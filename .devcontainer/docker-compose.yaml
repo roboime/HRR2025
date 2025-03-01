@@ -1,0 +1,18 @@
+version: '3.7'
+
+services:
+  soccerbot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.jetson
+      args:
+        USER_UID: 1000
+        USER_GID: 1000
+    volumes:
+      - ../:/ros2_ws/src
+      - /dev:/dev
+    devices:
+      - "/dev/nvhost-ctrl:/dev/nvhost-ctrl"
+      - "/dev/nvhost-ctrl-gpu:/dev/nvhost-ctrl-gpu"
+    runtime: nvidia
+    privileged: true

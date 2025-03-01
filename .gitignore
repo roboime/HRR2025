@@ -1,0 +1,18 @@
+# ROS
+install/
+build/
+log/
+*.pyc
+
+# Docker
+*.swp
+.env
+
+# JetPack
+*.jetpack
+*.onnx
+*.engine
+
+# IDE
+.vscode/
+.idea/

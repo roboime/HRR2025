@@ -1,0 +1,18 @@
+{
+    "name": "HSL",
+    "dockerComposeFile": "docker-compose.yml",
+    "remoteUser": "developer",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-azuretools.vscode-docker",
+                "ms-vscode.cpptools",
+                "ms-python.python"
+            ],
+            "settings": {
+                "terminal.integrated.shell.linux": "/bin/bash",
+                "python.pythonPath": "/usr/bin/python3"
+            }
+        }
+    }
+}

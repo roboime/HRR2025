@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>roboime_behavior</name>
+  <version>0.1.0</version>
+  <description>Pacote de comportamento para o robô de futebol RoboIME</description>
+  <maintainer email="seu-email@example.com">Seu Nome</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>roboime_msgs</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package> 

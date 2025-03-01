@@ -1,0 +1,81 @@
+FROM nvcr.io/nvidia/l4t-base:r32.7.1
+
+# ==================== CONFIGURAÇÃO BÁSICA ====================
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG C.UTF-8
+ENV ROS_DISTRO=eloquent   
+
+# ==================== NVIDIA JETPACK 4.6.1 ====================
+# Instalar componentes essenciais do JetPack
+RUN apt-get update && apt-get install -y \
+    nvidia-jetpack \
+    libopencv-dev \
+    cuda-toolkit-10-2 \
+    tensorrt \
+    && rm -rf /var/lib/apt/lists/*
+
+# ==================== ROS ELOQUENT ====================
+# Configurar repositórios ROS2
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg2 \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+# Instalar ROS Eloquent
+RUN apt-get update && apt-get install -y \
+    ros-eloquent-ros-base \
+    ros-eloquent-cv-bridge \
+    ros-eloquent-image-transport \
+    ros-eloquent-navigation2 \
+    ros-eloquent-joy-linux \
+    python3-colcon-common-extensions \
+    python3-rosdep \
+    && rm -rf /var/lib/apt/lists/*
+
+# ==================== OTIMIZAÇÕES DE HARDWARE ====================
+# Configurar variáveis de ambiente NVIDIA
+ENV LD_LIBRARY_PATH=/usr/local/cuda-10.2/lib64:$LD_LIBRARY_PATH
+ENV PATH=/usr/local/cuda-10.2/bin:$PATH
+
+# Configurar TensorRT
+ENV TENSORRT_DIR=/usr/lib/aarch64-linux-gnu
+ENV LD_LIBRARY_PATH=$TENSORRT_DIR:$LD_LIBRARY_PATH
+
+# ==================== AMBIENTE DE DESENVOLVIMENTO ====================
+RUN apt-get update && apt-get install -y \
+    git \
+    python3-pip \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Dependências Python otimizadas para JetPack 4.6.1
+RUN python3 -m pip install --upgrade pip && \
+    pip3 install \
+    numpy==1.19.5 \
+    opencv-python-headless==4.5.5.64 \
+    torch==1.10.0 \
+    torchvision==0.11.1 \
+    --extra-index-url https://nvidia-jetpack.github.io/permalink/pytorch-cuda102.html
+
+# ==================== CONFIGURAÇÃO DO WORKSPACE ====================
+WORKDIR /ros2_ws
+
+# Inicialização ROS
+RUN rosdep init && rosdep update
+RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> ~/.bashrc
+
+# ==================== USUÁRIO NÃO-ROOT ====================
+RUN useradd -m developer && \
+    usermod -aG video developer && \
+    chown -R developer:developer /ros2_ws
+
+USER developer
+
+# ==================== ENTRYPOINT ====================
+COPY ./entrypoint.sh /
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["bash"]
