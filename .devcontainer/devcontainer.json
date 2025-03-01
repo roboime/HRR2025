@@ -1,6 +1,6 @@
 {
     "name": "HSL",
-    "dockerComposeFile": "docker-compose.yml",
+    "dockerComposeFile": "docker-compose.yaml",
     "remoteUser": "developer",
     "customizations": {
         "vscode": {

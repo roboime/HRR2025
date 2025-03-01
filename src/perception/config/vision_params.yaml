@@ -1,0 +1,79 @@
+/**:
+  ros__parameters:
+    # Parâmetros gerais da câmera
+    camera_topic: '/camera/image_raw'
+    camera_info_topic: '/camera/camera_info'
+    debug_image: true
+    processing_fps: 30.0
+
+# Parâmetros da câmera da Jetson
+jetson_camera_node:
+  ros__parameters:
+    camera_type: 'csi'  # 'csi' ou 'usb'
+    camera_index: 0
+    camera_width: 640
+    camera_height: 480
+    camera_fps: 30
+    display_width: 640
+    display_height: 480
+    enable_display: false
+
+# Parâmetros do pipeline de visão
+vision_pipeline:
+  ros__parameters:
+    enable_ball_detection: true
+    enable_field_detection: true
+    enable_line_detection: false
+    enable_goal_detection: false
+    enable_obstacle_detection: false
+
+# Parâmetros do detector de bola
+ball_detector:
+  ros__parameters:
+    ball_color_lower: [0, 120, 70]  # HSV para laranja (bola)
+    ball_color_upper: [10, 255, 255]
+    min_ball_radius: 10
+    debug_image: true
+
+# Parâmetros do detector de campo
+field_detector:
+  ros__parameters:
+    field_color_lower: [35, 80, 25]  # HSV para verde (campo)
+    field_color_upper: [65, 255, 255]
+    min_field_area_ratio: 0.1
+    debug_image: true
+
+# Parâmetros do detector de linhas
+line_detector:
+  ros__parameters:
+    line_color_lower: [200, 200, 200]  # BGR para branco (linhas)
+    line_color_upper: [255, 255, 255]
+    canny_threshold1: 50
+    canny_threshold2: 150
+    hough_threshold: 50
+    min_line_length: 30
+    max_line_gap: 10
+    use_field_mask: true
+    debug_image: true
+
+# Parâmetros do detector de gols
+goal_detector:
+  ros__parameters:
+    goal_color_lower: [200, 200, 200]  # BGR para branco (gols)
+    goal_color_upper: [255, 255, 255]
+    min_post_height: 50
+    min_post_width: 10
+    max_post_width: 50
+    use_field_mask: true
+    debug_image: true
+
+# Parâmetros do detector de obstáculos
+obstacle_detector:
+  ros__parameters:
+    min_obstacle_height: 30
+    min_obstacle_width: 20
+    use_field_mask: true
+    use_color_segmentation: false
+    obstacle_color_lower: [0, 0, 0]  # HSV para preto (obstáculos)
+    obstacle_color_upper: [180, 255, 50]
+    debug_image: true 
