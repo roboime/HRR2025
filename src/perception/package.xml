@@ -1,13 +1,13 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>roboime_vision</name>
-  <version>0.1.0</version>
+  <name>perception</name>
+  <version>1.0.0</version>
   <description>
-    Pacote de visão computacional para o robô de futebol da RoboIME,
-    adaptado do sistema de visão dos Hamburg Bit-Bots.
+    Sistema de percepção visual para robôs de futebol usando o modelo YOEO
+    (You Only Encode Once) para detecção de objetos e segmentação semântica.
   </description>
-  <maintainer email="seu_email@example.com">RoboIME Team</maintainer>
+  <maintainer email="keller.felipe@ime.eb.br">RoboIME</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
@@ -17,21 +17,23 @@
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>vision_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>cv_bridge</depend>
   <depend>image_transport</depend>
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
   <depend>tf2_geometry_msgs</depend>
-  <depend>visualization_msgs</depend>
-  <depend>vision_msgs</depend>
 
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-tensorflow</exec_depend>
-  <exec_depend>python3-keras</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
   <exec_depend>python3-matplotlib</exec_depend>
-  <exec_depend>python3-pillow</exec_depend>
+  <exec_depend>python3-albumentations</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

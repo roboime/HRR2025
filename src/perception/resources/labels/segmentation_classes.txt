@@ -1,0 +1,7 @@
+background
+field
+line
+goal_area
+penalty_mark
+center_circle
+corner 

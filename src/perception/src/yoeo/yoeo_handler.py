@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+Manipulador do modelo YOEO.
+
+Este módulo fornece classes e funções para gerenciar o modelo YOEO,
+processar suas saídas e fornecer uma interface unificada para os
+componentes de detecção e segmentação.
+"""
+
 import os
 import cv2
 import numpy as np
 import tensorflow as tf
-import enum
+from enum import Enum, auto
 import logging
+import time
 
 from src.perception.src.yoeo.yoeo_model import YOEOModel
 
@@ -14,321 +23,373 @@ from src.perception.src.yoeo.yoeo_model import YOEOModel
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('yoeo_handler')
 
-class DetectionType(enum.Enum):
-    """Tipos de detecção suportados pelo YOEO."""
-    BALL = 0
-    GOAL = 1
-    ROBOT = 2
-    REFEREE = 3
+class DetectionType(Enum):
+    """Tipos de objetos que o modelo YOEO pode detectar."""
+    BALL = auto()
+    GOAL = auto()
+    ROBOT = auto()
+    REFEREE = auto()
 
-class SegmentationType(enum.Enum):
-    """Tipos de segmentação suportados pelo YOEO."""
-    FIELD = 0
-    LINE = 1
+class SegmentationType(Enum):
+    """Tipos de segmentação que o modelo YOEO pode realizar."""
+    FIELD = auto()
+    LINE = auto()
 
 class YOEOHandler:
     """
     Manipulador para o modelo YOEO.
     
-    Esta classe é responsável por gerenciar o modelo YOEO, incluindo seu carregamento,
-    pré-processamento de imagens, execução de inferência e pós-processamento de resultados.
+    Esta classe é responsável por:
+    1. Carregar e gerenciar o modelo YOEO
+    2. Pré-processar imagens para entrada no modelo
+    3. Processar as saídas do modelo para detecção e segmentação
+    4. Fornecer uma interface unificada para os componentes
     """
     
-    def __init__(self, model_path, input_width=416, input_height=416, 
-                 confidence_threshold=0.5, iou_threshold=0.45, use_tensorrt=False):
+    def __init__(self, model_path, input_size=(416, 416), confidence_threshold=0.5, iou_threshold=0.45):
         """
         Inicializa o manipulador YOEO.
         
         Args:
-            model_path: Caminho para o arquivo do modelo
-            input_width: Largura da entrada do modelo
-            input_height: Altura da entrada do modelo
-            confidence_threshold: Limiar de confiança para as detecções
-            iou_threshold: Limiar de IoU para non-maximum suppression
-            use_tensorrt: Se deve usar o modelo otimizado com TensorRT
+            model_path: Caminho para o modelo YOEO salvo
+            input_size: Tamanho de entrada do modelo (largura, altura)
+            confidence_threshold: Limiar de confiança para detecções
+            iou_threshold: Limiar de IoU para supressão não-máxima
         """
         self.model_path = model_path
-        self.input_width = input_width
-        self.input_height = input_height
+        self.input_size = input_size
         self.confidence_threshold = confidence_threshold
         self.iou_threshold = iou_threshold
-        self.use_tensorrt = use_tensorrt
-        
-        # Mapeamento de classes para os tipos de detecção
-        self.detection_classes = {
-            DetectionType.BALL: 'bola',
-            DetectionType.GOAL: 'gol',
-            DetectionType.ROBOT: 'robo',
-            DetectionType.REFEREE: 'arbitro'
+        self.model = None
+        self.class_mapping = {
+            0: DetectionType.BALL,
+            1: DetectionType.GOAL,
+            2: DetectionType.ROBOT,
+            3: DetectionType.REFEREE
         }
-        
-        # Mapeamento de classes para os tipos de segmentação
-        self.segmentation_classes = {
-            SegmentationType.FIELD: 'campo',
-            SegmentationType.LINE: 'linha'
-        }
-        
-        # Índices das classes no modelo
-        self.class_indices = {
-            'bola': 0,
-            'gol': 1,
-            'robo': 2,
-            'arbitro': 3
-        }
-        
-        # Índices de segmentação no modelo
-        self.segmentation_indices = {
-            'fundo': 0,
-            'linha': 1,
-            'campo': 2
+        self.segmentation_mapping = {
+            0: None,  # Fundo (ignorado)
+            1: SegmentationType.FIELD,
+            2: SegmentationType.LINE
         }
         
         # Carregar o modelo
-        self.model = None
         self._load_model()
     
     def _load_model(self):
-        """
-        Carrega o modelo YOEO.
-        
-        Tenta carregar o modelo do caminho especificado. Se o modelo for TensorRT,
-        carrega usando TensorRT. Caso contrário, carrega o modelo Keras padrão.
-        """
+        """Carrega o modelo YOEO do caminho especificado."""
         try:
-            # Verificar se o arquivo do modelo existe
-            if not os.path.exists(self.model_path):
-                logger.error(f"Arquivo de modelo não encontrado: {self.model_path}")
-                return
+            print(f"Carregando modelo YOEO de {self.model_path}...")
+            self.model = tf.keras.models.load_model(self.model_path, compile=False)
             
-            # Carregar com TensorRT se especificado
-            if self.use_tensorrt and self.model_path.endswith('.trt'):
-                logger.info(f"Carregando modelo TensorRT de {self.model_path}")
-                
-                # Configurar o TensorRT
-                from tensorflow.python.compiler.tensorrt import trt_convert as trt
-                
-                # Carregar modelo TensorRT
-                converter = trt.TrtGraphConverterV2(input_saved_model_dir=self.model_path)
-                self.model = converter.convert()
-                logger.info("Modelo TensorRT carregado com sucesso")
-            else:
-                # Carregar modelo Keras normal
-                logger.info(f"Carregando modelo Keras de {self.model_path}")
-                
-                # Criar o modelo YOEO
-                yoeo_model = YOEOModel(
-                    input_shape=(self.input_height, self.input_width, 3),
-                    num_classes=len(self.class_indices),
-                    seg_classes=len(self.segmentation_indices)
-                )
-                
-                # Obter o modelo Keras
-                self.model = yoeo_model.get_model()
-                
-                # Carregar pesos
-                if self.model_path.endswith('.h5'):
-                    self.model.load_weights(self.model_path)
-                    logger.info("Pesos do modelo carregados com sucesso")
-                else:
-                    logger.warning(f"Formato de arquivo não suportado: {self.model_path}")
-                    logger.warning("Usando modelo com pesos aleatórios")
+            # Verificar se o modelo tem as saídas esperadas
+            expected_outputs = 2  # Detecção e segmentação
+            if len(self.model.outputs) != expected_outputs:
+                print(f"Aviso: O modelo tem {len(self.model.outputs)} saídas, mas esperávamos {expected_outputs}")
+            
+            # Aquecer o modelo com uma inferência em dados fictícios
+            dummy_input = np.zeros((1, *self.input_size, 3), dtype=np.float32)
+            _ = self.model.predict(dummy_input)
+            
+            print("Modelo YOEO carregado com sucesso!")
         except Exception as e:
-            logger.error(f"Erro ao carregar o modelo: {str(e)}")
-            self.model = None
+            print(f"Erro ao carregar o modelo YOEO: {e}")
+            raise
     
-    def preprocess(self, image):
+    def preprocess_image(self, image):
         """
-        Pré-processa uma imagem para entrada no modelo.
+        Pré-processa a imagem para entrada no modelo YOEO.
         
         Args:
             image: Imagem BGR do OpenCV
             
         Returns:
-            Imagem pré-processada pronta para inferência
+            Imagem pré-processada e fator de escala
         """
-        if image is None or self.model is None:
-            return None
+        # Salvar as dimensões originais
+        original_height, original_width = image.shape[:2]
         
-        try:
-            # Redimensionar a imagem para o tamanho de entrada do modelo
-            resized = cv2.resize(image, (self.input_width, self.input_height))
-            
-            # Converter BGR para RGB (o modelo espera RGB)
-            rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-            
-            # Normalizar para [0, 1]
-            normalized = rgb.astype(np.float32) / 255.0
-            
-            # Adicionar dimensão de batch
-            batched = np.expand_dims(normalized, axis=0)
-            
-            return batched
-        except Exception as e:
-            logger.error(f"Erro no pré-processamento da imagem: {str(e)}")
-            return None
+        # Redimensionar a imagem para o tamanho de entrada do modelo
+        resized_image = cv2.resize(image, self.input_size)
+        
+        # Converter BGR para RGB
+        rgb_image = cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB)
+        
+        # Normalizar para [0, 1]
+        normalized_image = rgb_image.astype(np.float32) / 255.0
+        
+        # Adicionar dimensão de lote
+        input_image = np.expand_dims(normalized_image, axis=0)
+        
+        # Calcular fatores de escala para converter coordenadas de volta para a imagem original
+        scale_x = original_width / self.input_size[0]
+        scale_y = original_height / self.input_size[1]
+        
+        return input_image, (scale_x, scale_y)
     
-    def predict(self, preprocessed_image):
+    def get_detections(self, image, detection_types=None, segmentation_types=None):
         """
-        Executa a inferência no modelo YOEO.
-        
-        Args:
-            preprocessed_image: Imagem pré-processada
-            
-        Returns:
-            Previsões brutas do modelo
-        """
-        if preprocessed_image is None or self.model is None:
-            return None
-        
-        try:
-            # Executar inferência
-            predictions = self.model.predict(preprocessed_image)
-            return predictions
-        except Exception as e:
-            logger.error(f"Erro na inferência do modelo: {str(e)}")
-            return None
-    
-    def postprocess(self, predictions, image_shape):
-        """
-        Pós-processa as previsões do modelo.
-        
-        Args:
-            predictions: Saída bruta do modelo
-            image_shape: Forma da imagem original (altura, largura)
-            
-        Returns:
-            Dicionário com detecções processadas e máscaras de segmentação
-        """
-        if predictions is None or self.model is None:
-            return None
-        
-        try:
-            # Extrair componentes das previsões
-            # Assumindo formato de saída conforme definido em yoeo_model.py
-            
-            # Detecções em diferentes escalas
-            large_scale = predictions[0]  # [box_xy, objectness, class_probs]
-            medium_scale = predictions[1]
-            small_scale = predictions[2]
-            
-            # Segmentação
-            segmentation = predictions[3]
-            
-            # Processar segmentação
-            seg_mask = np.argmax(segmentation[0], axis=-1)
-            seg_mask = cv2.resize(seg_mask.astype(np.uint8), 
-                                 (image_shape[1], image_shape[0]), 
-                                 interpolation=cv2.INTER_NEAREST)
-            
-            # Processar detecções (versão simplificada)
-            # Em uma implementação completa, precisaríamos decodificar os anchors,
-            # aplicar non-maximum suppression, etc.
-            
-            # Para esta versão simplificada, vamos retornar algumas detecções fictícias
-            # Em um sistema real, estas seriam derivadas dos outputs do modelo
-            
-            detections = []
-            
-            # Exemplo de detecção de bola (isso seria baseado nas previsões reais)
-            ball_detection = {
-                'class_id': 0,
-                'class_name': 'bola',
-                'confidence': 0.95,
-                'bbox': [100, 200, 50, 50]  # [x, y, width, height]
-            }
-            detections.append(ball_detection)
-            
-            # Exemplo de detecção de robô
-            robot_detection = {
-                'class_id': 2,
-                'class_name': 'robo',
-                'confidence': 0.85,
-                'bbox': [300, 250, 100, 150],
-                'team': 'opponent'
-            }
-            detections.append(robot_detection)
-            
-            # Retornar resultados processados
-            return {
-                'detections': detections,
-                'segmentation': seg_mask
-            }
-        except Exception as e:
-            logger.error(f"Erro no pós-processamento: {str(e)}")
-            return None
-    
-    def get_detections(self, image, detection_type=None):
-        """
-        Processa uma imagem para obter detecções de um tipo específico.
+        Processa a imagem e retorna as detecções e segmentações.
         
         Args:
             image: Imagem BGR do OpenCV
-            detection_type: Tipo de detecção a ser filtrado (opcional)
+            detection_types: Lista de tipos de detecção a serem retornados (None para todos)
+            segmentation_types: Lista de tipos de segmentação a serem retornados (None para todos)
             
         Returns:
-            Lista de detecções do tipo especificado, ou todas as detecções se None
+            Dicionário com 'detections' e 'segmentations'
         """
-        if image is None or self.model is None:
-            return []
+        # Pré-processar a imagem
+        input_image, scale_factors = self.preprocess_image(image)
         
-        try:
-            # Pipeline completo: pré-processamento, inferência, pós-processamento
-            preprocessed = self.preprocess(image)
-            predictions = self.predict(preprocessed)
-            results = self.postprocess(predictions, image.shape[:2])
+        # Medir o tempo de inferência
+        start_time = time.time()
+        
+        # Executar a inferência
+        outputs = self.model.predict(input_image)
+        
+        # Calcular FPS
+        inference_time = time.time() - start_time
+        fps = 1.0 / inference_time if inference_time > 0 else 0
+        
+        # Processar saídas
+        detections = {}
+        segmentations = {}
+        
+        # Processar saída de detecção (assumindo formato YOLO)
+        if len(outputs) >= 1:
+            detection_output = outputs[0]
+            processed_detections = self._process_detection_output(detection_output, scale_factors, image.shape[:2])
             
-            if results is None or 'detections' not in results:
-                return []
-            
-            # Filtrar por tipo se especificado
-            if detection_type is not None:
-                class_name = self.detection_classes[detection_type]
-                filtered_detections = [d for d in results['detections'] 
-                                      if d['class_name'] == class_name]
-                return filtered_detections
+            # Filtrar por tipos de detecção solicitados
+            if detection_types is None:
+                detections = processed_detections
             else:
-                return results['detections']
-        except Exception as e:
-            logger.error(f"Erro ao obter detecções: {str(e)}")
-            return []
+                detections = {k: v for k, v in processed_detections.items() if k in detection_types}
+        
+        # Processar saída de segmentação
+        if len(outputs) >= 2:
+            segmentation_output = outputs[1]
+            processed_segmentations = self._process_segmentation_output(segmentation_output, image.shape[:2])
+            
+            # Filtrar por tipos de segmentação solicitados
+            if segmentation_types is None:
+                segmentations = processed_segmentations
+            else:
+                segmentations = {k: v for k, v in processed_segmentations.items() if k in segmentation_types}
+        
+        return {
+            'detections': detections,
+            'segmentations': segmentations,
+            'fps': fps,
+            'inference_time': inference_time
+        }
     
-    def get_segmentation(self, image, segmentation_type):
+    def _process_detection_output(self, detection_output, scale_factors, original_shape):
         """
-        Processa uma imagem para obter uma máscara de segmentação específica.
+        Processa a saída de detecção do modelo YOEO.
         
         Args:
-            image: Imagem BGR do OpenCV
-            segmentation_type: Tipo de segmentação (FIELD ou LINE)
+            detection_output: Saída do modelo para detecção
+            scale_factors: Fatores de escala (scale_x, scale_y)
+            original_shape: Forma original da imagem (altura, largura)
             
         Returns:
-            Máscara binária da segmentação solicitada
+            Dicionário com detecções por tipo
         """
-        if image is None or self.model is None:
-            return None
+        # Extrair fatores de escala
+        scale_x, scale_y = scale_factors
         
-        try:
-            # Pipeline completo: pré-processamento, inferência, pós-processamento
-            preprocessed = self.preprocess(image)
-            predictions = self.predict(preprocessed)
-            results = self.postprocess(predictions, image.shape[:2])
+        # Inicializar dicionário de detecções
+        detections = {detection_type: [] for detection_type in DetectionType}
+        
+        # Processar cada detecção
+        # Formato esperado: [batch, num_boxes, 5 + num_classes]
+        # onde 5 = [x, y, w, h, confidence]
+        detection_data = detection_output[0]  # Primeiro item do lote
+        
+        for box_data in detection_data:
+            # Extrair confiança e verificar limiar
+            confidence = box_data[4]
+            if confidence < self.confidence_threshold:
+                continue
             
-            if results is None or 'segmentation' not in results:
-                return None
+            # Extrair probabilidades de classe
+            class_probs = box_data[5:]
+            class_id = np.argmax(class_probs)
+            class_confidence = class_probs[class_id]
             
-            seg_mask = results['segmentation']
+            # Verificar confiança da classe
+            if class_confidence < self.confidence_threshold:
+                continue
             
-            # Extrair máscara específica com base no tipo de segmentação
-            if segmentation_type == SegmentationType.FIELD:
-                # Índice 2 para campo
-                binary_mask = (seg_mask == self.segmentation_indices['campo']).astype(np.uint8) * 255
-                return binary_mask
-            elif segmentation_type == SegmentationType.LINE:
-                # Índice 1 para linha
-                binary_mask = (seg_mask == self.segmentation_indices['linha']).astype(np.uint8) * 255
-                return binary_mask
-            else:
-                logger.warning(f"Tipo de segmentação não suportado: {segmentation_type}")
-                return None
-        except Exception as e:
-            logger.error(f"Erro ao obter segmentação: {str(e)}")
-            return None 
+            # Mapear ID de classe para tipo de detecção
+            if class_id not in self.class_mapping:
+                continue
+            
+            detection_type = self.class_mapping[class_id]
+            
+            # Extrair coordenadas normalizadas (formato YOLO: x_center, y_center, width, height)
+            x_center, y_center, width, height = box_data[:4]
+            
+            # Converter para coordenadas de pixel no formato [x1, y1, x2, y2]
+            x1 = (x_center - width / 2) * self.input_size[0] * scale_x
+            y1 = (y_center - height / 2) * self.input_size[1] * scale_y
+            x2 = (x_center + width / 2) * self.input_size[0] * scale_x
+            y2 = (y_center + height / 2) * self.input_size[1] * scale_y
+            
+            # Garantir que as coordenadas estejam dentro da imagem
+            x1 = max(0, min(original_shape[1] - 1, x1))
+            y1 = max(0, min(original_shape[0] - 1, y1))
+            x2 = max(0, min(original_shape[1] - 1, x2))
+            y2 = max(0, min(original_shape[0] - 1, y2))
+            
+            # Adicionar detecção à lista do tipo correspondente
+            detections[detection_type].append({
+                'bbox': [x1, y1, x2, y2],
+                'confidence': float(class_confidence * confidence),
+                'class_id': int(class_id)
+            })
+        
+        # Aplicar supressão não-máxima para cada tipo de detecção
+        for detection_type in detections:
+            if detections[detection_type]:
+                detections[detection_type] = self._apply_nms(detections[detection_type])
+        
+        return detections
+    
+    def _process_segmentation_output(self, segmentation_output, original_shape):
+        """
+        Processa a saída de segmentação do modelo YOEO.
+        
+        Args:
+            segmentation_output: Saída do modelo para segmentação
+            original_shape: Forma original da imagem (altura, largura)
+            
+        Returns:
+            Dicionário com máscaras de segmentação por tipo
+        """
+        # Inicializar dicionário de segmentações
+        segmentations = {}
+        
+        # Processar saída de segmentação
+        # Formato esperado: [batch, height, width, num_classes]
+        seg_data = segmentation_output[0]  # Primeiro item do lote
+        
+        # Obter mapa de classes (argmax ao longo do eixo de classes)
+        class_map = np.argmax(seg_data, axis=-1)
+        
+        # Redimensionar para o tamanho original da imagem
+        class_map_resized = cv2.resize(
+            class_map.astype(np.uint8),
+            (original_shape[1], original_shape[0]),
+            interpolation=cv2.INTER_NEAREST
+        )
+        
+        # Criar máscaras para cada tipo de segmentação
+        for class_id, seg_type in self.segmentation_mapping.items():
+            if seg_type is None:  # Ignorar classe de fundo
+                continue
+            
+            # Criar máscara binária para esta classe
+            mask = np.zeros(original_shape[:2], dtype=np.uint8)
+            mask[class_map_resized == class_id] = 255
+            
+            segmentations[seg_type] = mask
+        
+        return segmentations
+    
+    def _apply_nms(self, detections):
+        """
+        Aplica supressão não-máxima a um conjunto de detecções.
+        
+        Args:
+            detections: Lista de detecções do mesmo tipo
+            
+        Returns:
+            Lista de detecções após supressão não-máxima
+        """
+        # Extrair caixas delimitadoras e pontuações
+        boxes = np.array([d['bbox'] for d in detections])
+        scores = np.array([d['confidence'] for d in detections])
+        
+        # Converter de [x1, y1, x2, y2] para [y1, x1, y2, x2] (formato TensorFlow)
+        boxes_tf = np.array([[box[1], box[0], box[3], box[2]] for box in boxes])
+        
+        # Aplicar NMS
+        selected_indices = tf.image.non_max_suppression(
+            boxes_tf, scores, max_output_size=100,
+            iou_threshold=self.iou_threshold,
+            score_threshold=self.confidence_threshold
+        ).numpy()
+        
+        # Retornar detecções selecionadas
+        return [detections[i] for i in selected_indices]
+    
+    def draw_results(self, image, results):
+        """
+        Desenha os resultados de detecção e segmentação na imagem.
+        
+        Args:
+            image: Imagem BGR original
+            results: Resultados de get_detections()
+            
+        Returns:
+            Imagem com visualizações
+        """
+        # Criar cópia da imagem
+        vis_image = image.copy()
+        
+        # Desenhar segmentações
+        if 'segmentations' in results:
+            # Criar sobreposição para segmentações
+            overlay = np.zeros_like(vis_image)
+            
+            # Desenhar campo em verde
+            if SegmentationType.FIELD in results['segmentations']:
+                field_mask = results['segmentations'][SegmentationType.FIELD]
+                overlay[field_mask > 0] = [0, 180, 0]  # Verde
+            
+            # Desenhar linhas em branco
+            if SegmentationType.LINE in results['segmentations']:
+                line_mask = results['segmentations'][SegmentationType.LINE]
+                overlay[line_mask > 0] = [255, 255, 255]  # Branco
+            
+            # Combinar com a imagem original
+            alpha = 0.3
+            cv2.addWeighted(overlay, alpha, vis_image, 1 - alpha, 0, vis_image)
+        
+        # Desenhar detecções
+        if 'detections' in results:
+            # Cores para diferentes tipos de detecção
+            colors = {
+                DetectionType.BALL: (0, 165, 255),    # Laranja
+                DetectionType.GOAL: (255, 255, 0),    # Ciano
+                DetectionType.ROBOT: (0, 255, 0),     # Verde
+                DetectionType.REFEREE: (255, 0, 255)  # Magenta
+            }
+            
+            # Desenhar cada tipo de detecção
+            for detection_type, detections in results['detections'].items():
+                color = colors.get(detection_type, (255, 255, 255))
+                
+                for detection in detections:
+                    # Extrair coordenadas e confiança
+                    x1, y1, x2, y2 = [int(coord) for coord in detection['bbox']]
+                    confidence = detection['confidence']
+                    
+                    # Desenhar retângulo
+                    cv2.rectangle(vis_image, (x1, y1), (x2, y2), color, 2)
+                    
+                    # Adicionar rótulo
+                    label = f"{detection_type.name}: {confidence:.2f}"
+                    cv2.putText(vis_image, label, (x1, y1 - 10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        
+        # Adicionar informações de FPS
+        if 'fps' in results:
+            fps_text = f"FPS: {results['fps']:.1f}"
+            cv2.putText(vis_image, fps_text, (10, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        
+        return vis_image 

@@ -1,246 +1,218 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+Componente para segmentação de linhas do campo usando o modelo YOEO.
+
+Este componente é responsável por extrair e processar a segmentação
+de linhas do campo a partir das saídas do modelo YOEO.
+"""
+
 import cv2
 import numpy as np
-from src.perception.src.yoeo.yoeo_handler import YOEOHandler, SegmentationType
+from enum import Enum
+
+from ..yoeo_handler import SegmentationType
+
 
 class LineSegmentationComponent:
     """
-    Componente para segmentação de linhas do campo de futebol.
+    Componente para segmentação de linhas do campo.
     
-    Este componente é responsável por extrair a máscara de segmentação de linhas
-    do campo a partir das saídas do YOEO, processar a máscara para melhorar a qualidade,
-    extrair características como linhas e intersecções, e fornecer visualizações.
+    Este componente processa a saída de segmentação do modelo YOEO
+    para extrair as linhas do campo, aplicar pós-processamento e
+    fornecer informações úteis para localização.
     """
     
-    def __init__(self, yoeo_handler, min_line_length=15, max_line_gap=10):
+    def __init__(self, yoeo_handler, field_component=None, min_line_area=100):
         """
         Inicializa o componente de segmentação de linhas.
         
         Args:
-            yoeo_handler: Instância do YOEOHandler para acesso ao modelo
-            min_line_length: Comprimento mínimo de linha para detecção
-            max_line_gap: Lacuna máxima entre segmentos de linha
+            yoeo_handler: Manipulador do modelo YOEO
+            field_component: Componente de segmentação de campo (opcional)
+            min_line_area: Área mínima para considerar um contorno como linha
         """
         self.yoeo_handler = yoeo_handler
-        self.min_line_length = min_line_length
-        self.max_line_gap = max_line_gap
+        self.field_component = field_component
+        self.min_line_area = min_line_area
         self.fallback_detector = None
         self.camera_info = None
-
+    
     def set_camera_info(self, camera_info):
         """
-        Define as informações de câmera para cálculos de posição.
+        Define as informações da câmera.
         
         Args:
-            camera_info: Informações da câmera (mensagem ROS CameraInfo)
+            camera_info: Mensagem CameraInfo do ROS
         """
         self.camera_info = camera_info
-
+    
     def set_fallback_detector(self, detector):
         """
-        Define um detector tradicional para ser usado como fallback.
+        Define um detector tradicional para fallback.
         
         Args:
-            detector: Instância do detector tradicional
+            detector: Detector tradicional de linhas
         """
         self.fallback_detector = detector
     
     def process(self, image):
         """
-        Processa a imagem para extrair linhas do campo.
+        Processa a imagem para segmentar as linhas do campo.
         
         Args:
-            image: Imagem BGR do OpenCV
+            image: Imagem BGR
             
         Returns:
-            Dicionário com resultados da segmentação de linhas: 
-            {
-                'mask': Máscara binária das linhas,
-                'lines': Lista de linhas detectadas (coordenadas),
-                'intersections': Lista de pontos de intersecção
-            }
+            Dicionário com resultados da segmentação de linhas:
+            - mask: Máscara binária das linhas
+            - contours: Contornos das linhas
+            - intersections: Pontos de interseção entre linhas
         """
-        # Verificar se a imagem é válida
-        if image is None or image.size == 0:
-            return None
-        
-        # Tentar obter a segmentação do YOEO
-        try:
-            # Obter segmentação do YOEO
-            segmentation = self.yoeo_handler.get_segmentation(image, SegmentationType.LINE)
-            
-            if segmentation is not None:
-                # Processar a máscara de linhas
-                processed_mask = self._process_mask(segmentation)
-                
-                # Extrair linhas da máscara processada
-                lines, intersections = self._extract_line_features(processed_mask)
-                
-                return {
-                    'mask': processed_mask,
-                    'lines': lines,
-                    'intersections': intersections
-                }
-            elif self.fallback_detector is not None:
-                # Usar detector tradicional como fallback
-                return self.fallback_detector.detect(image)
-            else:
-                # Retornar máscara vazia se não houver detecção
-                return {
-                    'mask': np.zeros(image.shape[:2], dtype=np.uint8),
-                    'lines': [],
-                    'intersections': []
-                }
-        except Exception as e:
-            print(f"Erro na segmentação de linhas: {e}")
-            return None
-    
-    def _process_mask(self, mask):
-        """
-        Processa a máscara de segmentação de linhas para melhorar a qualidade.
-        
-        Args:
-            mask: Máscara binária das linhas
-            
-        Returns:
-            Máscara processada
-        """
-        # Verificar se a máscara é válida
-        if mask is None:
-            return None
-        
-        # Aplicar operações morfológicas para melhorar a qualidade
-        kernel = np.ones((3, 3), np.uint8)
-        
-        # Remover ruído com abertura morfológica
-        mask_opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        
-        # Preencher pequenos buracos com fechamento morfológico
-        mask_closed = cv2.morphologyEx(mask_opened, cv2.MORPH_CLOSE, kernel)
-        
-        # Adelgaçar as linhas para melhor detecção
-        # mask_thinned = cv2.ximgproc.thinning(mask_closed)
-        # Como cv2.ximgproc pode não estar disponível, usar erosão como alternativa
-        mask_thinned = cv2.erode(mask_closed, kernel, iterations=1)
-        
-        return mask_thinned
-    
-    def _extract_line_features(self, mask):
-        """
-        Extrai características de linhas da máscara processada.
-        
-        Args:
-            mask: Máscara binária processada
-            
-        Returns:
-            Tupla (linhas, interseções)
-        """
-        # Verificar se a máscara é válida
-        if mask is None:
-            return [], []
-        
-        # Detectar linhas usando a transformada de Hough probabilística
-        lines = cv2.HoughLinesP(
-            mask, 
-            rho=1, 
-            theta=np.pi/180, 
-            threshold=30, 
-            minLineLength=self.min_line_length, 
-            maxLineGap=self.max_line_gap
+        # Obter segmentação do modelo YOEO
+        segmentations = self.yoeo_handler.get_detections(
+            image, detection_types=[], segmentation_types=[SegmentationType.LINE]
         )
         
-        # Converter para formato mais conveniente
-        line_segments = []
-        if lines is not None:
-            for line in lines:
-                x1, y1, x2, y2 = line[0]
-                line_segments.append(((x1, y1), (x2, y2)))
+        # Verificar se a segmentação de linha está disponível
+        if SegmentationType.LINE in segmentations['segmentations']:
+            line_mask = segmentations['segmentations'][SegmentationType.LINE]
+            
+            # Processar a máscara de linha
+            processed_mask, contours, intersections = self._process_line_mask(line_mask, image.shape[:2])
+            
+            return {
+                'mask': processed_mask,
+                'contours': contours,
+                'intersections': intersections
+            }
         
-        # Encontrar interseções de linhas (simplificado)
-        intersections = self._find_intersections(line_segments)
+        # Tentar usar o detector de fallback se disponível
+        if self.fallback_detector is not None:
+            try:
+                return self.fallback_detector.detect_lines(image)
+            except Exception as e:
+                print(f"Erro no detector de fallback: {e}")
         
-        return line_segments, intersections
+        # Se não houver segmentação de linha e nem fallback, retornar máscara vazia
+        return {
+            'mask': np.zeros(image.shape[:2], dtype=np.uint8),
+            'contours': [],
+            'intersections': []
+        }
     
-    def _find_intersections(self, lines):
+    def _process_line_mask(self, line_mask, image_shape):
         """
-        Encontra pontos de interseção entre as linhas.
+        Processa a máscara de linha para melhorar a qualidade e extrair informações.
         
         Args:
-            lines: Lista de segmentos de linha
+            line_mask: Máscara binária das linhas
+            image_shape: Forma da imagem original (altura, largura)
             
         Returns:
-            Lista de pontos de interseção
+            Tupla (máscara processada, contornos, interseções)
         """
-        intersections = []
+        # Garantir que a máscara seja binária
+        _, binary_mask = cv2.threshold(line_mask, 127, 255, cv2.THRESH_BINARY)
         
-        for i in range(len(lines)):
-            for j in range(i+1, len(lines)):
-                # Obter linhas
-                ((x1, y1), (x2, y2)) = lines[i]
-                ((x3, y3), (x4, y4)) = lines[j]
-                
-                # Calcular determinante
-                denominator = ((y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1))
-                
-                # Verificar paralelismo (ou quase paralelismo)
-                if denominator == 0:
-                    continue
-                
-                # Calcular ponto de interseção
-                ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denominator
-                ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denominator
-                
-                # Verificar se o ponto de interseção está nos segmentos de linha
-                if 0 <= ua <= 1 and 0 <= ub <= 1:
-                    x = int(x1 + ua * (x2 - x1))
-                    y = int(y1 + ua * (y2 - y1))
-                    intersections.append((x, y))
+        # Se o componente de campo estiver disponível, usar a máscara de campo para limitar as linhas
+        if self.field_component is not None:
+            field_result = self.field_component.process(np.zeros(image_shape + (3,), dtype=np.uint8))
+            if 'mask' in field_result and field_result['mask'] is not None:
+                # Limitar as linhas à área do campo
+                binary_mask = cv2.bitwise_and(binary_mask, field_result['mask'])
+        
+        # Aplicar operações morfológicas para melhorar a qualidade
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        processed_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel)
+        processed_mask = cv2.morphologyEx(processed_mask, cv2.MORPH_CLOSE, kernel)
+        
+        # Encontrar contornos das linhas
+        contours, _ = cv2.findContours(processed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Filtrar contornos muito pequenos
+        contours = [cnt for cnt in contours if cv2.contourArea(cnt) > self.min_line_area]
+        
+        # Encontrar interseções de linhas (simplificado)
+        intersections = self._find_line_intersections(processed_mask)
+        
+        return processed_mask, contours, intersections
+    
+    def _find_line_intersections(self, line_mask):
+        """
+        Encontra pontos de interseção entre linhas.
+        
+        Args:
+            line_mask: Máscara binária das linhas
+            
+        Returns:
+            Lista de pontos de interseção (x, y)
+        """
+        # Implementação simplificada para encontrar interseções
+        # Em uma implementação real, seria necessário um algoritmo mais robusto
+        
+        # Aplicar detector de cantos Harris
+        corners = cv2.cornerHarris(line_mask.astype(np.float32), 5, 3, 0.04)
+        
+        # Dilatar para marcar os cantos
+        corners = cv2.dilate(corners, None)
+        
+        # Limiar para pontos de interseção
+        threshold = 0.01 * corners.max()
+        corner_points = np.where(corners > threshold)
+        
+        # Converter para lista de pontos (x, y)
+        intersections = [(x, y) for y, x in zip(corner_points[0], corner_points[1])]
+        
+        # Agrupar pontos próximos (simplificado)
+        if intersections:
+            # Converter para array numpy para facilitar o processamento
+            points = np.array(intersections)
+            
+            # Usar K-means para agrupar pontos próximos
+            if len(points) > 10:  # Se houver muitos pontos, reduzir usando K-means
+                criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+                k = min(10, len(points) // 2)  # Número de clusters
+                _, _, centers = cv2.kmeans(points.astype(np.float32), k, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+                intersections = [(int(x), int(y)) for x, y in centers]
         
         return intersections
     
-    def draw_segmentation(self, image, segmentation_result):
+    def draw_segmentation(self, image, results):
         """
-        Desenha a segmentação e características de linhas na imagem.
+        Desenha a segmentação de linhas na imagem para visualização.
         
         Args:
-            image: Imagem original
-            segmentation_result: Resultado da segmentação
+            image: Imagem BGR original
+            results: Resultados da segmentação de linhas
             
         Returns:
-            Imagem com visualização
+            Imagem com visualização da segmentação
         """
-        if segmentation_result is None:
+        if results is None or 'mask' not in results or results['mask'] is None:
             return image
         
         # Criar cópia da imagem
         vis_image = image.copy()
         
-        # Desenhar máscara como overlay
-        if 'mask' in segmentation_result and segmentation_result['mask'] is not None:
-            # Criar overlay
-            line_overlay = np.zeros_like(vis_image)
-            line_overlay[segmentation_result['mask'] > 0] = [255, 255, 0]  # Amarelo
-            
-            # Combinar overlay com a imagem original
-            alpha = 0.3  # Transparência
-            cv2.addWeighted(vis_image, 1, line_overlay, alpha, 0, vis_image)
+        # Desenhar máscara de linha com transparência
+        line_overlay = np.zeros_like(image)
+        line_overlay[results['mask'] > 0] = [0, 255, 255]  # Amarelo para linhas
         
-        # Desenhar linhas detectadas
-        if 'lines' in segmentation_result and segmentation_result['lines']:
-            for (pt1, pt2) in segmentation_result['lines']:
-                cv2.line(vis_image, pt1, pt2, (0, 0, 255), 2)  # Vermelho
+        # Combinar com a imagem original
+        cv2.addWeighted(line_overlay, 0.5, vis_image, 1.0, 0, vis_image)
+        
+        # Desenhar contornos
+        if 'contours' in results and results['contours']:
+            cv2.drawContours(vis_image, results['contours'], -1, (0, 255, 0), 2)
         
         # Desenhar interseções
-        if 'intersections' in segmentation_result and segmentation_result['intersections']:
-            for pt in segmentation_result['intersections']:
-                cv2.circle(vis_image, pt, 5, (0, 255, 0), -1)  # Verde
+        if 'intersections' in results and results['intersections']:
+            for point in results['intersections']:
+                cv2.circle(vis_image, point, 5, (255, 0, 0), -1)
         
-        # Adicionar texto informativo
-        if 'lines' in segmentation_result:
-            num_lines = len(segmentation_result['lines'])
-            cv2.putText(vis_image, f"Linhas: {num_lines}", (10, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
-        return vis_image 
+        return vis_image
+    
+    # Alias para compatibilidade com a interface comum
+    draw_detections = draw_segmentation 

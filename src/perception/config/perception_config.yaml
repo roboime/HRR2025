@@ -1,0 +1,112 @@
+/**
+ * Configuração Unificada do Sistema de Percepção da RoboIME
+ * 
+ * Este arquivo contém todos os parâmetros de configuração para o sistema de percepção,
+ * incluindo configurações de câmera, detectores tradicionais e YOEO.
+ */
+
+#=======================================#
+# CONFIGURAÇÃO GERAL
+#=======================================#
+
+# Configuração do pipeline
+pipeline:
+  processing_fps: 30.0          # Taxa de processamento de imagens (FPS)
+  debug_image: true             # Publicar imagens de debug
+  
+  # Habilitar/desabilitar sistemas
+  use_yoeo: true                # Usar o detector YOEO
+  use_traditional: true         # Usar os detectores tradicionais
+  
+  # Escolha de detector para cada tipo de objeto (opções: 'yoeo' ou 'traditional')
+  detector_ball: "yoeo"         # Detector para a bola
+  detector_field: "traditional" # Detector para o campo
+  detector_lines: "traditional" # Detector para as linhas
+  detector_goals: "yoeo"        # Detector para os gols
+  detector_robots: "yoeo"       # Detector para os robôs
+
+#=======================================#
+# CONFIGURAÇÃO DA CÂMERA
+#=======================================#
+camera:
+  # Tópicos ROS
+  topic: "/camera/image_raw"    # Tópico da câmera para receber imagens
+  info_topic: "/camera/camera_info"  # Tópico de informações da câmera
+  
+  # Configurações de imagem
+  width: 640                    # Largura da imagem da câmera
+  height: 480                   # Altura da imagem da câmera
+  fps: 60                       # Taxa de quadros da câmera
+  
+  # Configurações específicas para Jetson
+  jetson:
+    camera_type: 'usb'          # 'csi' ou 'usb'
+    camera_index: 0             # Índice da câmera
+    enable_display: true       # Exibir imagem em janela
+
+#=======================================#
+# CONFIGURAÇÃO DO YOEO
+#=======================================#
+yoeo:
+  # Configurações do modelo
+  model_path: "resources/models/yoeo_model.h5"  # Caminho para o modelo
+  input_width: 416              # Largura da entrada do modelo
+  input_height: 416             # Altura da entrada do modelo
+  
+  # Parâmetros de detecção
+  confidence_threshold: 0.5     # Limiar de confiança para detecções
+  iou_threshold: 0.45           # Limiar de IoU para NMS
+  
+  # Otimização
+  use_tensorrt: true           # Usar TensorRT para otimização
+  
+  # Componentes habilitados
+  components:
+    ball: true                  # Habilitar detecção de bola
+    field: fasle                 # Habilitar segmentação de campo
+    lines: false                 # Habilitar segmentação de linhas
+    goals: true                 # Habilitar detecção de gols
+    robots: true                # Habilitar detecção de robôs
+    referee: false              # Habilitar detecção de árbitro
+
+#=======================================#
+# CONFIGURAÇÃO DOS DETECTORES TRADICIONAIS
+#=======================================#
+traditional:
+  # Detector de bola
+  ball:
+    enabled: false                      # Habilitar detector
+    color_lower: [0, 120, 70]          # HSV mínimo (laranja)
+    color_upper: [10, 255, 255]        # HSV máximo (laranja)
+    min_radius: 10                     # Raio mínimo em pixels
+    max_radius: 100                    # Raio máximo em pixels
+    
+  # Detector de campo
+  field:
+    enabled: true                      # Habilitar detector
+    color_lower: [35, 40, 40]          # HSV mínimo (verde)
+    color_upper: [85, 255, 255]        # HSV máximo (verde)
+    morphology_kernel_size: 5          # Tamanho do kernel morfológico
+    
+  # Detector de linhas
+  lines:
+    enabled: true                     # Habilitar detector
+    canny_threshold1: 50               # Limiar 1 para detector Canny
+    canny_threshold2: 150              # Limiar 2 para detector Canny
+    hough_rho: 1                       # Parâmetro rho para Hough
+    hough_theta: 0.01                  # Parâmetro theta para Hough
+    hough_threshold: 50                # Limiar para Hough
+    
+  # Detector de gols
+  goals:
+    enabled: false                     # Habilitar detector
+    color_lower: [20, 0, 180]          # HSV mínimo (amarelo ou azul)
+    color_upper: [30, 255, 255]        # HSV máximo (amarelo ou azul)
+    min_height: 30                     # Altura mínima em pixels
+    
+  # Detector de robôs (obstáculos)
+  robots:
+    enabled: false                     # Habilitar detector
+    color_lower: [0, 0, 0]             # HSV mínimo
+    color_upper: [180, 255, 40]        # HSV máximo
+    min_area: 100                      # Área mínima em pixels 

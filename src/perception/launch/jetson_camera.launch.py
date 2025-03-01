@@ -17,7 +17,7 @@ def generate_launch_description():
     # Declarar argumentos de inicialização
     camera_type = DeclareLaunchArgument(
         'camera_type',
-        default_value='csi',
+        default_value='usb',
         description='Tipo de câmera (csi ou usb)'
     )
     

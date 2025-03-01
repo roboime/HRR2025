@@ -1,17 +1,32 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
-Componentes modulares para o sistema YOEO.
+Componentes do sistema YOEO para detecção e segmentação.
 
-Cada componente é responsável por uma funcionalidade específica de detecção 
-ou segmentação, seguindo uma arquitetura modular inspirada nos Bit-Bots.
+Este módulo contém componentes modulares que processam as saídas do modelo YOEO
+para tarefas específicas de detecção e segmentação, incluindo:
+
+- BallComponent: Detecção e rastreamento de bola
+- FieldComponent: Segmentação do campo de jogo
+- LineComponent: Segmentação e detecção de linhas do campo
+- GoalComponent: Detecção de gols e postes
+- RobotComponent: Detecção de robôs (aliados e adversários)
+- RefereeComponent: Detecção de árbitros
+
+Cada componente pode ser usado independentemente ou em conjunto com outros
+componentes, dependendo das necessidades da aplicação.
 """
 
-from src.perception.src.yoeo.components.ball_component import BallDetectionComponent
-from src.perception.src.yoeo.components.field_component import FieldSegmentationComponent
-from src.perception.src.yoeo.components.line_component import LineSegmentationComponent
-from src.perception.src.yoeo.components.goal_component import GoalDetectionComponent
-from src.perception.src.yoeo.components.robot_component import RobotDetectionComponent
-from src.perception.src.yoeo.components.referee_component import RefereeDetectionComponent
+# Importação dos componentes
+from .ball_component import BallDetectionComponent
+from .field_component import FieldSegmentationComponent
+from .line_component import LineSegmentationComponent
+from .goal_component import GoalDetectionComponent
+from .robot_component import RobotDetectionComponent
+from .referee_component import RefereeDetectionComponent
 
+# Exportação das classes principais
 __all__ = [
     'BallDetectionComponent',
     'FieldSegmentationComponent',

@@ -1,57 +1,60 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+Componente para detecção de robôs usando o modelo YOEO.
+
+Este componente é responsável por detectar robôs no campo,
+calcular suas posições 3D relativas à câmera e fornecer
+visualizações para depuração.
+"""
+
 import cv2
 import numpy as np
-from geometry_msgs.msg import Pose, PoseArray
-from src.perception.src.yoeo.yoeo_handler import YOEOHandler, DetectionType
+import math
+
+from ..yoeo_handler import DetectionType
+
 
 class RobotDetectionComponent:
     """
-    Componente para detecção de robôs utilizando o YOEO.
+    Componente para detecção de robôs.
     
-    Este componente é responsável por detectar robôs na imagem,
-    calcular suas posições 3D relativas ao robô, e fornecer visualizações
-    para depuração.
+    Este componente processa a saída de detecção do modelo YOEO
+    para identificar robôs, calcular suas posições 3D
+    e fornecer informações úteis para navegação e estratégia.
     """
     
-    def __init__(self, yoeo_handler, robot_width=0.30, robot_height=0.20):
+    def __init__(self, yoeo_handler, robot_height=0.15, confidence_threshold=0.5):
         """
-        Inicializa o componente de detecção de robôs.
+        Inicializa o componente de detecção de robô.
         
         Args:
-            yoeo_handler: Instância do YOEOHandler para acesso ao modelo
-            robot_width: Largura média do robô em metros
-            robot_height: Altura média do robô em metros
+            yoeo_handler: Manipulador do modelo YOEO
+            robot_height: Altura média dos robôs em metros
+            confidence_threshold: Limiar de confiança para detecções
         """
         self.yoeo_handler = yoeo_handler
-        self.robot_width = robot_width
         self.robot_height = robot_height
+        self.confidence_threshold = confidence_threshold
         self.fallback_detector = None
         self.camera_info = None
-        
-        # Distinguir robôs por cores (assumindo que pode haver classificações por time)
-        self.team_colors = {
-            'own': (0, 255, 0),    # Verde para próprio time
-            'opponent': (0, 0, 255),  # Vermelho para time adversário
-            'unknown': (255, 255, 0)   # Amarelo para não classificados
-        }
     
     def set_camera_info(self, camera_info):
         """
-        Define as informações da câmera para cálculos de posição.
+        Define as informações da câmera para cálculos de posição 3D.
         
         Args:
-            camera_info: Informações da câmera (mensagem ROS CameraInfo)
+            camera_info: Mensagem CameraInfo do ROS
         """
         self.camera_info = camera_info
     
     def set_fallback_detector(self, detector):
         """
-        Define um detector tradicional para ser usado como fallback.
+        Define um detector tradicional para fallback.
         
         Args:
-            detector: Instância do detector tradicional
+            detector: Detector tradicional de robôs
         """
         self.fallback_detector = detector
     
@@ -60,177 +63,206 @@ class RobotDetectionComponent:
         Processa a imagem para detectar robôs.
         
         Args:
-            image: Imagem BGR do OpenCV
+            image: Imagem BGR
             
         Returns:
             Lista de detecções de robôs, cada uma contendo:
-            {
-                'bbox': [x, y, width, height],
-                'confidence': confiança da detecção,
-                'center': (x, y) centro da detecção,
-                'position': (x, y, z) posição 3D relativa ao robô,
-                'team': equipe do robô ('own', 'opponent', ou 'unknown')
-            }
+            - bbox: Caixa delimitadora (x, y, w, h)
+            - confidence: Confiança da detecção
+            - center: Centro da detecção (x, y)
+            - position_3d: Posição 3D relativa à câmera (x, y, z) em metros
+            - team: Equipe do robô (se disponível)
         """
-        # Verificar se a imagem é válida
-        if image is None or image.size == 0:
-            return []
+        # Obter detecções do modelo YOEO
+        detections = self.yoeo_handler.get_detections(
+            image, detection_types=[DetectionType.ROBOT], segmentation_types=[]
+        )
         
-        # Tentar obter as detecções do YOEO
-        try:
-            # Obter detecções do YOEO
-            detections = self.yoeo_handler.get_detections(image, DetectionType.ROBOT)
+        # Verificar se há detecções de robô
+        if DetectionType.ROBOT in detections['detections']:
+            robot_detections = detections['detections'][DetectionType.ROBOT]
             
-            # Processar detecções se encontradas
-            if detections and len(detections) > 0:
-                robots = []
+            # Filtrar por confiança
+            robot_detections = [
+                det for det in robot_detections 
+                if det['confidence'] > self.confidence_threshold
+            ]
+            
+            # Calcular posições 3D e adicionar informações para cada detecção
+            for detection in robot_detections:
+                # Adicionar centro da detecção
+                x, y, w, h = detection['bbox']
+                detection['center'] = (int(x + w/2), int(y + h/2))
                 
-                for detection in detections:
-                    # Calcular centro da caixa delimitadora
-                    x, y, w, h = detection.get('bbox', [0, 0, 0, 0])
-                    center_x = x + w/2
-                    center_y = y + h/2
-                    
-                    # Calcular posição 3D
-                    position = self._calculate_3d_position((center_x, center_y), w, h)
-                    
-                    # Determinar a equipe (se disponível na detecção)
-                    team = detection.get('team', 'unknown')
-                    
-                    # Adicionar informações de detecção
-                    robot_info = {
-                        'bbox': [x, y, w, h],
-                        'confidence': detection.get('confidence', 0.0),
-                        'center': (int(center_x), int(center_y)),
-                        'position': position,
-                        'team': team
-                    }
-                    
-                    robots.append(robot_info)
+                # Calcular posição 3D
+                detection['position_3d'] = self._calculate_3d_position(detection, image.shape)
                 
-                return robots
-            elif self.fallback_detector is not None:
-                # Usar detector tradicional como fallback
-                return self.fallback_detector.detect(image)
-            else:
-                return []
-        except Exception as e:
-            print(f"Erro na detecção de robôs: {e}")
-            return []
+                # Tentar identificar a equipe (simplificado)
+                # Em uma implementação real, isso seria baseado em cores ou marcadores
+                detection['team'] = self._identify_team(image, detection)
+            
+            return robot_detections
+        
+        # Tentar usar o detector de fallback se disponível
+        if self.fallback_detector is not None:
+            try:
+                return self.fallback_detector.detect_robots(image)
+            except Exception as e:
+                print(f"Erro no detector de fallback: {e}")
+        
+        # Se não houver detecções, retornar lista vazia
+        return []
     
-    def _calculate_3d_position(self, center, width, height):
+    def _calculate_3d_position(self, detection, image_shape):
         """
-        Calcula a posição 3D do robô a partir de suas coordenadas na imagem.
+        Calcula a posição 3D do robô relativa à câmera.
         
         Args:
-            center: Coordenadas (x, y) do centro da caixa delimitadora
-            width: Largura da caixa delimitadora
-            height: Altura da caixa delimitadora
+            detection: Detecção do robô
+            image_shape: Forma da imagem (altura, largura, canais)
             
         Returns:
-            Tupla (x, y, z) com a posição 3D do robô relativa ao robô (em metros)
-            x: lateral (positivo à direita), y: vertical, z: frontal
+            Posição 3D (x, y, z) em metros, ou None se não for possível calcular
         """
         if self.camera_info is None:
             return None
         
-        try:
-            # Extrair parâmetros intrínsecos da câmera
-            fx = self.camera_info.k[0]  # Distância focal em x
-            fy = self.camera_info.k[4]  # Distância focal em y
-            cx = self.camera_info.k[2]  # Centro óptico x
-            cy = self.camera_info.k[5]  # Centro óptico y
-            
-            # Calcular distância com base na largura ou altura aparente
-            # Usando a largura para robôs, assume-se que é mais confiável
-            distance_z = (self.robot_width * fx) / width
-            
-            # Calcular coordenadas 3D
-            x_center, y_center = center
-            x_3d = (x_center - cx) * distance_z / fx
-            y_3d = (y_center - cy) * distance_z / fy
-            
-            return (x_3d, y_3d, distance_z)
-        except Exception as e:
-            print(f"Erro ao calcular posição 3D: {e}")
-            return None
+        # Extrair parâmetros da câmera
+        fx = self.camera_info.k[0]  # Distância focal x
+        fy = self.camera_info.k[4]  # Distância focal y
+        cx = self.camera_info.k[2]  # Centro óptico x
+        cy = self.camera_info.k[5]  # Centro óptico y
+        
+        # Se os parâmetros da câmera não estiverem disponíveis, usar valores padrão
+        if fx == 0 or fy == 0:
+            fx = fy = 500.0  # Valor aproximado para câmeras comuns
+            cx = image_shape[1] / 2
+            cy = image_shape[0] / 2
+        
+        # Extrair informações da detecção
+        x, y, w, h = detection['bbox']
+        
+        # Usar a altura da caixa delimitadora para estimar a distância
+        # Baseado na relação: altura_real / altura_pixel = distância / distância_focal
+        distance_z = (self.robot_height * fy) / h
+        
+        # Calcular coordenadas X e Y no mundo
+        center_x = x + w/2
+        center_y = y + h/2
+        
+        # Converter de coordenadas de pixel para coordenadas do mundo
+        world_x = (center_x - cx) * distance_z / fx
+        world_y = (center_y - cy) * distance_z / fy
+        
+        # Retornar posição 3D (x, y, z) em metros
+        # x: lateral (positivo para a direita)
+        # y: vertical (positivo para baixo)
+        # z: profundidade (positivo para frente)
+        return (world_x, world_y, distance_z)
     
-    def to_ros_messages(self, robots, frame_id):
+    def _identify_team(self, image, detection):
         """
-        Converte detecções de robôs para mensagens ROS.
+        Tenta identificar a equipe do robô com base em cores ou marcadores.
         
         Args:
-            robots: Lista de detecções de robôs
-            frame_id: ID do frame para as mensagens
+            image: Imagem BGR original
+            detection: Detecção do robô
             
         Returns:
-            PoseArray contendo as poses dos robôs
+            String indicando a equipe ('own', 'opponent', ou 'unknown')
         """
-        pose_array = PoseArray()
-        pose_array.header.frame_id = frame_id
+        # Implementação simplificada - em um sistema real, seria mais sofisticado
+        # Extrair região do robô
+        x, y, w, h = [int(v) for v in detection['bbox']]
         
-        for robot in robots:
-            if 'position' in robot and robot['position'] is not None:
-                pose = Pose()
-                x, y, z = robot['position']
-                pose.position.x = z  # Distância frontal
-                pose.position.y = -x  # Distância lateral (invertida para ROS)
-                pose.position.z = 0.0  # Assume-se que os robôs estão no solo
-                
-                # A orientação poderia ser inferida se houvesse informação de direção
-                # Por enquanto, assume-se que não há orientação
-                
-                pose_array.poses.append(pose)
+        # Garantir que as coordenadas estejam dentro da imagem
+        x = max(0, x)
+        y = max(0, y)
+        w = min(w, image.shape[1] - x)
+        h = min(h, image.shape[0] - y)
         
-        return pose_array
+        if w <= 0 or h <= 0:
+            return 'unknown'
+        
+        # Extrair região de interesse
+        roi = image[y:y+h, x:x+w]
+        
+        # Converter para HSV para melhor análise de cor
+        hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        
+        # Definir faixas de cor para as equipes (ajustar conforme necessário)
+        # Exemplo: azul para equipe própria, amarelo para oponente
+        lower_blue = np.array([100, 50, 50])
+        upper_blue = np.array([130, 255, 255])
+        
+        lower_yellow = np.array([20, 100, 100])
+        upper_yellow = np.array([30, 255, 255])
+        
+        # Criar máscaras para cada cor
+        mask_blue = cv2.inRange(hsv_roi, lower_blue, upper_blue)
+        mask_yellow = cv2.inRange(hsv_roi, lower_yellow, upper_yellow)
+        
+        # Contar pixels de cada cor
+        blue_pixels = cv2.countNonZero(mask_blue)
+        yellow_pixels = cv2.countNonZero(mask_yellow)
+        
+        # Determinar equipe com base na cor predominante
+        if blue_pixels > yellow_pixels and blue_pixels > roi.size * 0.1:
+            return 'own'
+        elif yellow_pixels > blue_pixels and yellow_pixels > roi.size * 0.1:
+            return 'opponent'
+        else:
+            return 'unknown'
     
-    def draw_detections(self, image, robots):
+    def draw_detections(self, image, detections):
         """
         Desenha as detecções de robôs na imagem para visualização.
         
         Args:
-            image: Imagem original
-            robots: Lista de detecções de robôs
+            image: Imagem BGR original
+            detections: Lista de detecções de robôs
             
         Returns:
-            Imagem com visualizações
+            Imagem com visualização das detecções
         """
-        if not robots:
+        if not detections:
             return image
         
         # Criar cópia da imagem
         vis_image = image.copy()
         
-        for robot in robots:
-            # Extrair informações
-            bbox = robot.get('bbox', [0, 0, 0, 0])
-            confidence = robot.get('confidence', 0.0)
-            position = robot.get('position', None)
-            team = robot.get('team', 'unknown')
+        # Desenhar cada detecção
+        for detection in detections:
+            # Extrair informações da detecção
+            x, y, w, h = detection['bbox']
+            confidence = detection['confidence']
+            center = detection['center']
+            team = detection.get('team', 'unknown')
             
-            # Obter cor com base no time
-            color = self.team_colors.get(team, self.team_colors['unknown'])
+            # Definir cor com base na equipe
+            if team == 'own':
+                color = (255, 0, 0)  # Azul para equipe própria
+            elif team == 'opponent':
+                color = (0, 255, 255)  # Amarelo para oponente
+            else:
+                color = (0, 255, 0)  # Verde para desconhecido
             
-            if bbox is not None:
-                x, y, w, h = [int(v) for v in bbox]
-                
-                # Desenhar retângulo
-                cv2.rectangle(vis_image, (x, y), (x + w, y + h), color, 2)
-                
-                # Texto de confiança
-                team_text = f"{team.capitalize()}: {confidence:.2f}"
-                cv2.putText(vis_image, team_text, (x, y - 5), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-                
-                # Adicionar informação de posição 3D se disponível
-                if position is not None:
-                    x_3d, y_3d, z_3d = position
-                    pos_text = f"({x_3d:.2f}, {z_3d:.2f}m)"
-                    cv2.putText(vis_image, pos_text, (x, y + h + 15), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-        
-        # Adicionar contador de robôs
-        cv2.putText(vis_image, f"Robôs: {len(robots)}", (10, 90), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            # Desenhar caixa delimitadora
+            cv2.rectangle(vis_image, (int(x), int(y)), (int(x + w), int(y + h)), color, 2)
+            
+            # Desenhar centro
+            cv2.circle(vis_image, center, 5, (0, 0, 255), -1)
+            
+            # Adicionar texto com confiança e equipe
+            text = f"Robô ({team}): {confidence:.2f}"
+            cv2.putText(vis_image, text, (int(x), int(y) - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            
+            # Adicionar informação de posição 3D se disponível
+            if 'position_3d' in detection and detection['position_3d'] is not None:
+                x3d, y3d, z3d = detection['position_3d']
+                pos_text = f"X: {x3d:.2f}m Y: {y3d:.2f}m Z: {z3d:.2f}m"
+                cv2.putText(vis_image, pos_text, (int(x), int(y + h) + 15),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
         
         return vis_image 
