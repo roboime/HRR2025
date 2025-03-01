@@ -26,6 +26,7 @@ vision_pipeline:
     enable_line_detection: false
     enable_goal_detection: false
     enable_obstacle_detection: false
+    enable_yoeo_detection: false
 
 # Parâmetros do detector de bola
 ball_detector:
@@ -76,4 +77,19 @@ obstacle_detector:
     use_color_segmentation: false
     obstacle_color_lower: [0, 0, 0]  # HSV para preto (obstáculos)
     obstacle_color_upper: [180, 255, 50]
-    debug_image: true 
+    debug_image: true
+
+# Parâmetros do detector YOEO
+yoeo_detector:
+  ros__parameters:
+    model_path: 'resource/models/yoeo_model.h5'
+    input_width: 416
+    input_height: 416
+    confidence_threshold: 0.5
+    iou_threshold: 0.45
+    debug_image: true
+    enable_ball_detection: true
+    enable_goal_detection: true
+    enable_robot_detection: true
+    enable_referee_detection: true
+    use_tensorrt: false 

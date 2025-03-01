@@ -1,74 +1,97 @@
 #!/bin/bash
-# Script de instalação para o sistema de visão da RoboIME na Jetson Nano
-# Este script instala todas as dependências necessárias para o sistema de visão
+# Script para configurar a Jetson Nano para o sistema de visão da RoboIME
 
-set -e  # Sair em caso de erro
-
-echo "Iniciando instalação do sistema de visão da RoboIME para Jetson Nano..."
-echo "Este script deve ser executado como usuário normal (não root)"
+echo "Configurando a Jetson Nano para o sistema de visão da RoboIME..."
 
 # Verificar se está rodando como root
-if [ "$(id -u)" -eq 0 ]; then
-    echo "ERRO: Este script não deve ser executado como root"
-    exit 1
+if [ "$EUID" -ne 0 ]; then
+  echo "Por favor, execute este script como root (sudo)."
+  exit 1
 fi
 
-# Verificar se está em uma Jetson Nano
-if ! grep -q "NVIDIA Jetson Nano" /proc/device-tree/model 2>/dev/null; then
-    echo "AVISO: Este script é destinado à NVIDIA Jetson Nano"
-    echo "Continuando mesmo assim..."
-fi
+# Atualizar o sistema
+echo "Atualizando o sistema..."
+apt-get update
+apt-get upgrade -y
 
-# Atualizar repositórios
-echo "Atualizando repositórios..."
-sudo apt-get update
-
-# Instalar dependências do sistema
-echo "Instalando dependências do sistema..."
-sudo apt-get install -y \
-    python3-pip \
-    python3-opencv \
-    python3-numpy \
-    libgstreamer1.0-dev \
-    libgstreamer-plugins-base1.0-dev \
-    gstreamer1.0-plugins-good \
-    gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly \
-    gstreamer1.0-tools
+# Instalar dependências
+echo "Instalando dependências..."
+apt-get install -y \
+  python3-pip \
+  python3-opencv \
+  python3-numpy \
+  libgstreamer1.0-dev \
+  libgstreamer-plugins-base1.0-dev \
+  gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad \
+  gstreamer1.0-plugins-ugly \
+  libopenblas-dev \
+  libjpeg-dev \
+  zlib1g-dev
 
 # Instalar dependências Python
 echo "Instalando dependências Python..."
-pip3 install --user numpy opencv-python
+pip3 install --upgrade pip
+pip3 install \
+  numpy \
+  opencv-python \
+  matplotlib \
+  pillow
 
-# Reiniciar o serviço nvargus-daemon (necessário para a câmera CSI)
-echo "Reiniciando o serviço nvargus-daemon..."
-sudo systemctl restart nvargus-daemon
-
-# Verificar se a câmera CSI está funcionando
-echo "Verificando se a câmera CSI está funcionando..."
-echo "Pressione Ctrl+C para sair após alguns segundos se a câmera estiver funcionando"
-gst-launch-1.0 nvarguscamerasrc ! 'video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=30/1' ! nvvidconv flip-method=0 ! 'video/x-raw, width=640, height=480, format=BGRx' ! videoconvert ! 'video/x-raw, format=BGR' ! videoconvert ! xvimagesink -e
-
-# Criar diretório para logs
-echo "Criando diretório para logs..."
-mkdir -p ~/ros2_logs
-
-# Adicionar variáveis de ambiente ao .bashrc
-echo "Adicionando variáveis de ambiente ao .bashrc..."
-if ! grep -q "ROS_DOMAIN_ID=30" ~/.bashrc; then
-    echo "# Configurações ROS 2 para RoboIME Vision" >> ~/.bashrc
-    echo "export ROS_DOMAIN_ID=30" >> ~/.bashrc
-    echo "export ROS_LOG_DIR=~/ros2_logs" >> ~/.bashrc
-    echo "source ~/ros2_ws/install/setup.bash" >> ~/.bashrc
+# Verificar se o TensorRT está instalado
+if dpkg -l | grep -q tensorrt; then
+  echo "TensorRT já está instalado."
+else
+  echo "AVISO: TensorRT não encontrado. Ele deve ser instalado como parte do JetPack 4.6.1."
+  echo "Por favor, certifique-se de que o JetPack 4.6.1 está instalado corretamente."
 fi
 
-echo ""
-echo "Instalação concluída!"
-echo "Para compilar o pacote, execute:"
-echo "cd ~/ros2_ws"
-echo "colcon build --packages-select roboime_vision"
-echo ""
-echo "Para iniciar o sistema de visão, execute:"
-echo "ros2 launch roboime_vision jetson_vision.launch.py"
-echo ""
-echo "Reinicie o terminal ou execute 'source ~/.bashrc' para aplicar as alterações" 
+# Verificar se o TensorFlow está instalado
+if pip3 list | grep -q tensorflow; then
+  echo "TensorFlow já está instalado."
+else
+  echo "Instalando TensorFlow 2.4.0 para Jetson..."
+  pip3 install --pre --extra-index-url https://developer.download.nvidia.com/compute/redist/jp/v461 tensorflow==2.4.0+nv21.5
+fi
+
+# Reiniciar o serviço da câmera
+echo "Reiniciando o serviço da câmera..."
+systemctl restart nvargus-daemon
+
+# Criar diretório para modelos
+echo "Criando diretório para modelos..."
+mkdir -p /opt/roboime/models
+chmod 777 /opt/roboime/models
+
+# Configurar variáveis de ambiente
+echo "Configurando variáveis de ambiente..."
+cat > /etc/profile.d/roboime_vision.sh << 'EOF'
+export ROBOIME_VISION_MODELS=/opt/roboime/models
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/lib64
+export CUDA_VISIBLE_DEVICES=0
+EOF
+
+# Otimizar a Jetson para desempenho
+echo "Otimizando a Jetson para desempenho..."
+cat > /etc/systemd/system/jetson_performance.service << 'EOF'
+[Unit]
+Description=Jetson Performance Mode
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/jetson_clocks
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl enable jetson_performance.service
+
+# Testar a câmera
+echo "Testando a câmera CSI..."
+timeout 5s gst-launch-1.0 nvarguscamerasrc ! nvvidconv ! fakesink -v
+
+echo "Configuração concluída!"
+echo "Por favor, reinicie a Jetson Nano para aplicar todas as configurações." 

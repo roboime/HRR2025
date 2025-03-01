@@ -80,6 +80,18 @@ def generate_launch_description():
         description='Habilitar detector de obstáculos'
     )
     
+    enable_yoeo_detector = DeclareLaunchArgument(
+        'enable_yoeo_detector',
+        default_value='false',
+        description='Habilitar detector YOEO'
+    )
+    
+    use_tensorrt = DeclareLaunchArgument(
+        'use_tensorrt',
+        default_value='true',
+        description='Usar TensorRT para otimização do modelo YOEO'
+    )
+    
     # Incluir inicialização da câmera da Jetson
     camera_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -105,8 +117,24 @@ def generate_launch_description():
             'enable_field_detector': LaunchConfiguration('enable_field_detector'),
             'enable_line_detector': LaunchConfiguration('enable_line_detector'),
             'enable_goal_detector': LaunchConfiguration('enable_goal_detector'),
-            'enable_obstacle_detector': LaunchConfiguration('enable_obstacle_detector')
+            'enable_obstacle_detector': LaunchConfiguration('enable_obstacle_detector'),
+            'enable_yoeo_detector': LaunchConfiguration('enable_yoeo_detector')
         }.items()
+    )
+    
+    # Incluir inicialização específica do detector YOEO
+    yoeo_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_dir, 'launch', 'yoeo_detector.launch.py')
+        ),
+        launch_arguments={
+            'use_tensorrt': LaunchConfiguration('use_tensorrt'),
+            'input_width': '416',
+            'input_height': '416',
+            'confidence_threshold': '0.5',
+            'iou_threshold': '0.45'
+        }.items(),
+        condition=LaunchConfiguration('enable_yoeo_detector')
     )
     
     # Retornar descrição de inicialização
@@ -121,6 +149,9 @@ def generate_launch_description():
         enable_line_detector,
         enable_goal_detector,
         enable_obstacle_detector,
+        enable_yoeo_detector,
+        use_tensorrt,
         camera_launch,
-        vision_launch
+        vision_launch,
+        yoeo_launch
     ]) 

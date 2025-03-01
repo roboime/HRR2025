@@ -36,7 +36,14 @@ install(PROGRAMS
   src/line_detector.py
   src/goal_detector.py
   src/obstacle_detector.py
+  src/yoeo_detector_node.py
   src/jetson_camera/jetson_camera_node.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# Install YOEO module
+install(DIRECTORY
+  src/yoeo
   DESTINATION lib/${PROJECT_NAME}
 )
 

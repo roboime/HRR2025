@@ -20,6 +20,7 @@ def generate_launch_description():
     use_line_detector = LaunchConfiguration('use_line_detector', default='false')
     use_goal_detector = LaunchConfiguration('use_goal_detector', default='false')
     use_obstacle_detector = LaunchConfiguration('use_obstacle_detector', default='false')
+    use_yoeo_detector = LaunchConfiguration('use_yoeo_detector', default='false')
     
     # Declarar argumentos
     declare_use_ball_detector = DeclareLaunchArgument(
@@ -50,6 +51,12 @@ def generate_launch_description():
         'use_obstacle_detector',
         default_value='false',
         description='Habilitar detector de obstáculos'
+    )
+    
+    declare_use_yoeo_detector = DeclareLaunchArgument(
+        'use_yoeo_detector',
+        default_value='false',
+        description='Habilitar detector YOEO'
     )
     
     # Nós a serem lançados
@@ -120,6 +127,17 @@ def generate_launch_description():
     )
     nodes.append(obstacle_detector_node)
     
+    # Detector YOEO (condicional)
+    yoeo_detector_node = Node(
+        package='roboime_vision',
+        executable='yoeo_detector',
+        name='yoeo_detector',
+        parameters=[config_file],
+        output='screen',
+        condition=LaunchConfiguration('use_yoeo_detector')
+    )
+    nodes.append(yoeo_detector_node)
+    
     # Criar e retornar a descrição de lançamento
     return LaunchDescription([
         declare_use_ball_detector,
@@ -127,5 +145,6 @@ def generate_launch_description():
         declare_use_line_detector,
         declare_use_goal_detector,
         declare_use_obstacle_detector,
+        declare_use_yoeo_detector,
         *nodes
     ]) 
