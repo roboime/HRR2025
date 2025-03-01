@@ -86,6 +86,18 @@ def generate_launch_description():
         description='Habilitar detector YOEO'
     )
     
+    enable_field_segmentation = DeclareLaunchArgument(
+        'enable_field_segmentation',
+        default_value='false',
+        description='Habilitar segmentação de campo com YOEO'
+    )
+    
+    enable_line_segmentation = DeclareLaunchArgument(
+        'enable_line_segmentation',
+        default_value='false',
+        description='Habilitar segmentação de linhas com YOEO'
+    )
+    
     use_tensorrt = DeclareLaunchArgument(
         'use_tensorrt',
         default_value='true',
@@ -132,7 +144,9 @@ def generate_launch_description():
             'input_width': '416',
             'input_height': '416',
             'confidence_threshold': '0.5',
-            'iou_threshold': '0.45'
+            'iou_threshold': '0.45',
+            'enable_field_segmentation': LaunchConfiguration('enable_field_segmentation'),
+            'enable_line_segmentation': LaunchConfiguration('enable_line_segmentation')
         }.items(),
         condition=LaunchConfiguration('enable_yoeo_detector')
     )
@@ -150,6 +164,8 @@ def generate_launch_description():
         enable_goal_detector,
         enable_obstacle_detector,
         enable_yoeo_detector,
+        enable_field_segmentation,
+        enable_line_segmentation,
         use_tensorrt,
         camera_launch,
         vision_launch,

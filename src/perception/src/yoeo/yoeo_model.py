@@ -4,216 +4,332 @@
 import os
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import layers, models, optimizers
-from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Conv2D, BatchNormalization, LeakyReLU, MaxPooling2D
+from tensorflow.keras.layers import Concatenate, UpSampling2D, Reshape, Lambda
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.regularizers import l2
 
 class YOEOModel:
     """
-    Implementação do modelo YOEO (You Only Encode Once) para detecção de objetos.
+    Modelo YOEO (You Only Encode Once) para detecção de objetos e segmentação semântica.
     
-    Este modelo é baseado em uma arquitetura de rede neural convolucional que combina
-    características de YOLO (You Only Look Once) com um codificador eficiente (MobileNetV2)
-    para detecção de múltiplos objetos em tempo real, otimizado para a Jetson Nano.
+    Esta classe define a arquitetura do modelo YOEO, que combina detecção de objetos
+    e segmentação semântica em uma única arquitetura neural.
     """
     
-    def __init__(self, input_shape=(416, 416, 3), num_classes=4, backbone='mobilenetv2'):
+    def __init__(self, input_shape=(416, 416, 3), num_classes=4, 
+                 seg_classes=3, weight_decay=5e-4):
         """
         Inicializa o modelo YOEO.
         
         Args:
-            input_shape: Formato da imagem de entrada (altura, largura, canais)
-            num_classes: Número de classes a serem detectadas (bola, gol, robôs, árbitro)
-            backbone: Backbone da rede neural ('mobilenetv2' é recomendado para Jetson Nano)
+            input_shape: Forma da entrada (altura, largura, canais)
+            num_classes: Número de classes para detecção de objetos 
+                        (bola, gol, robô, árbitro)
+            seg_classes: Número de classes para segmentação 
+                        (fundo, linhas, campo)
+            weight_decay: Regularização L2 para os pesos da rede
         """
         self.input_shape = input_shape
         self.num_classes = num_classes
-        self.backbone = backbone
-        self.model = None
+        self.seg_classes = seg_classes
+        self.weight_decay = weight_decay
+        
+        # Anchors para as diferentes escalas (podem ser ajustados)
         self.anchors = np.array([
-            [(0.28, 0.22), (0.38, 0.48), (0.9, 0.78)],  # Anchors para escala grande
-            [(0.07, 0.15), (0.15, 0.11), (0.14, 0.29)],  # Anchors para escala média
-            [(0.02, 0.03), (0.04, 0.07), (0.08, 0.06)]   # Anchors para escala pequena
+            [[10, 13], [16, 30], [33, 23]],     # Anchors pequenos (detectar objetos pequenos)
+            [[30, 61], [62, 45], [59, 119]],    # Anchors médios
+            [[116, 90], [156, 198], [373, 326]]  # Anchors grandes
         ])
-        self.classes = ['bola', 'gol', 'robo', 'arbitro']
         
         # Construir o modelo
-        self._build_model()
+        self.model = self._build_model()
     
     def _build_model(self):
-        """Constrói a arquitetura do modelo YOEO."""
-        # Input layer
-        inputs = layers.Input(shape=self.input_shape)
+        """
+        Constrói a arquitetura do modelo YOEO.
         
-        # Backbone (codificador)
-        if self.backbone == 'mobilenetv2':
-            # Usar MobileNetV2 como backbone (bom para dispositivos com recursos limitados como Jetson Nano)
-            backbone = MobileNetV2(
-                include_top=False,
-                weights='imagenet',
-                input_tensor=inputs,
-                alpha=0.75  # Fator de largura para reduzir a complexidade do modelo
-            )
-            
-            # Extrair features de diferentes níveis
-            # Características de baixo nível (detalhes finos)
-            f1 = backbone.get_layer('block_6_expand_relu').output  # 52x52
-            # Características de médio nível
-            f2 = backbone.get_layer('block_13_expand_relu').output  # 26x26
-            # Características de alto nível (semântica)
-            f3 = backbone.get_layer('out_relu').output  # 13x13
-        else:
-            raise ValueError(f"Backbone '{self.backbone}' não suportado")
+        Returns:
+            Modelo Keras
+        """
+        # Camada de entrada
+        inputs = Input(shape=self.input_shape)
         
-        # Congelar o backbone para treinamento inicial
-        backbone.trainable = False
+        # Backbone (extrator de características)
+        # Bloco 1
+        x = self._make_conv_block(inputs, 32, 3)
+        x = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding='same')(x)
         
-        # Neck (FPN - Feature Pyramid Network)
-        # Combina características de diferentes níveis para melhorar a detecção
+        # Bloco 2
+        x = self._make_conv_block(x, 64, 3)
+        x = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding='same')(x)
         
-        # Caminho ascendente (de baixo para cima)
-        x3 = layers.Conv2D(256, 1, padding='same', use_bias=False)(f3)
-        x3 = layers.BatchNormalization()(x3)
-        x3 = layers.LeakyReLU(alpha=0.1)(x3)
+        # Bloco 3
+        x = self._make_conv_block(x, 128, 3)
+        x = self._make_conv_block(x, 64, 1)
+        x = self._make_conv_block(x, 128, 3)
+        x = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding='same')(x)
         
-        x3_upsample = layers.UpSampling2D(2)(x3)
-        x2 = layers.Conv2D(256, 1, padding='same', use_bias=False)(f2)
-        x2 = layers.BatchNormalization()(x2)
-        x2 = layers.LeakyReLU(alpha=0.1)(x2)
-        x2 = layers.Concatenate()([x2, x3_upsample])
-        x2 = self._make_conv_block(x2, 256)
+        # Bloco 4
+        x = self._make_conv_block(x, 256, 3)
+        x = self._make_conv_block(x, 128, 1)
+        x = self._make_conv_block(x, 256, 3)
+        x4 = x  # Feature map para detecção de objetos pequenos
+        x = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding='same')(x)
         
-        x2_upsample = layers.UpSampling2D(2)(x2)
-        x1 = layers.Conv2D(128, 1, padding='same', use_bias=False)(f1)
-        x1 = layers.BatchNormalization()(x1)
-        x1 = layers.LeakyReLU(alpha=0.1)(x1)
-        x1 = layers.Concatenate()([x1, x2_upsample])
-        x1 = self._make_conv_block(x1, 128)
+        # Bloco 5
+        x = self._make_conv_block(x, 512, 3)
+        x = self._make_conv_block(x, 256, 1)
+        x = self._make_conv_block(x, 512, 3)
+        x = self._make_conv_block(x, 256, 1)
+        x = self._make_conv_block(x, 512, 3)
+        x5 = x  # Feature map para detecção de objetos médios
+        x = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding='same')(x)
         
-        # Caminho descendente (de cima para baixo)
-        x1_downsample = layers.Conv2D(256, 3, strides=2, padding='same', use_bias=False)(x1)
-        x1_downsample = layers.BatchNormalization()(x1_downsample)
-        x1_downsample = layers.LeakyReLU(alpha=0.1)(x1_downsample)
-        x2 = layers.Concatenate()([x1_downsample, x2])
-        x2 = self._make_conv_block(x2, 256)
-        
-        x2_downsample = layers.Conv2D(512, 3, strides=2, padding='same', use_bias=False)(x2)
-        x2_downsample = layers.BatchNormalization()(x2_downsample)
-        x2_downsample = layers.LeakyReLU(alpha=0.1)(x2_downsample)
-        x3 = layers.Concatenate()([x2_downsample, x3])
-        x3 = self._make_conv_block(x3, 512)
+        # Bloco 6
+        x = self._make_conv_block(x, 1024, 3)
+        x = self._make_conv_block(x, 512, 1)
+        x = self._make_conv_block(x, 1024, 3)
+        x = self._make_conv_block(x, 512, 1)
+        x = self._make_conv_block(x, 1024, 3)
+        x6 = x  # Feature map para detecção de objetos grandes
         
         # Cabeças de detecção para diferentes escalas
-        # Cada cabeça produz previsões para uma escala específica
+        # Detecção em escala grande (objetos pequenos)
+        large_box, large_obj, large_cls = self._make_detection_head(x6, 512, 
+                                                                    self.num_classes, 
+                                                                    self.anchors[2], 
+                                                                    'large')
         
-        # Cabeça para objetos pequenos (escala grande)
-        y1 = self._make_detection_head(x1, 128, self.num_classes)
+        # Upsample e concatenar para médio
+        x = self._make_conv_block(x6, 256, 1)
+        x = UpSampling2D(size=(2, 2))(x)
+        x = Concatenate()([x, x5])
+        x = self._make_conv_block(x, 256, 1)
+        x = self._make_conv_block(x, 512, 3)
+        x = self._make_conv_block(x, 256, 1)
+        x = self._make_conv_block(x, 512, 3)
+        medium_feature = self._make_conv_block(x, 256, 1)
         
-        # Cabeça para objetos médios
-        y2 = self._make_detection_head(x2, 256, self.num_classes)
+        # Detecção em escala média (objetos médios)
+        medium_box, medium_obj, medium_cls = self._make_detection_head(medium_feature, 
+                                                                      256, 
+                                                                      self.num_classes, 
+                                                                      self.anchors[1], 
+                                                                      'medium')
         
-        # Cabeça para objetos grandes (escala pequena)
-        y3 = self._make_detection_head(x3, 512, self.num_classes)
+        # Upsample e concatenar para pequeno
+        x = self._make_conv_block(medium_feature, 128, 1)
+        x = UpSampling2D(size=(2, 2))(x)
+        x = Concatenate()([x, x4])
+        x = self._make_conv_block(x, 128, 1)
+        x = self._make_conv_block(x, 256, 3)
+        x = self._make_conv_block(x, 128, 1)
+        x = self._make_conv_block(x, 256, 3)
+        small_feature = self._make_conv_block(x, 128, 1)
+        
+        # Detecção em escala pequena (objetos grandes)
+        small_box, small_obj, small_cls = self._make_detection_head(small_feature, 
+                                                                   128, 
+                                                                   self.num_classes, 
+                                                                   self.anchors[0], 
+                                                                   'small')
+        
+        # Segmentação semântica
+        # Usar características da detecção pequena (alta resolução)
+        seg = self._make_segmentation_head(small_feature, self.seg_classes)
         
         # Modelo final
-        self.model = models.Model(inputs, [y1, y2, y3])
+        return Model(inputs=inputs, outputs=[
+            # Outputs de detecção
+            [large_box, large_obj, large_cls],
+            [medium_box, medium_obj, medium_cls],
+            [small_box, small_obj, small_cls],
+            # Output de segmentação
+            seg
+        ])
     
-    def _make_conv_block(self, x, filters, num_blocks=1):
-        """Cria um bloco de camadas convolucionais."""
-        for _ in range(num_blocks):
-            x = layers.Conv2D(filters, 1, padding='same', use_bias=False)(x)
-            x = layers.BatchNormalization()(x)
-            x = layers.LeakyReLU(alpha=0.1)(x)
-            
-            x = layers.Conv2D(filters * 2, 3, padding='same', use_bias=False)(x)
-            x = layers.BatchNormalization()(x)
-            x = layers.LeakyReLU(alpha=0.1)(x)
-        return x
-    
-    def _make_detection_head(self, x, filters, num_classes):
-        """Cria uma cabeça de detecção para uma escala específica."""
-        x = self._make_conv_block(x, filters)
-        
-        # Saída final: para cada anchor, prevê [x, y, w, h, objectness, class1, class2, ...]
-        num_anchors = 3  # Número de anchors por célula
-        output_filters = num_anchors * (5 + num_classes)  # 5 = [x, y, w, h, objectness]
-        
-        x = layers.Conv2D(output_filters, 1, padding='same')(x)
-        return x
-    
-    def load_weights(self, weights_path):
-        """Carrega os pesos do modelo a partir de um arquivo."""
-        if os.path.exists(weights_path):
-            self.model.load_weights(weights_path)
-            print(f"Pesos carregados de {weights_path}")
-        else:
-            print(f"Arquivo de pesos {weights_path} não encontrado")
-    
-    def save_weights(self, weights_path):
-        """Salva os pesos do modelo em um arquivo."""
-        self.model.save_weights(weights_path)
-        print(f"Pesos salvos em {weights_path}")
-    
-    def predict(self, image):
+    def _make_conv_block(self, x, filters, kernel_size, strides=1):
         """
-        Realiza a predição em uma imagem.
+        Cria um bloco convolucional com normalização em lote e ativação LeakyReLU.
         
         Args:
-            image: Imagem numpy no formato (altura, largura, canais)
+            x: Tensor de entrada
+            filters: Número de filtros
+            kernel_size: Tamanho do kernel
+            strides: Stride da convolução
             
         Returns:
-            Lista de detecções no formato [x, y, w, h, confiança, classe]
+            Tensor de saída
         """
-        # Pré-processamento da imagem
-        image_resized = tf.image.resize(image, (self.input_shape[0], self.input_shape[1]))
-        image_normalized = image_resized / 255.0
-        image_batch = np.expand_dims(image_normalized, axis=0)
-        
-        # Realizar a predição
-        predictions = self.model.predict(image_batch)
-        
-        # Pós-processamento (decodificar as previsões)
-        detections = self._decode_predictions(predictions, image.shape)
-        
-        return detections
+        x = Conv2D(filters, kernel_size, strides=strides, padding='same',
+                   use_bias=False, kernel_regularizer=l2(self.weight_decay))(x)
+        x = BatchNormalization()(x)
+        x = LeakyReLU(alpha=0.1)(x)
+        return x
     
-    def _decode_predictions(self, predictions, original_shape):
+    def _make_detection_head(self, x, filters, num_classes, anchors, name):
         """
-        Decodifica as previsões do modelo.
+        Cria uma cabeça de detecção para uma escala específica.
         
         Args:
-            predictions: Saída do modelo [y1, y2, y3]
-            original_shape: Formato original da imagem (altura, largura, canais)
+            x: Tensor de entrada
+            filters: Número de filtros
+            num_classes: Número de classes
+            anchors: Anchors para esta escala
+            name: Nome para identificar a escala
             
         Returns:
-            Lista de detecções no formato [x, y, w, h, confiança, classe]
+            Tupla (box_output, objectness_output, class_output)
         """
-        # Implementação simplificada da decodificação
-        # Em uma implementação completa, seria necessário:
-        # 1. Converter as previsões em coordenadas de caixa
-        # 2. Aplicar sigmoid/exponencial conforme necessário
-        # 3. Aplicar non-maximum suppression
-        # 4. Converter para coordenadas da imagem original
+        num_anchors = anchors.shape[0]
         
-        # Por simplicidade, retornamos uma lista vazia
-        # A implementação completa seria mais complexa
-        return []
-    
-    def compile(self, learning_rate=0.001):
-        """Compila o modelo para treinamento."""
-        optimizer = optimizers.Adam(learning_rate=learning_rate)
+        # Camadas intermediárias
+        x = self._make_conv_block(x, filters, 3)
+        x = self._make_conv_block(x, filters*2, 3)
+        x = self._make_conv_block(x, filters, 1)
+        x = self._make_conv_block(x, filters*2, 3)
         
-        # Em uma implementação completa, seria necessário definir funções de perda personalizadas
-        # para detecção de objetos (perda de localização, perda de confiança, perda de classificação)
-        self.model.compile(
-            optimizer=optimizer,
-            loss='mse',  # Placeholder, deve ser substituído por funções de perda adequadas
-            metrics=['accuracy']  # Placeholder, métricas mais adequadas seriam mAP, recall, etc.
-        )
+        # Camada de saída (caixa, objetividade, classes)
+        output = Conv2D(num_anchors * (5 + num_classes), 1, padding='same',
+                        kernel_regularizer=l2(self.weight_decay),
+                        name=f'yolo_{name}')(x)
+        
+        # Reorganizar a saída para facilitar o processamento
+        grid_shape = tf.shape(output)[1:3]
+        output = Lambda(lambda x: tf.reshape(x, [-1, grid_shape[0], grid_shape[1], 
+                                             num_anchors, 5 + num_classes]))(output)
+        
+        # Separar os componentes
+        box_xy = Lambda(lambda x: tf.sigmoid(x[..., 0:2]), name=f'box_xy_{name}')(output)
+        box_wh = Lambda(lambda x: tf.exp(x[..., 2:4]), name=f'box_wh_{name}')(output)
+        objectness = Lambda(lambda x: tf.sigmoid(x[..., 4:5]), name=f'objectness_{name}')(output)
+        class_probs = Lambda(lambda x: tf.sigmoid(x[..., 5:]), name=f'class_probs_{name}')(output)
+        
+        return box_xy, objectness, class_probs
     
-    def summary(self):
-        """Exibe um resumo do modelo."""
-        return self.model.summary()
+    def _make_segmentation_head(self, x, num_classes):
+        """
+        Cria uma cabeça de segmentação.
+        
+        Args:
+            x: Tensor de entrada
+            num_classes: Número de classes de segmentação
+            
+        Returns:
+            Tensor de saída
+        """
+        # Upsample para corresponder à resolução original
+        x = self._make_conv_block(x, 64, 1)
+        x = UpSampling2D(size=(2, 2))(x)
+        x = self._make_conv_block(x, 64, 3)
+        
+        x = UpSampling2D(size=(2, 2))(x)
+        x = self._make_conv_block(x, 32, 3)
+        
+        # Saída de segmentação com ativação softmax
+        x = Conv2D(num_classes, 1, padding='same', 
+                   kernel_regularizer=l2(self.weight_decay))(x)
+        return Lambda(lambda x: tf.nn.softmax(x, axis=-1), name='segmentation')(x)
     
     def get_model(self):
-        """Retorna o modelo Keras."""
-        return self.model 
+        """
+        Retorna o modelo Keras construído.
+        
+        Returns:
+            Modelo Keras
+        """
+        return self.model
+    
+    def load_weights(self, weight_path):
+        """
+        Carrega pesos do modelo a partir de um arquivo.
+        
+        Args:
+            weight_path: Caminho para o arquivo de pesos
+        """
+        if os.path.exists(weight_path):
+            try:
+                self.model.load_weights(weight_path)
+                print(f"Pesos carregados de {weight_path}")
+            except Exception as e:
+                print(f"Erro ao carregar pesos: {e}")
+                print("Usando pesos aleatórios inicializados")
+        else:
+            print(f"Arquivo de pesos {weight_path} não encontrado")
+            print("Usando pesos aleatórios inicializados")
+    
+    def save_weights(self, weight_path):
+        """
+        Salva os pesos do modelo em um arquivo.
+        
+        Args:
+            weight_path: Caminho para salvar os pesos
+        """
+        try:
+            self.model.save_weights(weight_path)
+            print(f"Pesos salvos em {weight_path}")
+        except Exception as e:
+            print(f"Erro ao salvar pesos: {e}")
+    
+    def predict(self, x):
+        """
+        Realiza a predição em uma imagem ou lote de imagens.
+        
+        Args:
+            x: Imagem ou lote de imagens pré-processadas
+            
+        Returns:
+            Previsões do modelo
+        """
+        return self.model.predict(x)
+    
+    def decode(self, predictions, image_shape):
+        """
+        Decodifica as previsões do modelo para o formato adequado.
+        
+        Args:
+            predictions: Saída do modelo
+            image_shape: Forma da imagem original
+            
+        Returns:
+            Dicionário com detecções e segmentação processadas
+        """
+        # Esta é uma implementação simplificada
+        # Em um sistema real, precisaria implementar a decodificação completa
+        # dos anchors, non-max suppression, etc.
+        
+        # Extrair componentes
+        detection_outputs = predictions[:3]  # Três saídas de detecção
+        segmentation = predictions[3]  # Saída de segmentação
+        
+        # Implementação simplificada de decodificação
+        # Em um sistema real, seria mais complexo
+        
+        # Retornar resultados processados
+        return {
+            'detections': detection_outputs,
+            'segmentation': segmentation
+        }
+    
+    def compile(self, learning_rate=0.001):
+        """
+        Compila o modelo para treinamento.
+        
+        Args:
+            learning_rate: Taxa de aprendizado
+        """
+        # Otimizador
+        optimizer = Adam(learning_rate=learning_rate)
+        
+        # Compilar modelo
+        # Nota: Funções de perda reais seriam mais complexas para YOEO
+        # Esta é apenas uma função placeholder
+        self.model.compile(optimizer=optimizer, loss='mse')
+    
+    def summary(self):
+        """
+        Exibe um resumo da arquitetura do modelo.
+        """
+        return self.model.summary() 

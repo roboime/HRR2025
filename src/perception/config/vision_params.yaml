@@ -82,14 +82,63 @@ obstacle_detector:
 # Parâmetros do detector YOEO
 yoeo_detector:
   ros__parameters:
-    model_path: 'resource/models/yoeo_model.h5'
-    input_width: 416
-    input_height: 416
-    confidence_threshold: 0.5
-    iou_threshold: 0.45
-    debug_image: true
-    enable_ball_detection: true
-    enable_goal_detection: true
-    enable_robot_detection: true
-    enable_referee_detection: true
-    use_tensorrt: false 
+    # Parâmetros do modelo YOEO
+    model_path: "resource/models/yoeo_model.h5"  # Caminho para o modelo, relativo ao diretório do pacote
+    input_width: 416                             # Largura da entrada do modelo
+    input_height: 416                            # Altura da entrada do modelo
+    confidence_threshold: 0.5                    # Limiar de confiança para detecções
+    iou_threshold: 0.45                          # Limiar de IoU para non-maximum suppression
+    use_tensorrt: false                          # Usar modelo otimizado com TensorRT
+    
+    # Parâmetros de depuração
+    debug_image: true                            # Publicar imagem com visualizações
+    
+    # Ativar/desativar componentes
+    enable_ball_detection: true                  # Habilitar detecção de bola
+    enable_field_detection: true                 # Habilitar segmentação de campo
+    enable_line_detection: false                 # Habilitar segmentação de linhas
+    enable_goal_detection: false                 # Habilitar detecção de gol
+    enable_robot_detection: false                # Habilitar detecção de robôs
+    enable_referee_detection: false              # Habilitar detecção de árbitro
+    
+    # Fallback para detectores tradicionais
+    fallback_to_traditional: true                # Usar detectores tradicionais como fallback
+    
+    # Parâmetros específicos para bola
+    ball:
+      diameter: 0.043                            # Diâmetro da bola em metros
+      min_area: 20                               # Área mínima da bola em pixels
+      max_area: 2000                             # Área máxima da bola em pixels
+      publish_3d_position: true                  # Publicar posição 3D da bola
+    
+    # Parâmetros específicos para campo
+    field:
+      min_area_ratio: 0.05                       # Área mínima do campo como proporção da imagem
+      morphology_kernel_size: 5                  # Tamanho do kernel para operações morfológicas
+      detect_boundary: true                      # Detectar fronteira do campo
+    
+    # Parâmetros específicos para linhas
+    line:
+      min_line_length: 15                        # Comprimento mínimo de linha
+      max_line_gap: 10                           # Lacuna máxima entre segmentos de linha
+      hough_threshold: 30                        # Limiar para transformada de Hough
+      detect_intersections: true                 # Detectar interseções de linhas
+    
+    # Parâmetros específicos para gol
+    goal:
+      post_width: 0.10                           # Largura do poste de gol em metros
+      post_height: 0.80                          # Altura do poste de gol em metros
+      min_height_ratio: 0.1                      # Altura mínima do poste como proporção da imagem
+    
+    # Parâmetros específicos para robôs
+    robot:
+      robot_width: 0.30                          # Largura média do robô em metros
+      robot_height: 0.20                         # Altura média do robô em metros
+      classify_team: true                        # Classificar robôs por time
+      own_team_color: "azul"                     # Cor da própria equipe
+    
+    # Parâmetros específicos para árbitro
+    referee:
+      referee_width: 0.5                         # Largura média do árbitro em metros
+      referee_height: 1.7                        # Altura média do árbitro em metros
+      min_height_ratio: 0.2                      # Altura mínima do árbitro como proporção da imagem 
