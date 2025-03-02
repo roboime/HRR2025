@@ -110,47 +110,35 @@ class YOEOModel:
         """
         x = self._conv_block(inputs, 256, 3)
         x = Conv2D(num_anchors * (5 + num_classes), 1, padding='same')(x)
-        
-        # Reshape para [batch, grid_h, grid_w, num_anchors, 5 + num_classes]
-        shape = tf.shape(x)
-        grid_h, grid_w = shape[1], shape[2]
-        x = Lambda(lambda x: tf.reshape(x, [-1, grid_h, grid_w, num_anchors, 5 + num_classes]))(x)
-        
+
+        # Envolvemos a lógica de shape e reshape dentro de um Lambda
+        def reshape_yolo(t):
+            shape = tf.shape(t)
+            b, h, w, c = shape[0], shape[1], shape[2], shape[3]
+            # c deve ser == num_anchors*(5 + num_classes)
+            return tf.reshape(t, [b, h, w, num_anchors, 5 + num_classes])
+
+        x = Lambda(reshape_yolo)(x)
         return x
     
-    def _segmentation_head(self, features, num_classes):
-        """
-        Cabeça de segmentação semântica
-        
-        Args:
-            features: Lista de features de diferentes níveis do backbone
-            num_classes: Número de classes para segmentação
-            
-        Returns:
-            Tensor de saída para segmentação semântica
-        """
-        # Usar features de diferentes níveis para segmentação
-        x = features[-3]  # Feature map de resolução média
-        
-        # Upsample e concatenar com features de maior resolução
-        x = self._conv_block(x, 128, 1)
+    def _segmentation_head(self, features, num_seg_classes):
+        # Começa no final (13×13)
+        x = features[-1]  # (None, 13, 13, ???)
+
+        # 1º Up: 13->26
         x = UpSampling2D(2)(x)
-        x = Concatenate()([x, features[-4]])
-        
-        x = self._conv_block(x, 64, 3)
-        x = self._conv_block(x, 64, 3)
-        
-        # Upsample para resolução da imagem original
-        x = self._conv_block(x, 32, 3)
+        x = Concatenate()([x, features[-2]])  # (26×26) se features[-2] for 26×26
+        x = self._conv_block(x, 256, 3)
+
+        # 2º Up: 26->52
         x = UpSampling2D(2)(x)
-        x = self._conv_block(x, 32, 3)
-        x = UpSampling2D(2)(x)
-        
-        # Camada final de segmentação
-        x = Conv2D(num_classes, 1, padding='same', activation='softmax')(x)
-        
+        # Concatenate com features[-4], que (segundo a suposição) é 52×52
+        x = Concatenate()([x, features[-4]])  # (52×52)
+        x = self._conv_block(x, 128, 3)
+
+        x = Conv2D(num_seg_classes, 1, padding='same', activation='softmax')(x)
         return x
-    
+
     def build(self):
         """
         Constrói o modelo YOEO completo

@@ -78,11 +78,11 @@ def create_augmentation_pipeline(config):
         Pipeline de aumento do Albumentations
     """
     # Extrair parâmetros de configuração com valores padrão
-    rotation_range = config.get('rotation_range', 10)
-    width_shift = config.get('width_shift', 0.1)
-    height_shift = config.get('height_shift', 0.1)
-    brightness_range = config.get('brightness_range', 0.2)
-    horizontal_flip = config.get('horizontal_flip', True)
+    rotation_range = config['rotation_range']
+    width_shift = config['width_shift_range']
+    height_shift = config['height_shift_range']
+    brightness_range = config['brightness_range']
+    horizontal_flip = config['horizontal_flip']
     
     # Criar pipeline de aumento
     transform = A.Compose([
@@ -129,51 +129,51 @@ def prepare_dataset(config):
         Geradores de dados para treinamento, validação e teste
     """
     # Extrair parâmetros da configuração
-    batch_size = config['training']['batch_size']
-    input_size = (config['model']['input_height'], config['model']['input_width'])
+    batch_size = config['batch_size']
+    input_size = (config['input_height'], config['input_width'])
     
     # Criar pipeline de aumento de dados
-    augmentation = create_augmentation_pipeline(config['data_augmentation'])
+    augmentation = create_augmentation_pipeline(config)
     
     # Criar geradores de dados
     train_generator = YOEODataGenerator(
-        config['dataset']['train_images'],
-        config['dataset']['train_masks'],
-        config['dataset']['train_annotations'],
+        config['train_images'],
+        config['train_masks'],
+        config['train_annotations'],
         batch_size=batch_size,
         input_size=input_size,
-        num_classes=len(config['model']['classes']),
-        num_seg_classes=len(config['model']['segmentation_classes']),
+        num_classes=len(config['classes']),
+        num_seg_classes=len(config['segmentation_classes']),
         augmentation=augmentation,
         shuffle=True
     )
     
     val_generator = YOEODataGenerator(
-        config['dataset']['val_images'],
-        config['dataset']['val_masks'],
-        config['dataset']['val_annotations'],
+        config['val_images'],
+        config['val_masks'],
+        config['val_annotations'],
         batch_size=batch_size,
         input_size=input_size,
-        num_classes=len(config['model']['classes']),
-        num_seg_classes=len(config['model']['segmentation_classes']),
+        num_classes=len(config['classes']),
+        num_seg_classes=len(config['segmentation_classes']),
         augmentation=None,
         shuffle=False
     )
     
     # Criar gerador de teste se os caminhos estiverem definidos
     test_generator = None
-    if all(key in config['dataset'] for key in ['test_images', 'test_masks', 'test_annotations']):
-        test_generator = YOEODataGenerator(
-            config['dataset']['test_images'],
-            config['dataset']['test_masks'],
-            config['dataset']['test_annotations'],
-            batch_size=1,  # Batch size 1 para teste
-            input_size=input_size,
-            num_classes=len(config['model']['classes']),
-            num_seg_classes=len(config['model']['segmentation_classes']),
-            augmentation=None,
-            shuffle=False
-        )
+    #if all(key in config['dataset'] for key in ['test_images', 'test_masks', 'test_annotations']):
+    #    test_generator = YOEODataGenerator(
+    #        config['test_images'],
+    #        config['test_masks'],
+    #        config['test_annotations'],
+    #        batch_size=1,  # Batch size 1 para teste
+    #        input_size=input_size,
+    #        num_classes=len(config['classes']),
+    #        num_seg_classes=len(config['segmentation_classes']),
+    #        augmentation=None,
+    #        shuffle=False
+    #    )
     
     return train_generator, val_generator, test_generator
 

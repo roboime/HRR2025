@@ -16,3 +16,109 @@ log/
 # IDE
 .vscode/
 .idea/
+
+venv/
+
+# TensorFlow
+*.h5
+*.keras
+*.pb
+*.pbtxt
+*.saved_model
+
+# PyTorch
+*.pt
+*.pth
+*.pth.tar
+*.pt.tar
+*.pt.tar.gz
+*.pt.tar.gz.part
+
+# Logs
+*.log
+log/
+logs/
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# Ambiente virtual
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Dados
+*.bag
+*.csv
+*.json
+datasets/
+data/
+
+# Arquivos de configuração sistema
+.DS_Store
+Thumbs.db
+
+# Arquivos temporários
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Arquivos de compilação C++
+*.o
+*.out
+*.so
+*.a
+
+# Arquivos de compilação ROS
+devel/
+.catkin_workspace
+
+# Formatos adicionais de modelos
+*.weights
+*.caffemodel
+*.trt
+*.tflite
+*.mnn
+*.ncnn
+*.dlc
+*.ckpt
+*.darknet
+*.ymodel
+*.bin
+*.pkl
+*.safetensors
+
+# Calibração e configuração específica
+calibration_data/
+*_calibration.yaml
+camera_params.yaml
+
+# Checkpoints e modelos de treinamento
+checkpoints/
+model_weights/
+pretrained/
+runs/
+
+# Gerados por ferramentas
+.ropeproject/
+.hypothesis/
+.mypy_cache/
+
+# Arquivos de sincronização
+*.sync
+sync_info.json
+.sync-config/
+
+

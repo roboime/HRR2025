@@ -1,0 +1,43 @@
+# Requisitos para Sistema de Percepção da RoboIME
+
+# Dependências Básicas
+numpy
+opencv-python
+pyyaml
+matplotlib
+cvbridge3
+
+# Aprendizado de Máquina e Deep Learning
+tensorflow
+
+# TensorFlow para Jetson (somente para plataforma Jetson)
+# tensorflow-gpu==2.4.0+nv21.5  # Específico para Jetson
+
+# TensorRT (opcional para aceleração)
+#tensorrt
+
+# Para treinamento do modelo YOEO
+scikit-learn
+pandas
+pillow
+imgaug
+tqdm
+tensorboard
+
+# Ferramentas para processamento de imagens
+scikit-image
+
+# Para ambiente Jetson (descomente para ambiente Jetson)
+# jetson-stats>=3.1.0
+# pycuda>=2021.1
+# torch==1.10.0
+# torchvision==0.11.0
+
+# Utilidades
+protobuf # Compatibilidade com TensorFlow
+onnx  # Para exportação de modelos
+
+# Para testes e desenvolvimento
+pytest
+
+albumentations

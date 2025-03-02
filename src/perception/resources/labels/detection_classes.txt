@@ -1,5 +1,0 @@
-ball
-goal_post
-robot_blue
-robot_yellow
-referee 

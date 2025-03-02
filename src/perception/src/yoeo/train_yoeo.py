@@ -9,9 +9,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 
-from src.perception.src.yoeo.yoeo_model import YOEOModel
-from src.perception.src.yoeo.utils.data_utils import prepare_dataset
-from src.perception.src.yoeo.utils.losses import yoeo_loss, YOEOLoss
+from yoeo_model import YOEOModel
+from utils.data_utils import prepare_dataset
+from utils.losses import yoeo_loss, YOEOLoss
 
 # Configurar GPU (se disponível)
 def setup_gpu():
@@ -136,20 +136,20 @@ def train_yoeo(config_path):
     os.makedirs(config['output_dir'], exist_ok=True)
     
     # Preparar datasets
-    train_generator, val_generator = prepare_dataset(config)
+    train_generator, val_generator, test_generator = prepare_dataset(config)
     print(f"Datasets preparados: {len(train_generator)} batches de treinamento, {len(val_generator)} batches de validação")
     
     # Criar e compilar modelo
     input_shape = (config['input_height'], config['input_width'], 3)
     num_classes = len(config['classes'])
-    seg_classes = len(config['segmentation_classes'])
+    segmentation_classes = len(config['segmentation_classes'])
     
     model = YOEOModel(
         input_shape=input_shape,
         num_classes=num_classes,
-        seg_classes=seg_classes,
-        weight_decay=config.get('weight_decay', 5e-4)
-    ).get_model()
+        num_seg_classes=segmentation_classes,
+        anchors=None
+    ).build()
     
     # Carregar pesos pré-treinados (se especificado)
     if config.get('pretrained_weights', None):
@@ -176,7 +176,7 @@ def train_yoeo(config_path):
             filepath=os.path.join(config['checkpoint_dir'], 'yoeo_epoch_{epoch:02d}_loss_{val_loss:.4f}.h5'),
             monitor='val_loss',
             save_best_only=True,
-            save_weights_only=True,
+            save_weights_only=False,
             verbose=1
         ),
         tf.keras.callbacks.EarlyStopping(
@@ -220,7 +220,7 @@ def train_yoeo(config_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Treinar modelo YOEO")
-    parser.add_argument('--config', type=str, default='config/training_config.yaml',
+    parser.add_argument('--config', type=str, default='C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/config/training_config.yaml',
                         help='Caminho para o arquivo de configuração de treinamento')
     args = parser.parse_args()
     

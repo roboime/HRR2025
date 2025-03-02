@@ -1,35 +1,39 @@
-# Configuração para treinamento do modelo YOEO
+# Configuracao para treinamento do modelo YOEO
 
-# Configurações do modelo
+# Configuracaes do modelo
 input_width: 416
 input_height: 416
 classes: [
   'bola',    # Bola de futebol
   'gol',     # Postes de gol
-  'robo',    # Robôs (próprios e adversários)
-  'arbitro'  # Árbitro
+  'robo',    # Robos (proprios e adversarios)
+  'arbitro'  # Arbitro
 ]
 segmentation_classes: [
   'fundo',   # Fundo (não-campo)
   'linha',   # Linhas do campo
-  'campo'    # Área do campo
+  'campo'    # Area do campo
 ]
 
-# Configurações do dataset
-dataset_base_dir: "dataset/yoeo"
-train_data_dir: "dataset/yoeo/train"
-val_data_dir: "dataset/yoeo/val"
-test_data_dir: "dataset/yoeo/test"
-train_annotations: "dataset/yoeo/train/annotations.json"
-val_annotations: "dataset/yoeo/val/annotations.json"
-test_annotations: "dataset/yoeo/test/annotations.json"
+# Configuracoes do dataset
+dataset_base_dir: "resources/dataset"
+train_images: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/train/images"
+train_masks: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/train/segmentation_masks"
+train_annotations: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/train/annotations.json"
+val_images: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/val/images"
+val_masks: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/val/segmentation_masks"
+val_annotations: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/val/annotations.json"
+test_images: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/test/images"
+test_masks: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/test/segmentation_masks"
+test_annotations: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/test/annotations.json"
+
 
 # Estrutura do dataset esperada:
-# dataset/yoeo/
+# resources/dataset/
 #   ├── train/
 #   │   ├── images/              # Imagens de treinamento
-#   │   ├── segmentation_masks/  # Máscaras de segmentação
-#   │   └── annotations.json     # Anotações COCO
+#   │   ├── segmentation_masks/  # Mascaras de segmentacao
+#   │   └── annotations.json     # Anotacoes COCO
 #   ├── val/
 #   │   ├── images/
 #   │   ├── segmentation_masks/
@@ -39,7 +43,7 @@ test_annotations: "dataset/yoeo/test/annotations.json"
 #       ├── segmentation_masks/
 #       └── annotations.json
 
-# Configurações de treinamento
+# Configuracoes de treinamento
 batch_size: 8
 epochs: 100
 learning_rate: 0.001
@@ -47,24 +51,23 @@ weight_decay: 0.0005
 early_stopping_patience: 10
 reduce_lr_patience: 5
 
-# Configurações de aumento de dados
-data_augmentation: true
+# Configuracoes de aumento de dados
 rotation_range: 10
 width_shift_range: 0.1
 height_shift_range: 0.1
 brightness_range: [0.8, 1.2]
 horizontal_flip: true
 
-# Diretórios de saída
-checkpoint_dir: "checkpoints/yoeo"
-log_dir: "logs/yoeo"
-output_dir: "resources/models"
+# Diretorios de saida
+checkpoint_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models/checkpoints"
+log_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models/logs"
+output_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models"
 
-# Opções de exportação
+# Opções de exportacao
 export_tensorrt: true
-pretrained_weights: null  # Caminho para pesos pré-treinados (opcional)
+pretrained_weights: null  # Caminho para pesos pre-treinados (opcional)
 
-# Anchors para diferentes escalas (pré-definidos)
+# Anchors para diferentes escalas (pre-definidos)
 anchors_large: [[0.28, 0.22], [0.38, 0.48], [0.9, 0.78]]    # Para objetos grandes
 anchors_medium: [[0.07, 0.15], [0.15, 0.11], [0.14, 0.29]]  # Para objetos médios
 anchors_small: [[0.02, 0.03], [0.04, 0.07], [0.08, 0.06]]   # Para objetos pequenos 
