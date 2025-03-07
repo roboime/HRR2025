@@ -9,52 +9,52 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    """Gera a descrição de inicialização para a câmera da Jetson Nano."""
+    """Gera a descrição de inicialização para a câmera IMX219."""
     
     # Obter diretório do pacote
     pkg_dir = get_package_share_directory('perception')
     
     # Declarar argumentos de inicialização
-    camera_type = DeclareLaunchArgument(
-        'camera_type',
-        default_value='usb',
-        description='Tipo de câmera (csi ou usb)'
-    )
-    
-    camera_index = DeclareLaunchArgument(
-        'camera_index',
-        default_value='0',
-        description='Índice da câmera'
-    )
-    
-    camera_width = DeclareLaunchArgument(
-        'camera_width',
-        default_value='640',
-        description='Largura da imagem da câmera'
-    )
-    
-    camera_height = DeclareLaunchArgument(
-        'camera_height',
-        default_value='480',
-        description='Altura da imagem da câmera'
+    camera_mode = DeclareLaunchArgument(
+        'camera_mode',
+        default_value='2',  # 0=3280x2464@21fps, 1=1920x1080@60fps, 2=1280x720@120fps
+        description='Modo da câmera IMX219'
     )
     
     camera_fps = DeclareLaunchArgument(
         'camera_fps',
-        default_value='30',
+        default_value='120',
         description='Taxa de quadros da câmera'
     )
     
-    display_width = DeclareLaunchArgument(
-        'display_width',
-        default_value='640',
-        description='Largura da janela de exibição'
+    exposure_time = DeclareLaunchArgument(
+        'exposure_time',
+        default_value='13333',  # em microssegundos
+        description='Tempo de exposição da câmera'
     )
     
-    display_height = DeclareLaunchArgument(
-        'display_height',
-        default_value='480',
-        description='Altura da janela de exibição'
+    gain = DeclareLaunchArgument(
+        'gain',
+        default_value='1.0',
+        description='Ganho da câmera'
+    )
+    
+    awb_mode = DeclareLaunchArgument(
+        'awb_mode',
+        default_value='1',  # 0=off, 1=auto
+        description='Modo de white balance automático'
+    )
+    
+    enable_hdr = DeclareLaunchArgument(
+        'enable_hdr',
+        default_value='false',
+        description='Habilitar HDR'
+    )
+    
+    enable_cuda = DeclareLaunchArgument(
+        'enable_cuda',
+        default_value='true',
+        description='Habilitar processamento CUDA'
     )
     
     enable_display = DeclareLaunchArgument(
@@ -67,29 +67,32 @@ def generate_launch_description():
     camera_node = Node(
         package='perception',
         executable='jetson_camera_node.py',
-        name='jetson_camera_node',
+        name='imx219_camera_node',
         output='screen',
         parameters=[{
-            'camera_type': LaunchConfiguration('camera_type'),
-            'camera_index': LaunchConfiguration('camera_index'),
-            'camera_width': LaunchConfiguration('camera_width'),
-            'camera_height': LaunchConfiguration('camera_height'),
+            'camera_mode': LaunchConfiguration('camera_mode'),
             'camera_fps': LaunchConfiguration('camera_fps'),
-            'display_width': LaunchConfiguration('display_width'),
-            'display_height': LaunchConfiguration('display_height'),
-            'enable_display': LaunchConfiguration('enable_display')
+            'exposure_time': LaunchConfiguration('exposure_time'),
+            'gain': LaunchConfiguration('gain'),
+            'awb_mode': LaunchConfiguration('awb_mode'),
+            'brightness': 0,
+            'saturation': 1.0,
+            'enable_hdr': LaunchConfiguration('enable_hdr'),
+            'enable_cuda': LaunchConfiguration('enable_cuda'),
+            'enable_display': LaunchConfiguration('enable_display'),
+            'flip_method': 0
         }]
     )
     
     # Retornar descrição de inicialização
     return LaunchDescription([
-        camera_type,
-        camera_index,
-        camera_width,
-        camera_height,
+        camera_mode,
         camera_fps,
-        display_width,
-        display_height,
+        exposure_time,
+        gain,
+        awb_mode,
+        enable_hdr,
+        enable_cuda,
         enable_display,
         camera_node
     ])

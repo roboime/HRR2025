@@ -80,19 +80,23 @@ def generate_launch_description():
         
         # Nó da câmera
         camera_node = None
-        if camera_src_value == 'csi' or camera_src_value == 'usb':
-            camera_type = camera_src_value
+        if camera_src_value == 'csi':
             camera_node = Node(
                 package='perception',
                 executable='jetson_camera_node.py',
                 name='camera',
                 output='screen',
                 parameters=[{
-                    'camera_type': camera_type,
-                    'camera_index': config['camera']['jetson']['camera_index'],
-                    'camera_width': config['camera']['width'],
-                    'camera_height': config['camera']['height'],
+                    'camera_mode': 2,  # 0=3280x2464, 1=1920x1080, 2=1280x720
                     'camera_fps': config['camera']['fps'],
+                    'flip_method': 0,
+                    'exposure_time': 13333,  # Otimizado para iluminação indoor
+                    'gain': 1.0,
+                    'awb_mode': 1,  # Auto white balance
+                    'brightness': 0,
+                    'saturation': 1.0,
+                    'enable_cuda': True,
+                    'enable_hdr': False,  # Habilitar se necessário
                     'enable_display': debug_value == 'true'
                 }]
             )
