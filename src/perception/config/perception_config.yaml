@@ -47,7 +47,10 @@ camera:
   saturation: 1.2              # Saturação aumentada para melhor detecção de cores
   enable_hdr: false            # HDR desabilitado por padrão
   enable_cuda: true            # Processamento CUDA habilitado
-  enable_display: false        # Display desabilitado por padrão
+  enable_display: true        # Habilitar display
+  display_fps: 15            # FPS reduzido para display remoto
+  display_width: 640         # Resolução reduzida para display
+  display_height: 360        # para melhor performance via SSH
   flip_method: 0              # Sem flip
   
   # Otimizações de processamento
