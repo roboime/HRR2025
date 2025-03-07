@@ -99,7 +99,18 @@ ENV TF_CPP_MIN_LOG_LEVEL=2
 ENV CUDA_VISIBLE_DEVICES=0
 
 # Configurações específicas para IMX219
+RUN apt-get update && apt-get install -y \
+    nvidia-l4t-init \
+    nvidia-l4t-camera-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Otimizações para IMX219
 RUN echo 'SUBSYSTEM=="video*", ATTR{name}=="imx219", GROUP="video", MODE="0660"' > /etc/udev/rules.d/99-camera.rules
+RUN echo 'options imx219 sensor_mode=2' > /etc/modprobe.d/imx219.conf
+
+# Configurar serviços da câmera
+RUN systemctl disable nvgetty
+RUN echo "sudo systemctl restart nvargus-daemon" >> ~/.bashrc
 
 # ==================== CONFIGURAÇÃO DO WORKSPACE ====================
 WORKDIR /ros2_ws
@@ -107,10 +118,6 @@ WORKDIR /ros2_ws
 # Inicialização ROS
 RUN rosdep init && rosdep update
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> ~/.bashrc
-
-# Configurar serviços da câmera
-RUN systemctl disable nvgetty
-RUN echo "sudo systemctl restart nvargus-daemon" >> ~/.bashrc
 
 # ==================== USUÁRIO NÃO-ROOT ====================
 RUN useradd -m developer && \

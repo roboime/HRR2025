@@ -28,8 +28,8 @@ class IMX219CameraNode(Node):
         self.declare_parameters(
             namespace='',
             parameters=[
-                ('camera_mode', 0),  # 0=3280x2464, 1=1920x1080, 2=1280x720
-                ('camera_fps', 30),
+                ('camera_mode', 2),  # 0=3280x2464, 1=1920x1080, 2=1280x720
+                ('camera_fps', 120),  # Ajustado para máximo FPS no modo HD
                 ('flip_method', 0),
                 ('exposure_time', 13333),  # em microssegundos
                 ('gain', 1.0),
@@ -38,7 +38,10 @@ class IMX219CameraNode(Node):
                 ('saturation', 1.0),
                 ('enable_cuda', True),
                 ('enable_hdr', False),
-                ('enable_display', False)
+                ('enable_display', False),
+                ('enable_isp', False),
+                ('enable_noise_reduction', False),
+                ('enable_edge_enhancement', False)
             ]
         )
         
@@ -88,15 +91,34 @@ class IMX219CameraNode(Node):
             f"wbmode={self.get_parameter('awb_mode').value} "
             f"tnr-mode=2 ee-mode=2 "  # Redução de ruído temporal e aprimoramento de bordas
             f"saturation={self.get_parameter('saturation').value} "
+            f"brightness={self.get_parameter('brightness').value} "
+            f"ispdigitalgainrange='1 2' "  # Otimização do ganho digital
             f"! video/x-raw(memory:NVMM), "
             f"width=(int){self.width}, height=(int){self.height}, "
             f"format=(string)NV12, framerate=(fraction){self.get_parameter('camera_fps').value}/1 ! "
-            f"nvvidconv flip-method={self.get_parameter('flip_method').value} "
         )
+        
+        # Adicionar processamento ISP se habilitado
+        if self.get_parameter('enable_isp').value:
+            pipeline += (
+                f"nvvidconv "
+                f"interpolation-method=5 "  # Melhor qualidade de interpolação
+                f"flip-method={self.get_parameter('flip_method').value} "
+            )
+        else:
+            pipeline += f"nvvidconv flip-method={self.get_parameter('flip_method').value} "
         
         # Adicionar HDR se habilitado
         if self.get_parameter('enable_hdr').value:
             pipeline += "post-processing=1 "
+        
+        # Adicionar redução de ruído se habilitada
+        if self.get_parameter('enable_noise_reduction').value:
+            pipeline += "noise-reduction=1 "
+        
+        # Adicionar aprimoramento de bordas se habilitado
+        if self.get_parameter('enable_edge_enhancement').value:
+            pipeline += "edge-enhancement=1 "
         
         # Completar pipeline
         pipeline += (
@@ -153,8 +175,19 @@ class IMX219CameraNode(Node):
                         stream=self.cuda_stream
                     )
                     
+                    # Aprimoramento de bordas
+                    if self.get_parameter('enable_edge_enhancement').value:
+                        cv2.cuda.createSobelFilter(
+                            cv2.CV_8UC3,
+                            cv2.CV_16S,
+                            1, 0
+                        ).apply(
+                            self.cuda_color,
+                            self.cuda_download,
+                            self.cuda_stream
+                        )
+                    
                     # Download do resultado
-                    self.cuda_color.download(self.cuda_stream)
                     frame = self.cuda_color.download()
                 
                 # Publicar imagem

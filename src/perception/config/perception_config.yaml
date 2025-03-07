@@ -11,7 +11,7 @@
 
 # Configuração do pipeline
 pipeline:
-  processing_fps: 30.0          # Taxa de processamento de imagens (FPS)
+  processing_fps: 120.0          # Taxa de processamento de imagens (FPS)
   debug_image: true             # Publicar imagens de debug
   
   # Habilitar/desabilitar sistemas
@@ -34,15 +34,27 @@ camera:
   info_topic: "/camera/camera_info"  # Tópico de informações da câmera
   
   # Configurações de imagem
-  width: 640                    # Largura da imagem da câmera
-  height: 480                   # Altura da imagem da câmera
-  fps: 60                       # Taxa de quadros da câmera
+  width: 1280                   # Resolução padrão (1280x720@120fps)
+  height: 720
+  fps: 120
   
-  # Configurações específicas para Jetson
-  jetson:
-    camera_type: 'usb'          # 'csi' ou 'usb'
-    camera_index: 0             # Índice da câmera
-    enable_display: true       # Exibir imagem em janela
+  # Configurações específicas para IMX219
+  camera_mode: 2                 # 0=3280x2464@21fps, 1=1920x1080@60fps, 2=1280x720@120fps
+  exposure_time: 13333          # Tempo de exposição em microssegundos (otimizado para indoor)
+  gain: 1.0                     # Ganho da câmera
+  awb_mode: 1                   # Auto white balance
+  brightness: 0                 # Brilho padrão
+  saturation: 1.2              # Saturação aumentada para melhor detecção de cores
+  enable_hdr: false            # HDR desabilitado por padrão
+  enable_cuda: true            # Processamento CUDA habilitado
+  enable_display: false        # Display desabilitado por padrão
+  flip_method: 0              # Sem flip
+  
+  # Otimizações de processamento
+  use_tensorrt: true          # Usar TensorRT para otimização
+  enable_edge_enhancement: true # Aprimoramento de bordas
+  enable_noise_reduction: true # Redução de ruído temporal
+  enable_isp: true           # Image Signal Processing otimizado
 
 #=======================================#
 # CONFIGURAÇÃO DO YOEO
@@ -110,3 +122,32 @@ traditional:
     color_lower: [0, 0, 0]             # HSV mínimo
     color_upper: [180, 255, 40]        # HSV máximo
     min_area: 100                      # Área mínima em pixels 
+
+# Configurações de detecção
+detection:
+  # Configurações da bola
+  ball:
+    min_confidence: 0.6
+    min_size: 10
+    max_size: 100
+    
+  # Configurações do campo
+  field:
+    color_threshold: 40
+    min_area: 1000
+    
+  # Configurações das linhas
+  lines:
+    canny_threshold1: 50
+    canny_threshold2: 150
+    min_line_length: 30
+    
+  # Configurações dos gols
+  goals:
+    min_confidence: 0.7
+    min_height: 30
+    
+  # Configurações dos robôs
+  robots:
+    min_confidence: 0.6
+    min_size: 20 
