@@ -48,9 +48,10 @@ RUN apt-get update && apt-get install -y \
     ros-eloquent-ros-base \
     ros-eloquent-cv-bridge \
     ros-eloquent-image-transport \
-    ros-eloquent-image-pipeline \
     ros-eloquent-camera-info-manager \
     ros-eloquent-camera-calibration-parsers \
+    ros-eloquent-image-proc \
+    ros-eloquent-image-publisher \
     python3-colcon-common-extensions \
     python3-rosdep \
     && rm -rf /var/lib/apt/lists/*
