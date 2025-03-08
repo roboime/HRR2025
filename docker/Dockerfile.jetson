@@ -29,10 +29,12 @@ RUN apt-get update && apt-get install -y \
     cuda-libraries-dev-10-2 \
     libcudnn8 \
     libcudnn8-dev \
-    tensorrt \
-    python3-libnvinfer \
-    python3-libnvinfer-dev \
-    onnx-graphsurgeon \
+    nvidia-tensorrt \
+    libnvinfer8 \
+    libnvinfer-dev \
+    libnvinfer-plugin8 \
+    libnvparsers8 \
+    libnvonnxparsers8 \
     libopencv-dev \
     python3-opencv \
     v4l-utils \
