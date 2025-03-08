@@ -27,6 +27,9 @@ RUN apt-get update && apt-get install -y \
     gstreamer1.0-plugins-ugly \
     gstreamer1.0-tools \
     python3-gst-1.0 \
+    gstreamer1.0-libav \
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Configurar permissões da câmera
@@ -48,10 +51,6 @@ RUN apt-get update && apt-get install -y \
     ros-eloquent-ros-base \
     ros-eloquent-cv-bridge \
     ros-eloquent-image-transport \
-    ros-eloquent-camera-info-manager \
-    ros-eloquent-camera-calibration-parsers \
-    ros-eloquent-image-proc \
-    ros-eloquent-image-publisher \
     python3-colcon-common-extensions \
     python3-rosdep \
     && rm -rf /var/lib/apt/lists/*
