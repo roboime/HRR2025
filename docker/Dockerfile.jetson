@@ -5,14 +5,21 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG C.UTF-8
 ENV ROS_DISTRO=eloquent
 
-# Instalar gnupg primeiro
-RUN apt-get update && apt-get install -y gnupg2 && rm -rf /var/lib/apt/lists/*
+# Instalar e configurar certificados primeiro
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    apt-utils \
+    gnupg2 \
+    wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && update-ca-certificates
 
 # ==================== NVIDIA JETPACK 4.6 ====================
 # Adicionar repositórios NVIDIA
-RUN echo "deb https://repo.download.nvidia.com/jetson/common r32.6 main" > /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
-    echo "deb https://repo.download.nvidia.com/jetson/t210 r32.6 main" >> /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
-    apt-key adv --fetch-key http://repo.download.nvidia.com/jetson/jetson-ota-public.asc
+RUN wget https://repo.download.nvidia.com/jetson/jetson-ota-public.asc -O /etc/apt/trusted.gpg.d/jetson-ota-public.asc && \
+    echo "deb [signed-by=/etc/apt/trusted.gpg.d/jetson-ota-public.asc] https://repo.download.nvidia.com/jetson/common r32.6 main" > /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
+    echo "deb [signed-by=/etc/apt/trusted.gpg.d/jetson-ota-public.asc] https://repo.download.nvidia.com/jetson/t210 r32.6 main" >> /etc/apt/sources.list.d/nvidia-l4t-apt-source.list
 
 # Instalar componentes essenciais do JetPack
 RUN apt-get update && apt-get install -y \
