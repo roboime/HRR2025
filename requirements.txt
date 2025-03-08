@@ -23,6 +23,7 @@ pillow
 imgaug
 tqdm
 tensorboard
+pycocotools
 
 # Ferramentas para processamento de imagens
 scikit-image

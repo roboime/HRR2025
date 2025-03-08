@@ -15,6 +15,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.utils import Sequence
 import albumentations as A
+from pycocotools import mask as coco_mask
 
 
 def load_image(image_path):
@@ -137,9 +138,7 @@ def prepare_dataset(config):
     
     # Criar geradores de dados
     train_generator = YOEODataGenerator(
-        config['train_images'],
-        config['train_masks'],
-        config['train_annotations'],
+        data_dir=config['train_dir'],
         batch_size=batch_size,
         input_size=input_size,
         num_classes=len(config['classes']),
@@ -149,9 +148,7 @@ def prepare_dataset(config):
     )
     
     val_generator = YOEODataGenerator(
-        config['val_images'],
-        config['val_masks'],
-        config['val_annotations'],
+        data_dir=config['val_dir'],
         batch_size=batch_size,
         input_size=input_size,
         num_classes=len(config['classes']),
@@ -160,20 +157,18 @@ def prepare_dataset(config):
         shuffle=False
     )
     
-    # Criar gerador de teste se os caminhos estiverem definidos
+    # Criar gerador de teste se o diretório existir
     test_generator = None
-    #if all(key in config['dataset'] for key in ['test_images', 'test_masks', 'test_annotations']):
-    #    test_generator = YOEODataGenerator(
-    #        config['test_images'],
-    #        config['test_masks'],
-    #        config['test_annotations'],
-    #        batch_size=1,  # Batch size 1 para teste
-    #        input_size=input_size,
-    #        num_classes=len(config['classes']),
-    #        num_seg_classes=len(config['segmentation_classes']),
-    #        augmentation=None,
-    #        shuffle=False
-    #    )
+    if 'test_dir' in config and os.path.exists(config['test_dir']):
+        test_generator = YOEODataGenerator(
+            data_dir=config['test_dir'],
+            batch_size=1,  # Batch size 1 para teste
+            input_size=input_size,
+            num_classes=len(config['classes']),
+            num_seg_classes=len(config['segmentation_classes']),
+            augmentation=None,
+            shuffle=False
+        )
     
     return train_generator, val_generator, test_generator
 
@@ -182,48 +177,67 @@ class YOEODataGenerator(Sequence):
     """
     Gerador de dados para o modelo YOEO.
     
-    Este gerador carrega imagens, máscaras e anotações, aplica
-    aumento de dados e gera lotes para treinamento e avaliação.
+    Este gerador carrega imagens e anotações no formato COCO,
+    que contém tanto segmentação quanto bounding boxes.
     """
     
-    def __init__(self, image_dir, mask_dir, annotation_dir, batch_size=8,
-                 input_size=(416, 416), num_classes=4, num_seg_classes=3,
-                 augmentation=None, shuffle=True):
+    def __init__(self, data_dir, batch_size=8, input_size=(416, 416), 
+                 num_classes=3, num_seg_classes=2, augmentation=None, shuffle=True):
         """
         Inicializa o gerador de dados.
         
         Args:
-            image_dir: Diretório contendo imagens
-            mask_dir: Diretório contendo máscaras de segmentação
-            annotation_dir: Diretório contendo anotações de detecção
+            data_dir: Diretório contendo imagens e annotations.json
             batch_size: Tamanho do lote
             input_size: Tamanho de entrada do modelo (altura, largura)
-            num_classes: Número de classes de detecção
-            num_seg_classes: Número de classes de segmentação
+            num_classes: Número de classes de detecção (bola, gol, robo)
+            num_seg_classes: Número de classes de segmentação (linha, campo)
             augmentation: Pipeline de aumento de dados
             shuffle: Se deve embaralhar os dados a cada época
         """
-        self.image_dir = image_dir
-        self.mask_dir = mask_dir
-        self.annotation_dir = annotation_dir
+        self.data_dir = data_dir
         self.batch_size = batch_size
         self.input_size = input_size
-        self.num_classes = num_classes
-        self.num_seg_classes = num_seg_classes
+        self.num_classes = num_classes  # Deve ser 3
+        self.num_seg_classes = num_seg_classes  # Deve ser 2
         self.augmentation = augmentation
         self.shuffle = shuffle
         
-        # Listar arquivos de imagem
-        self.image_files = [f for f in os.listdir(image_dir) if f.endswith(('.jpg', '.jpeg', '.png'))]
-        self.indexes = np.arange(len(self.image_files))
+        # Classes válidas
+        self.valid_classes = {'bola': 0, 'gol': 1, 'robo': 2}
+        self.valid_seg_classes = {'linha': 0, 'campo': 1}
         
-        # Embaralhar no início
+        # Carregar anotações COCO
+        with open(os.path.join(data_dir, 'annotations.json'), 'r') as f:
+            self.coco_data = json.load(f)
+        
+        # Criar índice de imagens
+        self.image_ids = [img['id'] for img in self.coco_data['images']]
+        self.image_info = {img['id']: img for img in self.coco_data['images']}
+        
+        # Criar mapeamento de categorias
+        self.cat_mapping = {}
+        for cat in self.coco_data['categories']:
+            if cat['name'] in self.valid_classes:
+                self.cat_mapping[cat['id']] = self.valid_classes[cat['name']]
+        
+        # Criar índice de anotações por imagem (apenas classes válidas)
+        self.annotations = {}
+        for ann in self.coco_data['annotations']:
+            img_id = ann['image_id']
+            # Verificar se é uma categoria válida
+            if ann['category_id'] in self.cat_mapping:
+                if img_id not in self.annotations:
+                    self.annotations[img_id] = []
+                self.annotations[img_id].append(ann)
+        
+        self.indexes = np.arange(len(self.image_ids))
         if self.shuffle:
             np.random.shuffle(self.indexes)
     
     def __len__(self):
         """Retorna o número de lotes por época."""
-        return int(np.ceil(len(self.image_files) / self.batch_size))
+        return int(np.ceil(len(self.image_ids) / self.batch_size))
     
     def __getitem__(self, index):
         """
@@ -237,43 +251,64 @@ class YOEODataGenerator(Sequence):
         """
         # Gerar índices para este lote
         batch_indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]
-        batch_files = [self.image_files[i] for i in batch_indexes]
+        batch_ids = [self.image_ids[i] for i in batch_indexes]
         
         # Inicializar arrays para imagens e saídas
-        batch_images = np.zeros((len(batch_files), *self.input_size, 3), dtype=np.float32)
-        batch_detection = np.zeros((len(batch_files), 100, 5 + self.num_classes), dtype=np.float32)
-        batch_segmentation = np.zeros((len(batch_files), *self.input_size, self.num_seg_classes), dtype=np.float32)
+        batch_images = np.zeros((len(batch_ids), *self.input_size, 3), dtype=np.float32)
+        batch_detection = np.zeros((len(batch_ids), 100, 5 + self.num_classes), dtype=np.float32)
+        batch_segmentation = np.zeros((len(batch_ids), *self.input_size, self.num_seg_classes), dtype=np.float32)
         
         # Carregar e processar cada imagem no lote
-        for i, image_file in enumerate(batch_files):
-            # Construir caminhos para imagem, máscara e anotação
-            image_path = os.path.join(self.image_dir, image_file)
-            mask_path = os.path.join(self.mask_dir, os.path.splitext(image_file)[0] + '.png')
-            annotation_path = os.path.join(self.annotation_dir, os.path.splitext(image_file)[0] + '.json')
+        for i, img_id in enumerate(batch_ids):
+            # Obter informações da imagem
+            img_info = self.image_info[img_id]
+            img_anns = self.annotations.get(img_id, [])
             
-            # Carregar imagem, máscara e anotações
-            image = load_image(image_path)
-            mask = load_mask(mask_path)
-            annotations = load_annotations(annotation_path)
+            # Carregar imagem
+            img_path = os.path.join(self.data_dir, img_info['file_name'])
+            image = cv2.imread(img_path)
+            if image is None:
+                raise ValueError(f"Não foi possível carregar a imagem: {img_path}")
             
-            # Extrair caixas delimitadoras e classes
+            # Criar máscara de segmentação
+            mask = np.zeros((*self.input_size, self.num_seg_classes), dtype=np.float32)
+            
+            # Processar anotações
             boxes = []
             class_labels = []
-            for ann in annotations:
-                # Formato YOLO: [x_center, y_center, width, height]
-                x_center = ann['bbox'][0] + ann['bbox'][2] / 2
-                y_center = ann['bbox'][1] + ann['bbox'][3] / 2
-                width = ann['bbox'][2]
-                height = ann['bbox'][3]
+            
+            for ann in img_anns:
+                # Processar segmentação
+                if 'segmentation' in ann:
+                    # Verificar se é uma classe de segmentação válida
+                    class_name = next((cat['name'] for cat in self.coco_data['categories'] 
+                                    if cat['id'] == ann['category_id']), None)
+                    
+                    if class_name in self.valid_seg_classes:
+                        # Converter polígonos/RLE para máscara binária
+                        if isinstance(ann['segmentation'], dict):  # RLE
+                            seg_mask = self._rle_to_mask(ann['segmentation'], img_info['height'], img_info['width'])
+                        else:  # Polígono
+                            seg_mask = self._polygon_to_mask(ann['segmentation'], img_info['height'], img_info['width'])
+                        
+                        # Adicionar à máscara apropriada
+                        seg_idx = self.valid_seg_classes[class_name]
+                        mask[..., seg_idx] = np.logical_or(mask[..., seg_idx], seg_mask)
                 
-                # Normalizar para [0, 1]
-                x_center /= image.shape[1]
-                y_center /= image.shape[0]
-                width /= image.shape[1]
-                height /= image.shape[0]
-                
-                boxes.append([x_center, y_center, width, height])
-                class_labels.append(ann['category_id'])
+                # Processar bounding box
+                if 'bbox' in ann and ann['category_id'] in self.cat_mapping:
+                    x, y, w, h = ann['bbox']
+                    # Converter para formato YOLO (x_center, y_center, width, height)
+                    x_center = (x + w/2) / img_info['width']
+                    y_center = (y + h/2) / img_info['height']
+                    width = w / img_info['width']
+                    height = h / img_info['height']
+                    
+                    boxes.append([x_center, y_center, width, height])
+                    class_labels.append(self.cat_mapping[ann['category_id']])
+            
+            # Redimensionar imagem
+            image = cv2.resize(image, self.input_size[::-1])
             
             # Aplicar aumento de dados se disponível
             if self.augmentation and boxes:
@@ -288,21 +323,12 @@ class YOEODataGenerator(Sequence):
                 boxes = augmented['bboxes']
                 class_labels = augmented['class_labels']
             
-            # Redimensionar imagem e máscara
-            image = cv2.resize(image, self.input_size[::-1])  # OpenCV usa (largura, altura)
-            mask = cv2.resize(mask, self.input_size[::-1], interpolation=cv2.INTER_NEAREST)
-            
             # Normalizar imagem
-            image = normalize_image(image)
-            
-            # Converter máscara para one-hot encoding
-            mask_one_hot = np.zeros((*self.input_size, self.num_seg_classes), dtype=np.float32)
-            for c in range(self.num_seg_classes):
-                mask_one_hot[..., c] = (mask == c).astype(np.float32)
+            image = image.astype(np.float32) / 255.0
             
             # Preencher arrays do lote
             batch_images[i] = image
-            batch_segmentation[i] = mask_one_hot
+            batch_segmentation[i] = mask
             
             # Preencher detecções
             for j, (box, class_id) in enumerate(zip(boxes, class_labels)):
@@ -314,13 +340,27 @@ class YOEODataGenerator(Sequence):
                 batch_detection[i, j, 4] = 1.0  # Objectness
                 batch_detection[i, j, 5 + class_id] = 1.0  # Classe one-hot
         
-        # Retornar imagens e saídas esperadas
         return batch_images, [batch_detection, batch_segmentation]
     
     def on_epoch_end(self):
         """Chamado no final de cada época."""
         if self.shuffle:
             np.random.shuffle(self.indexes)
+    
+    def _rle_to_mask(self, rle, height, width):
+        """Converte RLE para máscara binária."""
+        if isinstance(rle['counts'], list):
+            rle = coco_mask.frPyObjects(rle, height, width)
+        mask = coco_mask.decode(rle)
+        return cv2.resize(mask, self.input_size[::-1], interpolation=cv2.INTER_NEAREST)
+    
+    def _polygon_to_mask(self, polygons, height, width):
+        """Converte polígonos para máscara binária."""
+        mask = np.zeros((height, width), dtype=np.uint8)
+        for polygon in polygons:
+            pts = np.array(polygon).reshape((-1, 2)).astype(np.int32)
+            cv2.fillPoly(mask, [pts], 1)
+        return cv2.resize(mask, self.input_size[::-1], interpolation=cv2.INTER_NEAREST)
 
 
 def visualize_batch(batch_images, batch_outputs, class_names, seg_class_names, num_samples=4):

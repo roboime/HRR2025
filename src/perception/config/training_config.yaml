@@ -6,41 +6,29 @@ input_height: 416
 classes: [
   'bola',    # Bola de futebol
   'gol',     # Postes de gol
-  'robo',    # Robos (proprios e adversarios)
-  'arbitro'  # Arbitro
+  'robo'     # Robos (proprios e adversarios)
 ]
 segmentation_classes: [
-  'fundo',   # Fundo (não-campo)
   'linha',   # Linhas do campo
   'campo'    # Area do campo
 ]
 
 # Configuracoes do dataset
 dataset_base_dir: "resources/dataset"
-train_images: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/train/images"
-train_masks: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/train/segmentation_masks"
-train_annotations: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/train/annotations.json"
-val_images: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/val/images"
-val_masks: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/val/segmentation_masks"
-val_annotations: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/val/annotations.json"
-test_images: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/test/images"
-test_masks: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/test/segmentation_masks"
-test_annotations: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/test/annotations.json"
-
+train_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/train"
+val_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/val"
+test_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/test"
 
 # Estrutura do dataset esperada:
 # resources/dataset/
 #   ├── train/
-#   │   ├── images/              # Imagens de treinamento
-#   │   ├── segmentation_masks/  # Mascaras de segmentacao
-#   │   └── annotations.json     # Anotacoes COCO
+#   │   ├── img1.png
+#   │   └── annotations.json     # Anotacoes COCO com segmentação e bounding boxes
 #   ├── val/
-#   │   ├── images/
-#   │   ├── segmentation_masks/
+#   │   ├── img2.png
 #   │   └── annotations.json
 #   └── test/
-#       ├── images/
-#       ├── segmentation_masks/
+#       ├── img3.png
 #       └── annotations.json
 
 # Configuracoes de treinamento

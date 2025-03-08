@@ -78,7 +78,7 @@ yoeo:
   # Componentes habilitados
   components:
     ball: true                  # Habilitar detecção de bola
-    field: fasle                 # Habilitar segmentação de campo
+    field: false                 # Habilitar segmentação de campo
     lines: false                 # Habilitar segmentação de linhas
     goals: true                 # Habilitar detecção de gols
     robots: true                # Habilitar detecção de robôs
