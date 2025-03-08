@@ -6,20 +6,26 @@ ENV LANG C.UTF-8
 ENV ROS_DISTRO=eloquent
 
 # ==================== NVIDIA JETPACK 4.6 ====================
+# Adicionar repositórios NVIDIA
+RUN echo "deb https://repo.download.nvidia.com/jetson/common r32.6 main" > /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
+    echo "deb https://repo.download.nvidia.com/jetson/t210 r32.6 main" >> /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
+    apt-key adv --fetch-key http://repo.download.nvidia.com/jetson/jetson-ota-public.asc
+
 # Instalar componentes essenciais do JetPack
 RUN apt-get update && apt-get install -y \
-    nvidia-jetpack=4.6 \
-    nvidia-cuda=10.2.460 \
-    nvidia-cudnn8=8.2.1.32 \
-    nvidia-tensorrt=8.0.1.6 \
-    nvidia-opencv=4.5.3 \
-    nvidia-l4t-camera=32.6.1-20210918082159 \
-    libopencv-dev \
     cuda-toolkit-10-2 \
-    tensorrt \
-    nvidia-l4t-camera \
-    nvidia-l4t-multimedia \
-    nvidia-l4t-multimedia-utils \
+    cuda-tools-10-2 \
+    cuda-libraries-10-2 \
+    cuda-libraries-dev-10-2 \
+    libcudnn8 \
+    libcudnn8-dev \
+    libnvinfer7 \
+    libnvinfer-dev \
+    libnvinfer-plugin7 \
+    libnvonnxparsers7 \
+    libnvparsers7 \
+    libopencv-dev \
+    python3-opencv \
     v4l-utils \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
@@ -27,6 +33,16 @@ RUN apt-get update && apt-get install -y \
     gstreamer1.0-plugins-ugly \
     gstreamer1.0-tools \
     python3-gst-1.0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Instalar L4T específicos
+RUN apt-get update && apt-get install -y \
+    nvidia-l4t-core \
+    nvidia-l4t-cuda \
+    nvidia-l4t-cudnn \
+    nvidia-l4t-graphics \
+    nvidia-l4t-multimedia \
+    nvidia-l4t-camera \
     && rm -rf /var/lib/apt/lists/*
 
 # Configurar permissões da câmera
@@ -51,8 +67,6 @@ RUN apt-get update && apt-get install -y \
     ros-eloquent-image-pipeline \
     ros-eloquent-camera-info-manager \
     ros-eloquent-camera-calibration-parsers \
-    ros-eloquent-navigation2 \
-    ros-eloquent-joy-linux \
     python3-colcon-common-extensions \
     python3-rosdep \
     && rm -rf /var/lib/apt/lists/*
@@ -94,9 +108,16 @@ RUN python3 -m pip install --upgrade pip && \
     onnx==1.10.2 \
     jetson-stats \
     pycuda==2021.1 \
-    torch==1.8.0 \
-    torchvision==0.9.0 \
     --extra-index-url https://nvidia.github.io/jetson-wheels/
+
+# Instalar PyTorch para Jetson
+RUN wget https://nvidia.box.com/shared/static/p57jwntv436lfrd78inwl7iml6p13fzh.whl -O torch-1.8.0-cp36-cp36m-linux_aarch64.whl && \
+    pip3 install torch-1.8.0-cp36-cp36m-linux_aarch64.whl && \
+    rm torch-1.8.0-cp36-cp36m-linux_aarch64.whl
+
+RUN wget https://nvidia.box.com/shared/static/qwakpqpzpo430j6189c4px0caqg77pdv.whl -O torchvision-0.9.0-cp36-cp36m-linux_aarch64.whl && \
+    pip3 install torchvision-0.9.0-cp36-cp36m-linux_aarch64.whl && \
+    rm torchvision-0.9.0-cp36-cp36m-linux_aarch64.whl
 
 # Configurar variáveis de ambiente para TensorFlow e CUDA
 ENV TF_FORCE_GPU_ALLOW_GROWTH=true
@@ -104,12 +125,6 @@ ENV TF_CPP_MIN_LOG_LEVEL=2
 ENV CUDA_VISIBLE_DEVICES=0
 
 # Configurações específicas para IMX219
-RUN apt-get update && apt-get install -y \
-    nvidia-l4t-init \
-    nvidia-l4t-camera-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Otimizações para IMX219
 RUN echo 'SUBSYSTEM=="video*", ATTR{name}=="imx219", GROUP="video", MODE="0660"' > /etc/udev/rules.d/99-camera.rules
 RUN echo 'options imx219 sensor_mode=2' > /etc/modprobe.d/imx219.conf
 
