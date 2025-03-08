@@ -40,6 +40,10 @@ RUN apt-get update && apt-get install -y \
 # Configurar permissões da câmera
 RUN usermod -a -G video root
 
+# Corrigir problema com o OpenCV para Jetson
+RUN ln -s /usr/lib/python3/dist-packages/cv2.cpython-36m-aarch64-linux-gnu.so /usr/local/lib/python3.6/dist-packages/cv2.so || \
+    echo "Aviso: Não foi possível criar link simbólico para OpenCV"
+
 # ==================== ROS ELOQUENT ====================
 # Configurar repositórios ROS2
 RUN apt-get update && apt-get install -y \
@@ -132,17 +136,33 @@ RUN pip3 install --no-cache-dir --extra-index-url https://nvidia.github.io/jetso
     torchvision \
     || echo "Aviso: Falha ao instalar PyTorch para Jetson. Verifique manualmente após a construção."
 
-# Instalar pacotes complexos com tratamento de erros
-# PyCocoTools
-RUN pip3 install --no-cache-dir pycocotools || \
-    echo "Aviso: PyCocoTools não pode ser instalado automaticamente."
-
-# Albumentations (sem opencv, que já está instalado via apt)
-RUN pip3 install --no-cache-dir --no-deps albumentations==0.5.2
-
 # Verificar se OpenCV está funcionando
-RUN python3 -c "import cv2; print('OpenCV versão:', cv2.__version__)" || \
-    echo "Aviso: OpenCV não está configurado corretamente"
+RUN python3 -c "import cv2; print('Versão do OpenCV:', cv2.__version__)" || \
+    echo "Aviso: OpenCV não está configurado corretamente - instalando python3-opencv do sistema"
+
+# Atualizar package index e instalar dependências para compilar pycocotools
+RUN apt-get update && apt-get install -y \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Instalar pycocotools manualmente da fonte 
+RUN git clone https://github.com/cocodataset/cocoapi.git /tmp/cocoapi && \
+    cd /tmp/cocoapi/PythonAPI && \
+    # Modificar Makefile para usar compilação compatível com ARM
+    sed -i 's/CFLAGS=/CFLAGS=-std=c99 -fPIC /' Makefile && \
+    # Compilar sem otimizações que podem causar problemas em ARM
+    make && \
+    cp -r pycocotools /usr/local/lib/python3.6/dist-packages/ && \
+    cd / && \
+    rm -rf /tmp/cocoapi
+
+# Verificar a instalação do pycocotools
+RUN python3 -c "from pycocotools import coco; print('pycocotools instalado com sucesso')" || \
+    echo "Aviso: pycocotools não foi instalado corretamente, mas continuando com a construção"
+
+# Instalar albumentations (sem opencv, que já está instalado via apt)
+RUN pip3 install --no-cache-dir --no-deps albumentations==0.5.2
 
 # Configurar variáveis de ambiente para TensorFlow e CUDA
 ENV TF_FORCE_GPU_ALLOW_GROWTH=true
