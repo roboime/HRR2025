@@ -30,6 +30,8 @@ RUN apt-get update && apt-get install -y \
     gstreamer1.0-libav \
     libgstreamer1.0-dev \
     libgstreamer-plugins-base1.0-dev \
+    libc6-dev \
+    libatlas-base-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Configurar permissões da câmera
@@ -89,17 +91,16 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     libjpeg-dev \
     libhdf5-dev \
+    python3-numpy \
+    python3-matplotlib \
+    python3-pil \
+    python3-scipy \
     && rm -rf /var/lib/apt/lists/*
 
 # Dependências Python otimizadas para JetPack 4.6
 RUN python3 -m pip install --upgrade pip && \
-    pip3 install \
-    numpy==1.16.0 \
-    && pip3 install \
-    opencv-python==4.5.3.56 \
+    pip3 install --no-cache-dir \
     pyyaml==5.4.1 \
-    matplotlib==3.0.3 \
-    pillow==8.4.0 \
     scikit-learn==0.24.2 \
     scikit-image==0.17.2 \
     tqdm==4.62.3 \
@@ -107,18 +108,16 @@ RUN python3 -m pip install --upgrade pip && \
     pycocotools==2.0.4 \
     protobuf==3.19.4 \
     onnx==1.10.2 \
-    jetson-stats \
-    pycuda==2021.1 \
-    --extra-index-url https://nvidia.github.io/jetson-wheels/
+    jetson-stats
+
+# Instalar pacotes específicos para Jetson da NVIDIA
+RUN pip3 install --no-cache-dir --extra-index-url https://nvidia.github.io/jetson-wheels/ \
+    numpy \
+    scipy \
+    cupy-cuda102
 
 # Instalar PyTorch para Jetson
-RUN wget https://nvidia.box.com/shared/static/p57jwntv436lfrd78inwl7iml6p13fzh.whl -O torch-1.8.0-cp36-cp36m-linux_aarch64.whl && \
-    pip3 install torch-1.8.0-cp36-cp36m-linux_aarch64.whl && \
-    rm torch-1.8.0-cp36-cp36m-linux_aarch64.whl
-
-RUN wget https://nvidia.box.com/shared/static/qwakpqpzpo430j6189c4px0caqg77pdv.whl -O torchvision-0.9.0-cp36-cp36m-linux_aarch64.whl && \
-    pip3 install torchvision-0.9.0-cp36-cp36m-linux_aarch64.whl && \
-    rm torchvision-0.9.0-cp36-cp36m-linux_aarch64.whl
+RUN pip3 install --no-cache-dir -U --extra-index-url https://nvidia.github.io/jetson-wheels/ torch torchvision
 
 # Configurar variáveis de ambiente para TensorFlow e CUDA
 ENV TF_FORCE_GPU_ALLOW_GROWTH=true
