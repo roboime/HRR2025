@@ -1,14 +1,19 @@
-FROM nvcr.io/nvidia/l4t-base:r32.7.1
+FROM nvcr.io/nvidia/l4t-base:r32.6.1
 
 # ==================== CONFIGURAÇÃO BÁSICA ====================
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG C.UTF-8
-ENV ROS_DISTRO=eloquent   
+ENV ROS_DISTRO=eloquent
 
-# ==================== NVIDIA JETPACK 4.6.1 ====================
+# ==================== NVIDIA JETPACK 4.6 ====================
 # Instalar componentes essenciais do JetPack
 RUN apt-get update && apt-get install -y \
-    nvidia-jetpack \
+    nvidia-jetpack=4.6 \
+    nvidia-cuda=10.2.460 \
+    nvidia-cudnn8=8.2.1.32 \
+    nvidia-tensorrt=8.0.1.6 \
+    nvidia-opencv=4.5.3 \
+    nvidia-l4t-camera=32.6.1-20210918082159 \
     libopencv-dev \
     cuda-toolkit-10-2 \
     tensorrt \
@@ -54,12 +59,12 @@ RUN apt-get update && apt-get install -y \
 
 # ==================== OTIMIZAÇÕES DE HARDWARE ====================
 # Configurar variáveis de ambiente NVIDIA
-ENV LD_LIBRARY_PATH=/usr/local/cuda-10.2/lib64:/usr/lib/aarch64-linux-gnu:$LD_LIBRARY_PATH
-ENV PATH=/usr/local/cuda-10.2/bin:$PATH
+ENV PATH=/usr/local/cuda-10.2/bin:${PATH}
+ENV LD_LIBRARY_PATH=/usr/local/cuda-10.2/lib64:/usr/lib/aarch64-linux-gnu:${LD_LIBRARY_PATH}
 
 # Configurar TensorRT
 ENV TENSORRT_DIR=/usr/lib/aarch64-linux-gnu
-ENV LD_LIBRARY_PATH=$TENSORRT_DIR:$LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=${TENSORRT_DIR}:${LD_LIBRARY_PATH}
 
 # Configurar GStreamer
 ENV GST_DEBUG=3
@@ -72,26 +77,26 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Dependências Python otimizadas para JetPack 4.6.1
+# Dependências Python otimizadas para JetPack 4.6
 RUN python3 -m pip install --upgrade pip && \
     pip3 install \
-    numpy==1.19.5 \
-    opencv-python-headless==4.5.5.64 \
-    pyyaml==6.0 \
-    matplotlib==3.5.1 \
-    pandas==1.3.5 \
-    pillow==9.0.0 \
-    scikit-learn==1.0.2 \
-    scikit-image==0.19.1 \
+    numpy==1.19.4 \
+    opencv-python==4.5.3.56 \
+    pyyaml==5.4.1 \
+    matplotlib==3.3.4 \
+    pillow==8.4.0 \
+    scikit-learn==0.24.2 \
+    scikit-image==0.17.2 \
     tqdm==4.62.3 \
-    imgaug==0.4.0 \
+    albumentations==1.1.0 \
+    pycocotools==2.0.4 \
     protobuf==3.19.4 \
-    onnx==1.12.0 \
+    onnx==1.10.2 \
     jetson-stats \
-    pycuda \
-    torch==1.10.0 \
-    torchvision==0.11.1 \
-    --extra-index-url https://nvidia-jetpack.github.io/permalink/pytorch-cuda102.html
+    pycuda==2021.1 \
+    torch==1.8.0 \
+    torchvision==0.9.0 \
+    --extra-index-url https://nvidia.github.io/jetson-wheels/
 
 # Configurar variáveis de ambiente para TensorFlow e CUDA
 ENV TF_FORCE_GPU_ALLOW_GROWTH=true
@@ -108,9 +113,9 @@ RUN apt-get update && apt-get install -y \
 RUN echo 'SUBSYSTEM=="video*", ATTR{name}=="imx219", GROUP="video", MODE="0660"' > /etc/udev/rules.d/99-camera.rules
 RUN echo 'options imx219 sensor_mode=2' > /etc/modprobe.d/imx219.conf
 
-# Configurar serviços da câmera
-RUN systemctl disable nvgetty
-RUN echo "sudo systemctl restart nvargus-daemon" >> ~/.bashrc
+# Otimizações para Jetson
+RUN echo 'nvargus-daemon' > /etc/ld.so.conf.d/nvidia.conf
+RUN ldconfig
 
 # ==================== CONFIGURAÇÃO DO WORKSPACE ====================
 WORKDIR /ros2_ws
@@ -118,6 +123,10 @@ WORKDIR /ros2_ws
 # Inicialização ROS
 RUN rosdep init && rosdep update
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> ~/.bashrc
+
+# Configurar serviços da câmera
+RUN systemctl disable nvgetty
+RUN echo "sudo systemctl restart nvargus-daemon" >> ~/.bashrc
 
 # ==================== USUÁRIO NÃO-ROOT ====================
 RUN useradd -m developer && \
