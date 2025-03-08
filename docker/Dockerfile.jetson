@@ -43,6 +43,7 @@ RUN apt-get update && apt-get install -y \
     lsb-release \
     python3-yaml \
     python3-setuptools \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
@@ -58,7 +59,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Instalar dependências Python específicas para ROS2
-RUN pip3 install \
+RUN python3 -m pip install \
     rosinstall-generator \
     vcstool \
     rospkg \
