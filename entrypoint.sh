@@ -1,8 +1,14 @@
 #!/bin/bash
 set -e
 
-# Configuração do ambiente ROS2
+# Configurar variáveis de ambiente ROS2
 source /opt/ros/eloquent/setup.bash
+
+# Configurar o ambiente CUDA e TensorRT
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda-10.2/lib64:/usr/lib/aarch64-linux-gnu
+export PATH=$PATH:/usr/local/cuda-10.2/bin
+
+# Se existir um workspace ROS, configurar
 if [ -f "/ros2_ws/install/setup.bash" ]; then
     source /ros2_ws/install/setup.bash
 fi
@@ -19,5 +25,5 @@ echo "======================================================"
 echo "Dispositivos de câmera disponíveis:"
 ls -la /dev/video* 2>/dev/null || echo "Nenhum dispositivo de câmera encontrado"
 
-# Executar comando passado como argumento
+# Executar o comando fornecido ou bash por padrão
 exec "$@" 

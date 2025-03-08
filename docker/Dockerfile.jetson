@@ -32,6 +32,9 @@ RUN apt-get update && apt-get install -y \
     libgstreamer-plugins-base1.0-dev \
     libc6-dev \
     libatlas-base-dev \
+    python3-pil \
+    python3-numpy \
+    cython3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Configurar permissões da câmera
@@ -95,20 +98,28 @@ RUN apt-get update && apt-get install -y \
     python3-matplotlib \
     python3-pil \
     python3-scipy \
+    python3-yaml \
     && rm -rf /var/lib/apt/lists/*
+
+# Configurar variáveis para evitar compilação de pacotes quando não necessário
+ENV PIP_PREFER_BINARY=1 
+ENV MAKEFLAGS="-j$(nproc)"
 
 # Dependências Python otimizadas para JetPack 4.6
 RUN python3 -m pip install --upgrade pip && \
     pip3 install --no-cache-dir \
     pyyaml==5.4.1 \
     scikit-learn==0.24.2 \
-    scikit-image==0.17.2 \
+    --prefer-binary scikit-image==0.17.2 \
     tqdm==4.62.3 \
-    albumentations==0.5.2 \
-    pycocotools==2.0.4 \
+    --prefer-binary albumentations==0.5.2 \
     protobuf==3.19.4 \
     onnx==1.10.2 \
     jetson-stats
+
+# Instalar pycocotools de forma mais simples
+RUN pip3 install --no-cache-dir --no-build-isolation Cython && \
+    pip3 install --no-cache-dir pycocotools
 
 # Instalar pacotes específicos para Jetson da NVIDIA
 RUN pip3 install --no-cache-dir --extra-index-url https://nvidia.github.io/jetson-wheels/ \
