@@ -41,6 +41,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     gnupg2 \
     lsb-release \
+    python3-yaml \
+    python3-setuptools \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
@@ -54,6 +56,13 @@ RUN apt-get update && apt-get install -y \
     python3-colcon-common-extensions \
     python3-rosdep \
     && rm -rf /var/lib/apt/lists/*
+
+# Instalar dependências Python específicas para ROS2
+RUN pip3 install \
+    rosinstall-generator \
+    vcstool \
+    rospkg \
+    empy
 
 # ==================== OTIMIZAÇÕES DE HARDWARE ====================
 # Configurar variáveis de ambiente NVIDIA
@@ -73,20 +82,27 @@ RUN apt-get update && apt-get install -y \
     git \
     python3-pip \
     build-essential \
+    python3-dev \
+    pkg-config \
+    libfreetype6-dev \
+    libpng-dev \
+    libjpeg-dev \
+    libhdf5-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Dependências Python otimizadas para JetPack 4.6
 RUN python3 -m pip install --upgrade pip && \
     pip3 install \
-    numpy==1.19.4 \
+    numpy==1.16.0 \
+    && pip3 install \
     opencv-python==4.5.3.56 \
     pyyaml==5.4.1 \
-    matplotlib==3.3.4 \
+    matplotlib==3.0.3 \
     pillow==8.4.0 \
     scikit-learn==0.24.2 \
     scikit-image==0.17.2 \
     tqdm==4.62.3 \
-    albumentations==1.1.0 \
+    albumentations==0.5.2 \
     pycocotools==2.0.4 \
     protobuf==3.19.4 \
     onnx==1.10.2 \
