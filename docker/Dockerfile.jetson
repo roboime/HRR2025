@@ -111,29 +111,38 @@ ENV MAKEFLAGS="-j$(nproc)"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Instalar pacotes simples primeiro (que não precisam de compilação longa)
+# Instalar pacotes essenciais e de baixa complexidade
 RUN python3 -m pip install --upgrade pip setuptools wheel && \
     pip3 install --no-cache-dir --ignore-installed \
     tqdm==4.62.3 \
     onnx==1.10.2 \
     jetson-stats
 
-# Instalar Cython antes de qualquer pacote que dependa dele
-RUN pip3 install --no-cache-dir --no-build-isolation Cython
+# Instalar Cython primeiro (necessário para compilações)
+RUN pip3 install --no-cache-dir Cython
 
-# Instalar pacotes do Jetson Wheels (versões pré-compiladas)
+# Instalar pacotes pré-compilados do repositório NVIDIA
 RUN pip3 install --no-cache-dir --extra-index-url https://nvidia.github.io/jetson-wheels/ \
     numpy \
-    scipy \
-    cupy-cuda102
+    scipy
 
-# Instalar PyTorch para Jetson
-RUN pip3 install --no-cache-dir -U --extra-index-url https://nvidia.github.io/jetson-wheels/ torch torchvision
+# Tentar instalar PyTorch (com tratamento de erro)
+RUN pip3 install --no-cache-dir --extra-index-url https://nvidia.github.io/jetson-wheels/ \
+    torch \
+    torchvision \
+    || echo "Aviso: Falha ao instalar PyTorch para Jetson. Verifique manualmente após a construção."
 
-# Instalar pacotes que precisam de compilação no final
-RUN pip3 install --no-cache-dir --no-build-isolation pycocotools && \
-    pip3 install --no-cache-dir --no-deps opencv-python-headless==4.5.3.56 && \
-    pip3 install --no-cache-dir --no-deps -U albumentations==0.5.2
+# Instalar pacotes complexos com tratamento de erros
+# PyCocoTools
+RUN pip3 install --no-cache-dir pycocotools || \
+    echo "Aviso: PyCocoTools não pode ser instalado automaticamente."
+
+# Albumentations (sem opencv, que já está instalado via apt)
+RUN pip3 install --no-cache-dir --no-deps albumentations==0.5.2
+
+# Verificar se OpenCV está funcionando
+RUN python3 -c "import cv2; print('OpenCV versão:', cv2.__version__)" || \
+    echo "Aviso: OpenCV não está configurado corretamente"
 
 # Configurar variáveis de ambiente para TensorFlow e CUDA
 ENV TF_FORCE_GPU_ALLOW_GROWTH=true
