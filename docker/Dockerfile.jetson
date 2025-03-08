@@ -5,6 +5,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG C.UTF-8
 ENV ROS_DISTRO=eloquent
 
+# Instalar gnupg primeiro
+RUN apt-get update && apt-get install -y gnupg2 && rm -rf /var/lib/apt/lists/*
+
 # ==================== NVIDIA JETPACK 4.6 ====================
 # Adicionar repositórios NVIDIA
 RUN echo "deb https://repo.download.nvidia.com/jetson/common r32.6 main" > /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
