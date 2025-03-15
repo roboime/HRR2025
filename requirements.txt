@@ -1,29 +1,29 @@
-# Requisitos para Sistema de Percepção da RoboIME - Versão de Inferência para Jetson
+# Requisitos para Sistema de Percepcao da RoboIME - Versao de Inferencia para Jetson
 
-# Dependências Básicas - Essenciais para todas as funcionalidades
+# Dependencias Basicas - Essenciais para todas as funcionalidades
 numpy>=1.19.4
 opencv-python>=4.5.0
 pyyaml>=5.1
 matplotlib>=3.3.0
 cvbridge3  # Ponte entre OpenCV e ROS2
 
-# Inferência de Deep Learning
-tensorflow==2.4.0+nv21.5  # Versão específica para Jetson (já descomentada)
+# Inferencia de Deep Learning
+tensorflow==2.4.0+nv21.5  # Versao especifica para Jetson (ja descomentada)
 
-# TensorRT para aceleração na Jetson (altamente recomendado para inferência)
-# Obs: Esta biblioteca geralmente é instalada com o JetPack, não via pip
+# TensorRT para aceleracao na Jetson (altamente recomendado para inferencia)
+# Obs: Esta biblioteca geralmente eh instalada com o JetPack, nao via pip
 # tensorrt 
 
-# Básico para processamento do modelo YOEO
+# Basico para processamento do modelo YOEO
 pillow>=8.0.0  # Processamento de imagens
 protobuf<=3.20.0  # Compatibilidade com TensorFlow
 
-# Utilidades para pré-processamento de imagens na inferência
-scikit-image  # Transformações e processamento de imagens
+# Utilidades para pre-processamento de imagens na inferencia
+scikit-image  # Transformacoes e processamento de imagens
 
-# Bibliotecas específicas para Jetson - necessárias para aceleração em GPU
+# Bibliotecas especificas para Jetson - necessarias para aceleracao em GPU
 jetson-stats>=3.1.0  # Monitoramento de recursos
-pycuda>=2021.1  # Aceleração CUDA para Python
+pycuda>=2021.1  # Aceleracao CUDA para Python
 
-# Bibliotecas mínimas para modificações no sistema sem precisar treinar
-albumentations  # Transformações de imagem durante inferência
+# Bibliotecas minimas para modificacoes no sistema sem precisar treinar
+albumentations  # Transformacoes de imagem durante inferencia

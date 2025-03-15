@@ -67,13 +67,25 @@ RUN mkdir -p /setup
 # Nota: Este arquivo será usado para instalar as dependências quando o container estiver rodando
 COPY requirements.txt /setup/
 
-# Cria um script para instalar as dependências
+# Cria um script para instalar as dependências com melhor tratamento de codificação
 RUN echo '#!/bin/bash\n\
 echo "Instalando dependências básicas do sistema..."\n\
 apt-get update && apt-get install -y build-essential cmake python3-dev libhdf5-dev\n\
 \n\
+echo "Definindo codificação UTF-8 para evitar problemas com caracteres especiais..."\n\
+export PYTHONIOENCODING=utf-8\n\
+export LANG=C.UTF-8\n\
+export LC_ALL=C.UTF-8\n\
+\n\
 echo "Instalando dependências Python do requirements.txt..."\n\
-pip3 install -r /setup/requirements.txt\n\
+cat /setup/requirements.txt | tr -d "\\r" > /setup/requirements_fixed.txt\n\
+pip3 install -r /setup/requirements_fixed.txt\n\
+\n\
+# Verificar se a instalação do TensorFlow para Jetson falhou e usar alternativa\n\
+if ! python3 -c "import tensorflow" &> /dev/null; then\n\
+    echo "TensorFlow específico para Jetson falhou, tentando versão compatível alternativa..."\n\
+    pip3 install tensorflow==2.4.0\n\
+fi\n\
 \n\
 echo "Instalação concluída!"\n\
 ' > /setup/install_dependencies.sh && chmod +x /setup/install_dependencies.sh
@@ -87,13 +99,13 @@ echo "=================================================="\n\
 echo "Container ROS2 Eloquent para Jetson inicializado!"\n\
 echo "=================================================="\n\
 echo "Para instalar as dependências, execute:"\n\
-echo "  /setup/install_dependencies.sh"\n\
+echo "  ./setup/install_dependencies.sh"\n\
 echo "=================================================="\n\
 \n\
 exec "$@"\n\
 ' > /entrypoint.sh && chmod +x /entrypoint.sh
 
-WORKDIR /ros2_ws
+#WORKDIR /ros2_ws
 
 # Define o entrypoint para configurar o ambiente ROS2
 ENTRYPOINT ["/entrypoint.sh"]
