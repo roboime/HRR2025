@@ -22,24 +22,39 @@ import os
 
 # Importar componentes YOEO se disponíveis
 try:
-    from perception.src.yoeo.yoeo_detector import YOEOHandler
-    from perception.src.yoeo.yoeo_model import YOEOModel
+    from .yoeo.yoeo_detector import YOEOHandler
+    from .yoeo.yoeo_model import YOEOModel
     YOEO_AVAILABLE = True
 except ImportError:
-    YOEO_AVAILABLE = False
-    print("AVISO: YOEO não está disponível. Usando apenas detectores tradicionais.")
+    try:
+        # Tentativa alternativa se o import relativo falhar
+        from perception.src.yoeo.yoeo_detector import YOEOHandler
+        from perception.src.yoeo.yoeo_model import YOEOModel
+        YOEO_AVAILABLE = True
+    except ImportError:
+        YOEO_AVAILABLE = False
+        print("AVISO: YOEO não está disponível. Usando apenas detectores tradicionais.")
 
 # Importar detectores tradicionais
 try:
-    from perception.src.ball_detector import BallDetector
-    from perception.src.field_detector import FieldDetector
-    from perception.src.line_detector import LineDetector
-    from perception.src.goal_detector import GoalDetector
-    from perception.src.obstacle_detector import ObstacleDetector
+    from .ball_detector import BallDetector
+    from .field_detector import FieldDetector
+    from .line_detector import LineDetector
+    from .goal_detector import GoalDetector
+    from .obstacle_detector import ObstacleDetector
     TRADITIONAL_DETECTORS_AVAILABLE = True
 except ImportError:
-    TRADITIONAL_DETECTORS_AVAILABLE = False
-    print("AVISO: Detectores tradicionais não estão disponíveis.")
+    try:
+        # Tentativa alternativa se o import relativo falhar
+        from perception.src.ball_detector import BallDetector
+        from perception.src.field_detector import FieldDetector
+        from perception.src.line_detector import LineDetector
+        from perception.src.goal_detector import GoalDetector
+        from perception.src.obstacle_detector import ObstacleDetector
+        TRADITIONAL_DETECTORS_AVAILABLE = True
+    except ImportError:
+        TRADITIONAL_DETECTORS_AVAILABLE = False
+        print("AVISO: Detectores tradicionais não estão disponíveis.")
 
 class VisionPipeline(Node):
     """

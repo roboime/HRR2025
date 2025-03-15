@@ -1,44 +1,29 @@
-# Requisitos para Sistema de Percepção da RoboIME
+# Requisitos para Sistema de Percepção da RoboIME - Versão de Inferência para Jetson
 
-# Dependências Básicas
-numpy
-opencv-python
-pyyaml
-matplotlib
-cvbridge3
+# Dependências Básicas - Essenciais para todas as funcionalidades
+numpy>=1.19.4
+opencv-python>=4.5.0
+pyyaml>=5.1
+matplotlib>=3.3.0
+cvbridge3  # Ponte entre OpenCV e ROS2
 
-# Aprendizado de Máquina e Deep Learning
-tensorflow
+# Inferência de Deep Learning
+tensorflow==2.4.0+nv21.5  # Versão específica para Jetson (já descomentada)
 
-# TensorFlow para Jetson (somente para plataforma Jetson)
-# tensorflow-gpu==2.4.0+nv21.5  # Específico para Jetson
+# TensorRT para aceleração na Jetson (altamente recomendado para inferência)
+# Obs: Esta biblioteca geralmente é instalada com o JetPack, não via pip
+# tensorrt 
 
-# TensorRT (opcional para aceleração)
-#tensorrt
+# Básico para processamento do modelo YOEO
+pillow>=8.0.0  # Processamento de imagens
+protobuf<=3.20.0  # Compatibilidade com TensorFlow
 
-# Para treinamento do modelo YOEO
-scikit-learn
-pandas
-pillow
-imgaug
-tqdm
-tensorboard
-pycocotools
+# Utilidades para pré-processamento de imagens na inferência
+scikit-image  # Transformações e processamento de imagens
 
-# Ferramentas para processamento de imagens
-scikit-image
+# Bibliotecas específicas para Jetson - necessárias para aceleração em GPU
+jetson-stats>=3.1.0  # Monitoramento de recursos
+pycuda>=2021.1  # Aceleração CUDA para Python
 
-# Para ambiente Jetson (descomente para ambiente Jetson)
-# jetson-stats>=3.1.0
-# pycuda>=2021.1
-# torch==1.10.0
-# torchvision==0.11.0
-
-# Utilidades
-protobuf # Compatibilidade com TensorFlow
-onnx  # Para exportação de modelos
-
-# Para testes e desenvolvimento
-pytest
-
-albumentations
+# Bibliotecas mínimas para modificações no sistema sem precisar treinar
+albumentations  # Transformações de imagem durante inferência

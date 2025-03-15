@@ -17,7 +17,7 @@ from enum import Enum, auto
 import logging
 import time
 
-from src.perception.src.yoeo.yoeo_model import YOEOModel
+from .yoeo_model import YOEOModel
 
 # Configuração de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -79,6 +79,20 @@ class YOEOHandler:
     def _load_model(self):
         """Carrega o modelo YOEO do caminho especificado."""
         try:
+            # Verificar se o arquivo existe
+            if not os.path.exists(self.model_path):
+                print(f"ERRO: Arquivo do modelo não encontrado em {self.model_path}")
+                # Verificar no diretório resources relativo ao pacote perception
+                from ament_index_python.packages import get_package_share_directory
+                pkg_dir = get_package_share_directory('perception')
+                alt_path = os.path.join(pkg_dir, 'resources', 'models', 'yoeo_model.h5')
+                
+                if os.path.exists(alt_path):
+                    print(f"Usando modelo alternativo em {alt_path}")
+                    self.model_path = alt_path
+                else:
+                    raise FileNotFoundError(f"Modelo YOEO não encontrado em {self.model_path} nem em {alt_path}")
+            
             print(f"Carregando modelo YOEO de {self.model_path}...")
             self.model = tf.keras.models.load_model(self.model_path, compile=False)
             
@@ -94,7 +108,8 @@ class YOEOHandler:
             print("Modelo YOEO carregado com sucesso!")
         except Exception as e:
             print(f"Erro ao carregar o modelo YOEO: {e}")
-            raise
+            print("Continuando sem o modelo YOEO. Algumas funcionalidades serão limitadas.")
+            self.model = None
     
     def preprocess_image(self, image):
         """

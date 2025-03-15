@@ -83,7 +83,7 @@ def generate_launch_description():
         if camera_src_value == 'csi':
             camera_node = Node(
                 package='perception',
-                executable='jetson_camera_node.py',
+                executable='src/jetson_camera/jetson_camera_node.py',
                 name='camera',
                 output='screen',
                 parameters=[{
@@ -104,7 +104,7 @@ def generate_launch_description():
         # Nó do pipeline de visão
         pipeline_node = Node(
             package='perception',
-            executable='vision_pipeline.py',
+            executable='src/vision_pipeline.py',
             name='vision_pipeline',
             output='screen',
             parameters=[{

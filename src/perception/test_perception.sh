@@ -29,6 +29,15 @@ function print_info() {
     echo -e "${YELLOW}ℹ $1${NC}"
 }
 
+# Verificar se o script está sendo executado na raiz do workspace
+SCRIPT_DIR=$(dirname "$0")
+WORKSPACE_DIR=$(cd "$SCRIPT_DIR/../.." && pwd)
+
+if [[ "$PWD" != "$WORKSPACE_DIR" ]]; then
+    print_info "Mudando para o diretório raiz do workspace: $WORKSPACE_DIR"
+    cd "$WORKSPACE_DIR"
+fi
+
 # Verificar instalação do ROS 2
 print_header "Verificando ambiente"
 
@@ -40,7 +49,7 @@ print_success "ROS 2 encontrado."
 
 # Verificar workspace
 if [ ! -f "./install/setup.bash" ]; then
-    print_error "Arquivo setup.bash não encontrado. Execute este script a partir da raiz do workspace."
+    print_error "Arquivo setup.bash não encontrado. Execute 'colcon build' primeiro."
     exit 1
 fi
 print_success "Workspace encontrado."
@@ -51,6 +60,13 @@ if [ ! -d "./src/perception" ]; then
     exit 1
 fi
 print_success "Pacote 'perception' encontrado."
+
+# Verificar se o pacote foi construído
+if [ ! -d "./install/perception" ]; then
+    print_error "O pacote 'perception' não foi construído. Execute 'colcon build --packages-select perception'."
+    exit 1
+fi
+print_success "Pacote 'perception' construído."
 
 # Configurar ambiente
 print_info "Configurando ambiente ROS 2..."
@@ -79,6 +95,23 @@ if python3 -c "import cv2; print(f'OpenCV versão: {cv2.__version__}')" 2>/dev/n
     print_success "OpenCV está funcionando."
 else
     print_error "OpenCV não encontrado ou com erro. Os detectores tradicionais não funcionarão."
+fi
+
+# Verificar se o modelo YOEO existe
+echo "Verificando modelo YOEO..."
+MODEL_PATH="./src/perception/resources/models/yoeo_model.h5"
+if [ -f "$MODEL_PATH" ]; then
+    print_success "Modelo YOEO encontrado em $MODEL_PATH"
+else
+    print_error "Modelo YOEO não encontrado em $MODEL_PATH"
+    # Verificar diretório alternativo
+    ALT_MODEL_PATH="./install/perception/share/perception/resources/models/yoeo_model.h5"
+    if [ -f "$ALT_MODEL_PATH" ]; then
+        print_success "Modelo YOEO encontrado em $ALT_MODEL_PATH"
+    else
+        print_info "O diretório de modelos será criado se não existir"
+        mkdir -p "$(dirname "$MODEL_PATH")"
+    fi
 fi
 
 # Menu de testes

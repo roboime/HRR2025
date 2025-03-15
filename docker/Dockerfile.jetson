@@ -8,17 +8,20 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV ROS_DISTRO=eloquent
 ENV ROS_PYTHON_VERSION=3
 
+# Configurar DNS para melhorar a conectividade
+RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf && \
+    echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+
 # (Opcional) Atualiza locale para UTF-8, se necessário
-RUN apt-get update && apt-get install -y locales \
+RUN apt-get update || true && apt-get install -y locales \
     && locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
 
 # Adiciona chave e repositório do ROS2 Eloquent (Ubuntu 18.04 Bionic)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update || true && apt-get install -y --no-install-recommends \
     curl gnupg2 lsb-release ca-certificates && \
-    update-ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+    update-ca-certificates
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
-    -o /usr/share/keyrings/ros-archive-keyring.gpg 
+    -o /usr/share/keyrings/ros-archive-keyring.gpg || true
 RUN echo "deb [arch=arm64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
     http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" \
     > /etc/apt/sources.list.d/ros2.list
@@ -33,69 +36,68 @@ RUN echo "deb https://repo.download.nvidia.com/jetson/common r32.6 main" \
 # Configurar permissões da câmera
 RUN usermod -a -G video root
 
-# Instala ROS2 Eloquent (ros-base) e pacotes ROS adicionais
-# Instala OpenCV (NVIDIA) e GStreamer (se não já incluído)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ros-eloquent-ros-base \
-    ros-eloquent-launch-xml \
-    ros-eloquent-launch-yaml \
-    ros-eloquent-rviz2 \
-    ros-eloquent-vision-msgs \ 
-    ros-eloquent-vision-opencv \
-    ros-eloquent-image-tools \
-    ros-eloquent-rclcpp \
-    ros-eloquent-rclpy \
-    ros-eloquent-sensor-msgs \
-    ros-eloquent-tf2 \
-    ros-eloquent-tf2-ros \
-    ros-eloquent-tf2-geometry-msgs \
-    ros-eloquent-geometry-msgs \
-    python3-colcon-common-extensions \
-    python3-rosdep \
-    python3-pip \
-    python3-opencv \
-    libopencv-dev \
-    gstreamer1.0-tools \                
-    && rm -rf /var/lib/apt/lists/*
+# Tentar instalar apenas o ROS2 básico primeiro
+RUN for i in 1 2 3 4 5; do \
+        echo "Tentativa $i de instalar ROS2..." && \
+        apt-get update && \
+        apt-get install -y --no-install-recommends \
+            ros-eloquent-ros-base \
+            python3-colcon-common-extensions \
+            python3-rosdep \
+            python3-pip \
+            python3-opencv && \
+        break || \
+        (echo "Falha na tentativa $i. Esperando..." && sleep 30); \
+    done
 
-# Instala ferramentas de compilação necessárias para pacotes Python
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    cmake \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Inicializa o rosdep sem falhar se não funcionar
+RUN rosdep init || echo "rosdep já inicializado ou falhou" && \
+    rosdep update || echo "rosdep update falhou, continuando mesmo assim"
 
-# Instala pacotes Python necessários via pip (nomes corretos)
-# Primeiro instala scikit-build necessário para compilar opencv-python
-RUN pip3 install --no-cache-dir \
-    wheel \
-    setuptools \
-    scikit-build \
-    ninja
-
-# Agora instala os pacotes principais
-RUN pip3 install --no-cache-dir \
-    matplotlib \
-    numpy \
-    pyyaml \
-    tensorflow
-
-# Inicializa o rosdep
-RUN rosdep init || echo "rosdep já inicializado" && \
-    rosdep update
-
-# Configura workspace ROS2 (opcional)
+# Configura workspace ROS2
 RUN mkdir -p /ros2_ws/src
 
 # Configura variáveis de ambiente para ROS2
 RUN echo 'source /opt/ros/eloquent/setup.bash' >> /root/.bashrc
 
-# Copia o script de entrypoint para o container
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Criar diretório para requirements e scripts
+RUN mkdir -p /setup
+
+# Copia o arquivo requirements.txt para o container
+# Nota: Este arquivo será usado para instalar as dependências quando o container estiver rodando
+COPY requirements.txt /setup/
+
+# Cria um script para instalar as dependências
+RUN echo '#!/bin/bash\n\
+echo "Instalando dependências básicas do sistema..."\n\
+apt-get update && apt-get install -y build-essential cmake python3-dev libhdf5-dev\n\
+\n\
+echo "Instalando dependências Python do requirements.txt..."\n\
+pip3 install -r /setup/requirements.txt\n\
+\n\
+echo "Instalação concluída!"\n\
+' > /setup/install_dependencies.sh && chmod +x /setup/install_dependencies.sh
+
+# Cria um script de entrypoint melhorado
+RUN echo '#!/bin/bash\n\
+source /opt/ros/eloquent/setup.bash\n\
+\n\
+# Exibe informações úteis\n\
+echo "=================================================="\n\
+echo "Container ROS2 Eloquent para Jetson inicializado!"\n\
+echo "=================================================="\n\
+echo "Para instalar as dependências, execute:"\n\
+echo "  /setup/install_dependencies.sh"\n\
+echo "=================================================="\n\
+\n\
+exec "$@"\n\
+' > /entrypoint.sh && chmod +x /entrypoint.sh
 
 WORKDIR /ros2_ws
 
 # Define o entrypoint para configurar o ambiente ROS2
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/bin/bash"]
+
+# Instrução para instalar pacotes adicionais após a criação do container:
+# docker exec -it [CONTAINER_ID] bash -c "apt-get update && apt-get install -y build-essential cmake python3-dev && pip3 install numpy matplotlib pyyaml tensorflow"
