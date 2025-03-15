@@ -62,7 +62,7 @@ ENV/
 *.bag
 *.csv
 *.json
-datasets/
+dataset/
 data/
 
 # Arquivos de configuração sistema

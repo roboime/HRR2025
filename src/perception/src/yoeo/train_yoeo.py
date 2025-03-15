@@ -11,7 +11,7 @@ from datetime import datetime
 
 from yoeo_model import YOEOModel
 from utils.data_utils import prepare_dataset
-from utils.losses import yoeo_loss, YOEOLoss
+from utils.loss_utils import create_loss
 
 # Configurar GPU (se disponível)
 def setup_gpu():
@@ -57,7 +57,8 @@ def plot_training_history(history, output_dir):
     plt.figure(figsize=(12, 4))
     plt.subplot(1, 2, 1)
     plt.plot(history.history['loss'], label='Treinamento')
-    plt.plot(history.history['val_loss'], label='Validação')
+    if 'val_loss' in history.history:
+        plt.plot(history.history['val_loss'], label='Validação')
     plt.title('Perda do Modelo')
     plt.ylabel('Perda')
     plt.xlabel('Época')
@@ -67,7 +68,8 @@ def plot_training_history(history, output_dir):
     if 'accuracy' in history.history:
         plt.subplot(1, 2, 2)
         plt.plot(history.history['accuracy'], label='Treinamento')
-        plt.plot(history.history['val_accuracy'], label='Validação')
+        if 'val_accuracy' in history.history:
+            plt.plot(history.history['val_accuracy'], label='Validação')
         plt.title('Acurácia do Modelo')
         plt.ylabel('Acurácia')
         plt.xlabel('Época')
@@ -137,64 +139,77 @@ def train_yoeo(config_path):
     
     # Preparar datasets
     train_generator, val_generator, test_generator = prepare_dataset(config)
-    print(f"Datasets preparados: {len(train_generator)} batches de treinamento, {len(val_generator)} batches de validação")
+    print(f"Datasets preparados: {len(train_generator)} batches de treinamento, {len(val_generator) if val_generator else 0} batches de validação")
     
-    # Criar e compilar modelo
-    input_shape = (config['input_height'], config['input_width'], 3)
+    # Criar modelo
+    input_shape = (config.get('input_height', 416), config.get('input_width', 416), 3)
     num_classes = len(config['classes'])
     segmentation_classes = len(config['segmentation_classes'])
     
+    # Validação e impressão das configurações de classes
+    print(f"\nClasses de detecção ({num_classes}): {config['classes']}")
+    print(f"Classes de segmentação ({segmentation_classes}): {config['segmentation_classes']}")
+    
+    # Criar o modelo
     model = YOEOModel(
         input_shape=input_shape,
         num_classes=num_classes,
-        num_seg_classes=segmentation_classes,
-        anchors=None
+        num_seg_classes=segmentation_classes
     ).build()
     
     # Carregar pesos pré-treinados (se especificado)
-    if config.get('pretrained_weights', None):
+    if config.get('pretrained_weights'):
         pretrained_path = config['pretrained_weights']
         if os.path.exists(pretrained_path):
+            print(f"Carregando pesos pré-treinados de {pretrained_path}")
             model.load_weights(pretrained_path, by_name=True, skip_mismatch=True)
-            print(f"Pesos pré-treinados carregados de {pretrained_path}")
         else:
             print(f"Arquivo de pesos pré-treinados não encontrado: {pretrained_path}")
     
-    # Compilar modelo
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=config['learning_rate']),
-        loss=YOEOLoss(),
-        metrics=['accuracy']  # Métricas adicionais podem ser necessárias
+    # Configurar otimizador
+    optimizer = tf.keras.optimizers.Adam(
+        learning_rate=config.get('learning_rate', 0.001)
     )
     
-    # Mostrar resumo do modelo
-    model.summary()
+    # Criar a função de perda combinada
+    loss = create_loss(
+        num_classes=num_classes,
+        num_seg_classes=segmentation_classes,
+        det_weight=config.get('detection_loss_weight', 1.0),
+        seg_weight=config.get('segmentation_loss_weight', 1.0)
+    )
     
-    # Callbacks
+    # Compilar modelo com a perda combinada
+    model.compile(
+        optimizer=optimizer,
+        loss=loss
+    )
+    
+    # Configurar callbacks
     callbacks = [
         tf.keras.callbacks.ModelCheckpoint(
-            filepath=os.path.join(config['checkpoint_dir'], 'yoeo_epoch_{epoch:02d}_loss_{val_loss:.4f}.h5'),
-            monitor='val_loss',
-            save_best_only=True,
-            save_weights_only=False,
+            filepath=os.path.join(config['checkpoint_dir'], 'yoeo_epoch_{epoch:02d}_loss_{loss:.4f}.weights.h5'),
+            save_weights_only=True,
+            save_best_only=False,
             verbose=1
         ),
         tf.keras.callbacks.EarlyStopping(
-            monitor='val_loss',
+            monitor='loss',
             patience=config.get('early_stopping_patience', 10),
             restore_best_weights=True,
             verbose=1
         ),
         tf.keras.callbacks.ReduceLROnPlateau(
-            monitor='val_loss',
-            factor=0.1,
-            patience=config.get('reduce_lr_patience', 5),
+            monitor='loss',
+            factor=0.5,
+            patience=3,
             min_lr=1e-6,
             verbose=1
         ),
         tf.keras.callbacks.TensorBoard(
             log_dir=os.path.join(config['log_dir'], datetime.now().strftime("%Y%m%d-%H%M%S")),
-            histogram_freq=1
+            write_graph=True,
+            update_freq='epoch'
         )
     ]
     
@@ -203,16 +218,19 @@ def train_yoeo(config_path):
     history = model.fit(
         train_generator,
         validation_data=val_generator,
-        epochs=config['epochs'],
+        epochs=config.get('epochs', 100),
         callbacks=callbacks,
         verbose=1
     )
     
-    # Salvar histórico de treinamento
-    plot_training_history(history, config['output_dir'])
+    # Salvar modelo e gerar visualizações
+    model_path = os.path.join(config['output_dir'], 'yoeo_final_model.weights.h5')
+    model.save_weights(model_path)
+    print(f"\nModelo final salvo em {model_path}")
     
-    # Exportar modelo
-    export_model(model, config)
+    # Plotar histórico de treinamento
+    if history.history:
+        plot_training_history(history, config['output_dir'])
     
     print("\nTreinamento concluído!\n")
     

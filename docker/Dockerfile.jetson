@@ -1,195 +1,50 @@
+# Base NVIDIA L4T image for JetPack 4.6 (L4T R32.6.1 - Ubuntu 18.04)
 FROM nvcr.io/nvidia/l4t-base:r32.6.1
 
-# ==================== CONFIGURAÇÃO BÁSICA ====================
-ENV DEBIAN_FRONTEND=noninteractive
-ENV LANG C.UTF-8
-ENV ROS_DISTRO=eloquent
+# Desabilita interações manuais no apt
+ENV DEBIAN_FRONTEND=noninteractive 
 
-# Instalar e configurar certificados primeiro
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ca-certificates \
-    apt-utils \
-    gnupg2 \
-    wget \
-    && rm -rf /var/lib/apt/lists/* \
-    && update-ca-certificates
+# (Opcional) Atualiza locale para UTF-8, se necessário
+RUN apt-get update && apt-get install -y locales \
+    && locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
 
-# ==================== COMPONENTES ESSENCIAIS ====================
-# Instalar pacotes básicos necessários
-RUN apt-get update && apt-get install -y \
-    libopencv-dev \
-    python3-opencv \
-    v4l-utils \
-    gstreamer1.0-plugins-base \
-    gstreamer1.0-plugins-good \
-    gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly \
-    gstreamer1.0-tools \
-    python3-gst-1.0 \
-    gstreamer1.0-libav \
-    libgstreamer1.0-dev \
-    libgstreamer-plugins-base1.0-dev \
-    libc6-dev \
-    libatlas-base-dev \
-    python3-pil \
-    python3-numpy \
-    cython3 \
-    && rm -rf /var/lib/apt/lists/*
+# Adiciona chave e repositório do ROS2 Eloquent (Ubuntu 18.04 Bionic)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl gnupg2 lsb-release && rm -rf /var/lib/apt/lists/*
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+    -o /usr/share/keyrings/ros-archive-keyring.gpg 
+RUN echo "deb [arch=arm64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+    http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" \
+    > /etc/apt/sources.list.d/ros2.list
+
+# Adiciona repositórios do JetPack (para OpenCV e demais libs NVIDIA)
+RUN apt-key adv --fetch-keys https://repo.download.nvidia.com/jetson/jetson-ota-public.asc 
+RUN echo "deb https://repo.download.nvidia.com/jetson/common r32.6 main" \
+    > /etc/apt/sources.list.d/nvidia-l4t-common.list && \
+    echo "deb https://repo.download.nvidia.com/jetson/t210 r32.6 main" \
+    > /etc/apt/sources.list.d/nvidia-l4t-t210.list
 
 # Configurar permissões da câmera
 RUN usermod -a -G video root
 
-# Corrigir problema com o OpenCV para Jetson
-RUN ln -s /usr/lib/python3/dist-packages/cv2.cpython-36m-aarch64-linux-gnu.so /usr/local/lib/python3.6/dist-packages/cv2.so || \
-    echo "Aviso: Não foi possível criar link simbólico para OpenCV"
-
-# ==================== ROS ELOQUENT ====================
-# Configurar repositórios ROS2
-RUN apt-get update && apt-get install -y \
-    curl \
-    gnupg2 \
-    lsb-release \
-    python3-yaml \
-    python3-setuptools \
-    python3-pip \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
-RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
-
-# Instalar ROS Eloquent
-RUN apt-get update && apt-get install -y \
+# Instala ROS2 Eloquent (ros-base) e pacotes ROS adicionais
+# Instala OpenCV (NVIDIA) e GStreamer (se não já incluído)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-eloquent-ros-base \
-    ros-eloquent-cv-bridge \
-    ros-eloquent-image-transport \
-    python3-colcon-common-extensions \
-    python3-rosdep \
+    ros-eloquent-launch-xml \
+	ros-eloquent-launch-yaml \
+	ros-eloquent-rviz2 \
+	ros-eloquent-vision-msgs \ 
+    ros-eloquent-vision-opencv \
+    ros-eloquent-image-tools \
+	python3-colcon-common-extensions \
+	python3-rosdep \
+    ros-eloquent-rclcpp ros-eloquent-rclpy ros-eloquent-sensor-msgs \ 
+    libopencv-dev libopencv-python \
+    gstreamer1.0-tools \                
     && rm -rf /var/lib/apt/lists/*
 
-# Instalar dependências Python específicas para ROS2
-RUN python3 -m pip install \
-    rosinstall-generator \
-    vcstool \
-    rospkg \
-    empy
-
-# ==================== OTIMIZAÇÕES DE HARDWARE ====================
-# Configurar variáveis de ambiente NVIDIA
-ENV PATH=/usr/local/cuda-10.2/bin:${PATH}
-ENV LD_LIBRARY_PATH=/usr/local/cuda-10.2/lib64:/usr/lib/aarch64-linux-gnu:${LD_LIBRARY_PATH}
-
-# Configurar TensorRT
-ENV TENSORRT_DIR=/usr/lib/aarch64-linux-gnu
-ENV LD_LIBRARY_PATH=${TENSORRT_DIR}:${LD_LIBRARY_PATH}
-
-# Configurar GStreamer
-ENV GST_DEBUG=3
-ENV NVARGUS_ENABLE=1
-
-# ==================== AMBIENTE DE DESENVOLVIMENTO ====================
-# Instalar todos os pacotes de sistema necessários de uma vez só
-RUN apt-get update && apt-get install -y \
-    git \
-    python3-pip \
-    build-essential \
-    python3-dev \
-    pkg-config \
-    libfreetype6-dev \
-    libpng-dev \
-    libjpeg-dev \
-    libhdf5-dev \
-    python3-numpy \
-    python3-matplotlib \
-    python3-pil \
-    python3-scipy \
-    python3-yaml \
-    python3-sklearn \
-    python3-skimage \
-    python3-protobuf \
-    && rm -rf /var/lib/apt/lists/*
-
-# Configurar variáveis para evitar compilação de pacotes quando não necessário
-ENV PIP_PREFER_BINARY=1 
-ENV MAKEFLAGS="-j$(nproc)"
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-# Instalar pacotes essenciais e de baixa complexidade
-RUN python3 -m pip install --upgrade pip setuptools wheel && \
-    pip3 install --no-cache-dir --ignore-installed \
-    tqdm==4.62.3 \
-    onnx==1.10.2 \
-    jetson-stats
-
-# Instalar Cython primeiro (necessário para compilações)
-RUN pip3 install --no-cache-dir Cython
-
-# Instalar pacotes pré-compilados do repositório NVIDIA
-RUN pip3 install --no-cache-dir --extra-index-url https://nvidia.github.io/jetson-wheels/ \
-    numpy \
-    scipy
-
-# Tentar instalar PyTorch (com tratamento de erro)
-RUN pip3 install --no-cache-dir --extra-index-url https://nvidia.github.io/jetson-wheels/ \
-    torch \
-    torchvision \
-    || echo "Aviso: Falha ao instalar PyTorch para Jetson. Verifique manualmente após a construção."
-
-# Verificar se OpenCV está funcionando
-RUN python3 -c "import cv2; print('Versão do OpenCV:', cv2.__version__)" || \
-    echo "Aviso: OpenCV não está configurado corretamente - instalando python3-opencv do sistema"
-
-# Atualizar package index e instalar dependências para compilar pycocotools
-RUN apt-get update && apt-get install -y \
-    git \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Instalar pycocotools manualmente da fonte 
-RUN git clone https://github.com/cocodataset/cocoapi.git /tmp/cocoapi && \
-    cd /tmp/cocoapi/PythonAPI && \
-    # Modificar Makefile para usar compilação compatível com ARM
-    sed -i 's/CFLAGS=/CFLAGS=-std=c99 -fPIC /' Makefile && \
-    # Compilar sem otimizações que podem causar problemas em ARM
-    make && \
-    cp -r pycocotools /usr/local/lib/python3.6/dist-packages/ && \
-    cd / && \
-    rm -rf /tmp/cocoapi
-
-# Verificar a instalação do pycocotools
-RUN python3 -c "from pycocotools import coco; print('pycocotools instalado com sucesso')" || \
-    echo "Aviso: pycocotools não foi instalado corretamente, mas continuando com a construção"
-
-# Instalar albumentations (sem opencv, que já está instalado via apt)
-RUN pip3 install --no-cache-dir --no-deps albumentations==0.5.2
-
-# Configurar variáveis de ambiente para TensorFlow e CUDA
-ENV TF_FORCE_GPU_ALLOW_GROWTH=true
-ENV TF_CPP_MIN_LOG_LEVEL=2
-ENV CUDA_VISIBLE_DEVICES=0
-
-# Configurações específicas para IMX219
-RUN mkdir -p /etc/udev/rules.d
-RUN echo 'SUBSYSTEM=="video*", ATTR{name}=="imx219", GROUP="video", MODE="0660"' > /etc/udev/rules.d/99-camera.rules
-RUN mkdir -p /etc/modprobe.d
-RUN echo 'options imx219 sensor_mode=2' > /etc/modprobe.d/imx219.conf
-
-# ==================== CONFIGURAÇÃO DO WORKSPACE ====================
-WORKDIR /ros2_ws
-
-# Inicialização ROS
-RUN rosdep init && rosdep update
-RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> ~/.bashrc
-
-# ==================== USUÁRIO NÃO-ROOT ====================
-RUN useradd -m developer && \
-    usermod -aG video,dialout developer && \
-    chown -R developer:developer /ros2_ws
-
-USER developer
-
-# ==================== ENTRYPOINT ====================
-COPY ./entrypoint.sh /
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["bash"]
+# (Opcional) Define entrypoint para configurar ambiente ROS automaticamente
+# COPY entrypoint.sh /entrypoint.sh
+# RUN chmod +x /entrypoint.sh
+# ENTRYPOINT ["/entrypoint.sh"]

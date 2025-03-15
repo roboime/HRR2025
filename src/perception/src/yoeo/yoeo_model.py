@@ -31,8 +31,8 @@ class YOEOModel:
     
     def __init__(self, 
                  input_shape=(416, 416, 3),
-                 num_classes=4,
-                 num_seg_classes=3,
+                 num_classes=3,
+                 num_seg_classes=2,
                  anchors=None):
         """
         Inicializa o modelo YOEO.
@@ -122,75 +122,104 @@ class YOEOModel:
         return x
     
     def _segmentation_head(self, features, num_seg_classes):
-        # Começa no final (13×13)
-        x = features[-1]  # (None, 13, 13, ???)
-
-        # 1º Up: 13->26
+        """
+        Cabeça de segmentação que processa as features do backbone.
+        
+        Args:
+            features: Lista de features do backbone em diferentes escalas
+            num_seg_classes: Número de classes de segmentação
+            
+        Returns:
+            Tensor de saída para segmentação
+        """
+        # Imprimir as formas das features para debug
+        print("Formas das features:")
+        for i, feat in enumerate(features):
+            print(f"Feature {i}: {feat.shape}")
+        
+        # Começa no final (menor resolução)
+        x = features[-1]  # (None, 13, 13, 1024)
+        
+        # Upsampling para 26x26
+        x = self._conv_block(x, 512, 1)
         x = UpSampling2D(2)(x)
-        x = Concatenate()([x, features[-2]])  # (26×26) se features[-2] for 26×26
+        x = Concatenate()([x, features[-2]])  # Concatenar com feature de 26x26
         x = self._conv_block(x, 256, 3)
-
-        # 2º Up: 26->52
+        
+        # Upsampling para 52x52
+        x = self._conv_block(x, 128, 1)
         x = UpSampling2D(2)(x)
-        # Concatenate com features[-4], que (segundo a suposição) é 52×52
-        x = Concatenate()([x, features[-4]])  # (52×52)
+        x = Concatenate()([x, features[-3]])  # Concatenar com feature de 52x52
         x = self._conv_block(x, 128, 3)
-
+        
+        # Upsampling para 104x104
+        x = self._conv_block(x, 64, 1)
+        x = UpSampling2D(2)(x)
+        x = Concatenate()([x, features[-4]])  # Concatenar com feature de 104x104
+        x = self._conv_block(x, 64, 3)
+        
+        # Upsampling para 208x208
+        x = self._conv_block(x, 32, 1)
+        x = UpSampling2D(2)(x)
+        x = Concatenate()([x, features[-5]])  # Concatenar com feature de 208x208
+        x = self._conv_block(x, 32, 3)
+        
+        # Upsampling final para 416x416 (tamanho original)
+        x = self._conv_block(x, 16, 1)
+        x = UpSampling2D(2)(x)
+        x = self._conv_block(x, 16, 3)
+        
+        # Camada final de segmentação
         x = Conv2D(num_seg_classes, 1, padding='same', activation='softmax')(x)
+        
         return x
 
-    def build(self):
+    def backbone(self, inputs):
         """
-        Constrói o modelo YOEO completo
+        Implementa o backbone da rede que extrai features em diferentes escalas.
         
+        Args:
+            inputs: Tensor de entrada
+            
         Returns:
-            Modelo Keras compilado
+            Tupla de tensores de features (pequena, média, grande)
         """
-        # Input
-        inputs = Input(shape=self.input_shape)
+        features = []
         
-        # Backbone - Darknet-like
         # Bloco inicial
         x = self._conv_block(inputs, 32, 3)
+        
+        # Blocos downsampling
         x = self._conv_block(x, 64, 3, strides=2)
+        features.append(x)  # 208x208
         
-        # Bloco 1
-        x = self._residual_block(x, 64)
         x = self._conv_block(x, 128, 3, strides=2)
-        
-        # Bloco 2
         for _ in range(2):
             x = self._residual_block(x, 128)
-        x = self._conv_block(x, 256, 3, strides=2)
+        features.append(x)  # 104x104
         
-        # Bloco 3
-        features = [x]  # Armazenar para uso posterior
+        x = self._conv_block(x, 256, 3, strides=2)
         for _ in range(8):
             x = self._residual_block(x, 256)
-        features.append(x)
-        x = self._conv_block(x, 512, 3, strides=2)
+        features.append(x)  # 52x52
         
-        # Bloco 4
+        x = self._conv_block(x, 512, 3, strides=2)
         for _ in range(8):
             x = self._residual_block(x, 512)
-        features.append(x)
-        x = self._conv_block(x, 1024, 3, strides=2)
+        features.append(x)  # 26x26
         
-        # Bloco 5
+        x = self._conv_block(x, 1024, 3, strides=2)
         for _ in range(4):
             x = self._residual_block(x, 1024)
-        features.append(x)
+        features.append(x)  # 13x13
         
-        # Cabeças de detecção para diferentes escalas
-        # Escala grande (para objetos pequenos)
+        # Processamento para gerar features para detecção em diferentes escalas
+        # Feature grande (para objetos pequenos)
         x_large = self._conv_block(features[-1], 512, 1)
         x_large = self._conv_block(x_large, 1024, 3)
         x_large = self._conv_block(x_large, 512, 1)
         
-        # Feature map para escala grande
-        y_large = self._detection_head(x_large, len(self.anchors['large']), self.num_classes)
-        
-        # Escala média (para objetos médios)
+        # Feature média (para objetos médios)
         x_medium = self._conv_block(x_large, 256, 1)
         x_medium = UpSampling2D(2)(x_medium)
         x_medium = Concatenate()([x_medium, features[-2]])
@@ -198,10 +227,7 @@ class YOEOModel:
         x_medium = self._conv_block(x_medium, 512, 3)
         x_medium = self._conv_block(x_medium, 256, 1)
         
-        # Feature map para escala média
-        y_medium = self._detection_head(x_medium, len(self.anchors['medium']), self.num_classes)
-        
-        # Escala pequena (para objetos grandes)
+        # Feature pequena (para objetos grandes)
         x_small = self._conv_block(x_medium, 128, 1)
         x_small = UpSampling2D(2)(x_small)
         x_small = Concatenate()([x_small, features[-3]])
@@ -209,16 +235,110 @@ class YOEOModel:
         x_small = self._conv_block(x_small, 256, 3)
         x_small = self._conv_block(x_small, 128, 1)
         
-        # Feature map para escala pequena
-        y_small = self._detection_head(x_small, len(self.anchors['small']), self.num_classes)
+        return x_small, x_medium, x_large
+
+    def detection_head(self, x, num_classes, name):
+        """
+        Implementa a cabeça de detecção para o modelo.
+        
+        Args:
+            x: Tensor de entrada
+            num_classes: Número de classes de detecção
+            name: Nome da cabeça de detecção
+            
+        Returns:
+            Tensor de saída para detecção
+        """
+        num_anchors = 3  # Usando 3 âncoras por escala
+        
+        # Aplicar convoluções e gerar saída
+        x = self._conv_block(x, 256, 3)
+        x = Conv2D(num_anchors * (5 + num_classes), 1, padding='same', name=name)(x)
+        
+        # Reshape para formato adequado [batch, grid_h, grid_w, anchors, 5+num_classes]
+        def reshape_detection(t):
+            shape = tf.shape(t)
+            batch_size, height, width, channels = shape[0], shape[1], shape[2], shape[3]
+            return tf.reshape(t, [batch_size, height, width, num_anchors, 5 + num_classes])
+        
+        x = Lambda(reshape_detection, name=f"{name}_reshape")(x)
+        return x
+
+    def segmentation_head(self, x_small, x_medium, x_large, num_seg_classes):
+        """
+        Implementa a cabeça de segmentação para o modelo.
+        
+        Args:
+            x_small: Feature map pequena
+            x_medium: Feature map média
+            x_large: Feature map grande
+            num_seg_classes: Número de classes de segmentação
+            
+        Returns:
+            Tensor de saída para segmentação
+        """
+        # Começar com a feature map média
+        x = self._conv_block(x_medium, 256, 3)
+        
+        # Upsample e concatenar com a feature map pequena
+        x = self._conv_block(x, 128, 1)
+        x = UpSampling2D(2)(x)
+        x = Concatenate()([x, x_small])
+        
+        # Continuar upsampling para alcançar a resolução de entrada
+        for filters in [128, 64, 32]:
+            x = self._conv_block(x, filters, 3)
+            x = UpSampling2D(2)(x)
+        
+        # Camada final para segmentação
+        x = Conv2D(num_seg_classes, 1, padding='same', activation='softmax', name='segmentation')(x)
+        
+        return x
+
+    def build(self):
+        """
+        Constrói o modelo YOEO.
+        
+        Returns:
+            Modelo compilado do YOEO com cabeças para detecção e segmentação.
+        """
+        # Camada de entrada
+        inputs = Input(shape=self.input_shape, name='input')
+        
+        # Backbone e feature pyramid
+        x_small, x_medium, x_large = self.backbone(inputs)
+        
+        # Cabeças de detecção para diferentes escalas
+        detection_small = self.detection_head(x_small, self.num_classes, "detection_small")
+        detection_medium = self.detection_head(x_medium, self.num_classes, "detection_medium")
+        detection_large = self.detection_head(x_large, self.num_classes, "detection_large")
         
         # Cabeça de segmentação
-        y_seg = self._segmentation_head(features, self.num_seg_classes)
+        segmentation = self.segmentation_head(x_small, x_medium, x_large, self.num_seg_classes)
         
-        # Modelo completo
-        self.model = Model(inputs, [y_small, y_medium, y_large, y_seg])
+        # Criar e retornar o modelo usando um dicionário de saídas para facilitar o treinamento
+        model = Model(
+            inputs=inputs,
+            outputs={
+                "detection_small": detection_small,
+                "detection_medium": detection_medium,
+                "detection_large": detection_large,
+                "segmentation": segmentation
+            },
+            name="yoeo"
+        )
         
-        return self.model
+        self.model = model
+        
+        # Exibir resumo do modelo
+        print("\nResumo do modelo YOEO:")
+        print(f"- Entrada: {inputs.shape}")
+        print(f"- Detecção (pequena): {detection_small.shape}")
+        print(f"- Detecção (média): {detection_medium.shape}")
+        print(f"- Detecção (grande): {detection_large.shape}")
+        print(f"- Segmentação: {segmentation.shape}")
+        
+        return model
     
     def load_weights(self, weights_path):
         """
@@ -279,7 +399,7 @@ class YOEOModel:
 
 if __name__ == "__main__":
     # Exemplo de uso
-    model = YOEOModel(input_shape=(416, 416, 3), num_classes=4, num_seg_classes=3)
+    model = YOEOModel(input_shape=(416, 416, 3), num_classes=3, num_seg_classes=2)
     model.build()
     model.summary()
     
@@ -288,7 +408,7 @@ if __name__ == "__main__":
     outputs = model.model.predict(dummy_input)
     
     print("\nFormatos das saídas:")
-    print(f"Detecção (escala pequena): {outputs[0].shape}")
-    print(f"Detecção (escala média): {outputs[1].shape}")
-    print(f"Detecção (escala grande): {outputs[2].shape}")
-    print(f"Segmentação: {outputs[3].shape}") 
+    print(f"Detecção (escala pequena): {outputs['detection_small'].shape}")
+    print(f"Detecção (escala média): {outputs['detection_medium'].shape}")
+    print(f"Detecção (escala grande): {outputs['detection_large'].shape}")
+    print(f"Segmentação: {outputs['segmentation'].shape}") 

@@ -129,18 +129,20 @@ class YOEOHandler:
     
     def get_detections(self, image, detection_types=None, segmentation_types=None):
         """
-        Processa a imagem e retorna as detecções e segmentações.
+        Obter as detecções e segmentações de uma imagem.
         
         Args:
-            image: Imagem BGR do OpenCV
-            detection_types: Lista de tipos de detecção a serem retornados (None para todos)
-            segmentation_types: Lista de tipos de segmentação a serem retornados (None para todos)
+            image: Imagem (numpy array BGR)
+            detection_types: Lista de tipos de detecção para retornar (None para todos)
+            segmentation_types: Lista de tipos de segmentação para retornar (None para todos)
             
         Returns:
-            Dicionário com 'detections' e 'segmentations'
+            dict: Dicionário com detecções, segmentações e FPS
         """
         # Pré-processar a imagem
         input_image, scale_factors = self.preprocess_image(image)
+        
+        # A dimensão do batch já foi adicionada no método preprocess_image
         
         # Medir o tempo de inferência
         start_time = time.time()
@@ -156,9 +158,12 @@ class YOEOHandler:
         detections = {}
         segmentations = {}
         
-        # Processar saída de detecção (assumindo formato YOLO)
-        if len(outputs) >= 1:
-            detection_output = outputs[0]
+        # Verificar o formato das saídas (dicionário ou lista)
+        if isinstance(outputs, dict):
+            # Novo formato (dicionário)
+            # Processar saída de detecção 
+            # Usamos a detecção small pois tem melhor resolução para objetos pequenos
+            detection_output = outputs["detection_small"]
             processed_detections = self._process_detection_output(detection_output, scale_factors, image.shape[:2])
             
             # Filtrar por tipos de detecção solicitados
@@ -166,10 +171,9 @@ class YOEOHandler:
                 detections = processed_detections
             else:
                 detections = {k: v for k, v in processed_detections.items() if k in detection_types}
-        
-        # Processar saída de segmentação
-        if len(outputs) >= 2:
-            segmentation_output = outputs[1]
+            
+            # Processar saída de segmentação
+            segmentation_output = outputs["segmentation"]
             processed_segmentations = self._process_segmentation_output(segmentation_output, image.shape[:2])
             
             # Filtrar por tipos de segmentação solicitados
@@ -177,12 +181,35 @@ class YOEOHandler:
                 segmentations = processed_segmentations
             else:
                 segmentations = {k: v for k, v in processed_segmentations.items() if k in segmentation_types}
+        else:
+            # Formato antigo (lista)
+            # Processar saída de detecção (assumindo formato YOLO)
+            if len(outputs) >= 1:
+                detection_output = outputs[0]
+                processed_detections = self._process_detection_output(detection_output, scale_factors, image.shape[:2])
+                
+                # Filtrar por tipos de detecção solicitados
+                if detection_types is None:
+                    detections = processed_detections
+                else:
+                    detections = {k: v for k, v in processed_detections.items() if k in detection_types}
+            
+            # Processar saída de segmentação
+            if len(outputs) >= 4:  # Agora são 4 saídas (3 detecções + 1 segmentação)
+                segmentation_output = outputs[3]
+                processed_segmentations = self._process_segmentation_output(segmentation_output, image.shape[:2])
+                
+                # Filtrar por tipos de segmentação solicitados
+                if segmentation_types is None:
+                    segmentations = processed_segmentations
+                else:
+                    segmentations = {k: v for k, v in processed_segmentations.items() if k in segmentation_types}
         
+        # Retornar resultados
         return {
-            'detections': detections,
-            'segmentations': segmentations,
-            'fps': fps,
-            'inference_time': inference_time
+            "detections": detections,
+            "segmentations": segmentations,
+            "fps": fps
         }
     
     def _process_detection_output(self, detection_output, scale_factors, original_shape):
