@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Executar container com acesso total ao hardware
-docker run -it --rm \
+docker run -it \
   --runtime nvidia \
   --privileged \
   -v /dev:/dev \
