@@ -25,5 +25,9 @@ echo "Pacotes ROS2 disponíveis:"
 ros2 pkg list | grep -E "roboime|perception" || echo "Nenhum pacote personalizado encontrado"
 echo "================================================"
 
+# Verificar dispositivos de câmera disponíveis
+echo "Dispositivos de câmera disponíveis:"
+ls -la /dev/video* 2>/dev/null || echo "Nenhum dispositivo de câmera encontrado"
+
 # Executa o comando passado como argumento ou inicia um shell
 exec "$@" || exec /bin/bash

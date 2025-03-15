@@ -8,6 +8,6 @@ docker run -it --rm \
   --network host --ipc=host \
   -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix \
   -v /tmp/argus_socket:/tmp/argus_socket \
-  -v $(pwd):/ros2_ws/src \
+  -v $(pwd):/ros2_ws \
   --device /dev/video0 \
   roboime-hsl:latest

@@ -53,16 +53,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-colcon-common-extensions \
     python3-rosdep \
     python3-pip \
-    libopencv-dev libopencv-python \
+    python3-opencv \
+    libopencv-dev \
     gstreamer1.0-tools \                
     && rm -rf /var/lib/apt/lists/*
 
+# Instala ferramentas de compilação necessárias para pacotes Python
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Instala pacotes Python necessários via pip (nomes corretos)
+# Primeiro instala scikit-build necessário para compilar opencv-python
 RUN pip3 install --no-cache-dir \
-    opencv-python \
+    wheel \
+    setuptools \
+    scikit-build \
+    ninja
+
+# Agora instala os pacotes principais
+RUN pip3 install --no-cache-dir \
     matplotlib \
     numpy \
-    pyyaml
+    pyyaml \
+    tensorflow
 
 # Inicializa o rosdep
 RUN rosdep init || echo "rosdep já inicializado" && \
