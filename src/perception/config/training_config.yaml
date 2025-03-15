@@ -33,14 +33,14 @@ test_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dat
 
 # Configuracoes de treinamento
 batch_size: 8
-epochs: 100
+epochs: 10
 learning_rate: 0.001
 weight_decay: 0.0005
 early_stopping_patience: 10
 reduce_lr_patience: 5
 
 # Configuracoes de aumento de dados
-rotation_range: 10
+rotation_range: 5
 width_shift_range: 0.1
 height_shift_range: 0.1
 brightness_range: [0.8, 1.2]
@@ -59,3 +59,41 @@ pretrained_weights: null  # Caminho para pesos pre-treinados (opcional)
 anchors_large: [[0.28, 0.22], [0.38, 0.48], [0.9, 0.78]]    # Para objetos grandes
 anchors_medium: [[0.07, 0.15], [0.15, 0.11], [0.14, 0.29]]  # Para objetos médios
 anchors_small: [[0.02, 0.03], [0.04, 0.07], [0.08, 0.06]]   # Para objetos pequenos 
+
+# Diretórios
+data_dir: 'src/perception/resources/dataset'
+checkpoint_dir: 'src/perception/resources/models/checkpoints'
+log_dir: 'src/perception/resources/logs'
+output_dir: 'src/perception/resources/models'
+
+# Pré-processamento de dados
+input_height: 416
+input_width: 416
+batch_size: 16
+validation_split: 0.2
+
+# Classes
+classes: ['bola', 'gol', 'robo']
+segmentation_classes: ['linha', 'campo']
+
+# Hiperparâmetros
+learning_rate: 0.001
+epochs: 100  
+early_stopping_patience: 10
+
+# Pesos das perdas
+detection_loss_weight: 1.0
+segmentation_loss_weight: 1.0
+
+# Augmentação
+augmentation:
+  flip_horizontal: true
+  flip_vertical: true
+  rotation_range: 5
+  brightness_range: [0.8, 1.2]
+  contrast_range: [0.8, 1.2]
+  blur_limit: 3
+  
+# Checkpoints
+save_best_only: true
+save_weights_only: true 

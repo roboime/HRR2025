@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y locales \
 
 # Adiciona chave e repositório do ROS2 Eloquent (Ubuntu 18.04 Bionic)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl gnupg2 lsb-release ca-certificates && \
+    update-ca-certificates && \
     curl gnupg2 lsb-release && rm -rf /var/lib/apt/lists/*
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
     -o /usr/share/keyrings/ros-archive-keyring.gpg 

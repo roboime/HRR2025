@@ -15,17 +15,62 @@ from utils.loss_utils import create_loss
 
 # Configurar GPU (se disponível)
 def setup_gpu():
-    """Configura a GPU para treinamento."""
+    """Configura a GPU para treinamento, ou otimiza a CPU se nenhuma GPU estiver disponível."""
+    # Verificar se TensorFlow está usando a aceleração de hardware correta
+    print("\n--- Configuração de Hardware ---")
+    
+    # Verificar dispositivos disponíveis
     gpus = tf.config.experimental.list_physical_devices('GPU')
+    cpus = tf.config.experimental.list_physical_devices('CPU')
+    
+    print(f"CPUs disponíveis: {len(cpus)}")
+    print(f"GPUs disponíveis: {len(gpus)}")
+    
     if gpus:
         try:
+            # Configurar para usar a primeira GPU
+            tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
+            
+            # Permitir crescimento de memória conforme necessário
             for gpu in gpus:
                 tf.config.experimental.set_memory_growth(gpu, True)
-            print(f"GPUs disponíveis: {len(gpus)}")
+            
+            # Verificar se a GPU está configurada corretamente
+            logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+            print(f"GPUs físicas: {len(gpus)}, GPUs lógicas: {len(logical_gpus)}")
+            
+            # Verificar disponibilidade da GPU
+            if tf.test.is_gpu_available():
+                print("✓ TensorFlow está usando GPU")
+            else:
+                print("✗ TensorFlow não está usando GPU apesar de estar disponível")
+            
+            print(f"Dispositivos visíveis: {tf.config.get_visible_devices()}")
         except RuntimeError as e:
             print(f"Erro na configuração da GPU: {e}")
+            print("Usando CPU como fallback.")
     else:
-        print("Nenhuma GPU encontrada. Usando CPU.")
+        print("\n⚠️ AVISO: Nenhuma GPU encontrada. O treinamento usará CPU, que será significativamente mais lento.")
+        print("Verificar:")
+        print("1. Se o TensorFlow-GPU está instalado corretamente (pip install tensorflow)")
+        print("2. Se os drivers NVIDIA estão instalados")
+        print("3. Se o CUDA Toolkit e cuDNN estão instalados e compatíveis com esta versão do TensorFlow")
+        
+        # Otimizar para CPU
+        try:
+            # Usar threads paralelos para melhorar desempenho da CPU
+            tf.config.threading.set_intra_op_parallelism_threads(
+                len(cpus) * 2  # Usar o dobro do número de CPUs físicas
+            )
+            tf.config.threading.set_inter_op_parallelism_threads(2)
+            
+            # Ativar otimizações específicas para CPU
+            os.environ['TF_ENABLE_ONEDNN_OPTS'] = '1'  # Usar otimizações oneDNN
+            os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'  # Ativar XLA
+            
+            print("\n✓ Otimizações para CPU ativadas")
+        except Exception as e:
+            print(f"Erro ao ativar otimizações para CPU: {e}")
 
 # Carregar configuração de treinamento
 def load_config(config_path):
@@ -125,7 +170,16 @@ def train_yoeo(config_path):
     Args:
         config_path: Caminho para o arquivo de configuração
     """
-    # Configurar GPU
+    # Imprimir versão do TensorFlow
+    print(f"\nTensorFlow versão: {tf.__version__}")
+    print(f"Modo Eager: {tf.executing_eagerly()}")
+    
+    # Verificar dispositivos disponíveis
+    print("\nDispositivos TensorFlow disponíveis:")
+    for device in tf.config.list_physical_devices():
+        print(f"  {device.device_type}: {device.name}")
+    
+    # Configurar GPU/CPU
     setup_gpu()
     
     # Carregar configuração
@@ -136,6 +190,14 @@ def train_yoeo(config_path):
     os.makedirs(config['checkpoint_dir'], exist_ok=True)
     os.makedirs(config['log_dir'], exist_ok=True)
     os.makedirs(config['output_dir'], exist_ok=True)
+    
+    # Definir política de mixed precision para melhorar desempenho
+    try:
+        policy = tf.keras.mixed_precision.Policy('mixed_float16')
+        tf.keras.mixed_precision.set_global_policy(policy)
+        print("Usando mixed precision: float16/float32")
+    except Exception as e:
+        print(f"Não foi possível ativar mixed precision: {e}")
     
     # Preparar datasets
     train_generator, val_generator, test_generator = prepare_dataset(config)
@@ -157,6 +219,13 @@ def train_yoeo(config_path):
         num_seg_classes=segmentation_classes
     ).build()
     
+    # Inicializar pesos aleatoriamente para evitar problemas com batch normalization
+    # e garantir um bom ponto de partida
+    dummy_data = np.random.random((1, input_shape[0], input_shape[1], input_shape[2]))
+    _ = model(dummy_data)  # Executa forward pass para inicializar todas as variáveis
+    
+    print("Modelo inicializado com forward pass em dados aleatórios")
+    
     # Carregar pesos pré-treinados (se especificado)
     if config.get('pretrained_weights'):
         pretrained_path = config['pretrained_weights']
@@ -166,9 +235,18 @@ def train_yoeo(config_path):
         else:
             print(f"Arquivo de pesos pré-treinados não encontrado: {pretrained_path}")
     
-    # Configurar otimizador
+    # Configurar otimizador com learning rate schedule
+    initial_lr = config.get('learning_rate', 0.001)
+    
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate=initial_lr,
+        decay_steps=len(train_generator) * 5,  # a cada 5 épocas
+        decay_rate=0.9,
+        staircase=True
+    )
+    
     optimizer = tf.keras.optimizers.Adam(
-        learning_rate=config.get('learning_rate', 0.001)
+        learning_rate=lr_schedule
     )
     
     # Criar a função de perda combinada
@@ -215,26 +293,56 @@ def train_yoeo(config_path):
     
     # Treinamento
     print("\nIniciando treinamento...\n")
-    history = model.fit(
-        train_generator,
-        validation_data=val_generator,
-        epochs=config.get('epochs', 100),
-        callbacks=callbacks,
-        verbose=1
-    )
     
-    # Salvar modelo e gerar visualizações
-    model_path = os.path.join(config['output_dir'], 'yoeo_final_model.weights.h5')
-    model.save_weights(model_path)
-    print(f"\nModelo final salvo em {model_path}")
-    
-    # Plotar histórico de treinamento
-    if history.history:
-        plot_training_history(history, config['output_dir'])
-    
-    print("\nTreinamento concluído!\n")
-    
-    return model, history
+    # Capturar possíveis erros durante o treinamento
+    try:
+        history = model.fit(
+            train_generator,
+            validation_data=val_generator,
+            epochs=config.get('epochs', 100),
+            callbacks=callbacks,
+            verbose=1
+        )
+        
+        # Salvar modelo e gerar visualizações
+        # Garantir que o nome do arquivo termine com .weights.h5
+        model_path = os.path.join(config['output_dir'], 'yoeo_final_model.weights.h5')
+        
+        try:
+            model.save_weights(model_path)
+            print(f"\nModelo final salvo em {model_path}")
+        except Exception as e:
+            print(f"Erro ao salvar modelo: {e}")
+            # Tentar formato alternativo se falhar
+            alt_path = os.path.join(config['output_dir'], 'yoeo_final_model.h5')
+            try:
+                model.save(alt_path)
+                print(f"Modelo salvo no formato alternativo: {alt_path}")
+            except Exception as e2:
+                print(f"Erro ao salvar no formato alternativo: {e2}")
+        
+        # Plotar histórico de treinamento
+        if history.history:
+            plot_training_history(history, config['output_dir'])
+        
+        print("\nTreinamento concluído!\n")
+        
+        return model, history
+        
+    except Exception as training_err:
+        print(f"\nErro durante o treinamento: {training_err}")
+        import traceback
+        traceback.print_exc()
+        
+        # Tentar salvar o modelo mesmo após erro
+        try:
+            recovery_path = os.path.join(config['output_dir'], 'yoeo_recovery.weights.h5')
+            model.save_weights(recovery_path)
+            print(f"Modelo salvo após erro em: {recovery_path}")
+        except:
+            print("Não foi possível salvar o modelo após o erro")
+        
+        return None, None
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Treinar modelo YOEO")
