@@ -8,7 +8,7 @@
 ![CUDA](https://img.shields.io/badge/CUDA-10.2-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
-<img src="https://github.com/RoboIME/RoboLogo" alt="RoboIME Logo" width="300"/>
+<img src="https://github.com/Kellerzinho/HSL2025/blob/master/RoboLogo.png" alt="RoboIME Logo" width="300"/>
 
 **Sistema de robô de futebol humanóide baseado no trabalho do [Hamburg Bit-Bots](https://github.com/bit-bots/bitbots_main)**
 
