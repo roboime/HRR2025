@@ -2,13 +2,13 @@
 
 # Dependencias Basicas - Essenciais para todas as funcionalidades
 numpy>=1.19.4
-opencv-python>=4.5.0
+# opencv-python>=4.5.0   # Será instalado via apt-get (python3-opencv)
 pyyaml>=5.1
 matplotlib>=3.3.0
 cvbridge3  # Ponte entre OpenCV e ROS2
 
 # Inferencia de Deep Learning
-tensorflow==2.4.0+nv21.5  # Versao especifica para Jetson (ja descomentada)
+# tensorflow==2.4.0+nv21.5  # Será instalado separadamente com pacotes NVIDIA
 
 # TensorRT para aceleracao na Jetson (altamente recomendado para inferencia)
 # Obs: Esta biblioteca geralmente eh instalada com o JetPack, nao via pip
@@ -23,7 +23,7 @@ scikit-image  # Transformacoes e processamento de imagens
 
 # Bibliotecas especificas para Jetson - necessarias para aceleracao em GPU
 jetson-stats>=3.1.0  # Monitoramento de recursos
-pycuda>=2021.1  # Aceleracao CUDA para Python
+# pycuda>=2021.1  # Aceleracao CUDA para Python (será instalado separadamente)
 
 # Bibliotecas minimas para modificacoes no sistema sem precisar treinar
 albumentations  # Transformacoes de imagem durante inferencia

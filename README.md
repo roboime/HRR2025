@@ -78,12 +78,14 @@ cd HSL2025
 2. **Construa a imagem Docker:**
 
 ```bash
-docker build -t hrr:latest -f docker/Dockerfile.jetson .
+docker build -t hsl:latest -f docker/Dockerfile.jetson .
 ```
 
 3. **Execute o container:**
 
 ```bash
+chmod +x ./scripts/docker-helpers/docker-run.sh
+
 ./scripts/docker-helpers/docker-run.sh
 ```
 
