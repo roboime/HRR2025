@@ -10,4 +10,4 @@ docker run -it --rm \
   -v /tmp/argus_socket:/tmp/argus_socket \
   -v $(pwd):/ros2_ws \
   --device /dev/video0 \
-  roboime-hsl:latest
+  hsl:latest
