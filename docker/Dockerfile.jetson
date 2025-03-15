@@ -4,6 +4,10 @@ FROM nvcr.io/nvidia/l4t-base:r32.6.1
 # Desabilita interações manuais no apt
 ENV DEBIAN_FRONTEND=noninteractive 
 
+# Define variáveis de ambiente ROS
+ENV ROS_DISTRO=eloquent
+ENV ROS_PYTHON_VERSION=3
+
 # (Opcional) Atualiza locale para UTF-8, se necessário
 RUN apt-get update && apt-get install -y locales \
     && locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
@@ -34,19 +38,48 @@ RUN usermod -a -G video root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-eloquent-ros-base \
     ros-eloquent-launch-xml \
-	ros-eloquent-launch-yaml \
-	ros-eloquent-rviz2 \
-	ros-eloquent-vision-msgs \ 
+    ros-eloquent-launch-yaml \
+    ros-eloquent-rviz2 \
+    ros-eloquent-vision-msgs \ 
     ros-eloquent-vision-opencv \
     ros-eloquent-image-tools \
-	python3-colcon-common-extensions \
-	python3-rosdep \
-    ros-eloquent-rclcpp ros-eloquent-rclpy ros-eloquent-sensor-msgs \ 
+    ros-eloquent-rclcpp \
+    ros-eloquent-rclpy \
+    ros-eloquent-sensor-msgs \
+    ros-eloquent-tf2 \
+    ros-eloquent-tf2-ros \
+    ros-eloquent-tf2-geometry-msgs \
+    ros-eloquent-geometry-msgs \
+    python3-colcon-common-extensions \
+    python3-rosdep \
+    python3-pip \
     libopencv-dev libopencv-python \
     gstreamer1.0-tools \                
     && rm -rf /var/lib/apt/lists/*
 
-# (Opcional) Define entrypoint para configurar ambiente ROS automaticamente
-# COPY entrypoint.sh /entrypoint.sh
-# RUN chmod +x /entrypoint.sh
-# ENTRYPOINT ["/entrypoint.sh"]
+# Instala pacotes Python necessários via pip (nomes corretos)
+RUN pip3 install --no-cache-dir \
+    opencv-python \
+    matplotlib \
+    numpy \
+    pyyaml
+
+# Inicializa o rosdep
+RUN rosdep init || echo "rosdep já inicializado" && \
+    rosdep update
+
+# Configura workspace ROS2 (opcional)
+RUN mkdir -p /ros2_ws/src
+
+# Configura variáveis de ambiente para ROS2
+RUN echo 'source /opt/ros/eloquent/setup.bash' >> /root/.bashrc
+
+# Copia o script de entrypoint para o container
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+WORKDIR /ros2_ws
+
+# Define o entrypoint para configurar o ambiente ROS2
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/bin/bash"]
