@@ -69,68 +69,14 @@ RUN echo 'source /opt/ros/eloquent/setup.bash' >> /root/.bashrc
 # Criar diretório para requirements e scripts
 RUN mkdir -p /setup
 
-# Copia o arquivo requirements.txt para o container
-# Nota: Este arquivo será usado para instalar as dependências quando o container estiver rodando
+# Copia o arquivo requirements.txt e script de instalação para o container
 COPY requirements.txt /setup/
+COPY docker/install_dependencies.sh /setup/
+RUN chmod +x /setup/install_dependencies.sh
 
-# Cria um script para instalar as dependências com melhor tratamento de codificação
-RUN echo '#!/bin/bash\n\
-echo "Instalando dependências básicas do sistema..."\n\
-apt-get update && apt-get install -y build-essential cmake python3-dev libhdf5-dev \\\n\
-    python3-opencv libopencv-dev python3-pip python3-setuptools\n\
-\n\
-echo "Instalando scikit-build necessário para algumas dependências..."\n\
-pip3 install scikit-build wheel\n\
-\n\
-echo "Definindo codificação UTF-8 para evitar problemas com caracteres especiais..."\n\
-export PYTHONIOENCODING=utf-8\n\
-export LANG=C.UTF-8\n\
-export LC_ALL=C.UTF-8\n\
-\n\
-echo "Instalando dependências Python do requirements.txt..."\n\
-cat /setup/requirements.txt | tr -d "\\r" > /setup/requirements_fixed.txt\n\
-pip3 install -r /setup/requirements_fixed.txt\n\
-\n\
-echo "Tentando instalar TensorFlow específico para Jetson..."\n\
-pip3 install --pre --extra-index-url https://developer.download.nvidia.com/compute/redist/jp/v46 tensorflow\n\
-\n\
-# Verificar se a instalação do TensorFlow para Jetson falhou e usar alternativa\n\
-if ! python3 -c "import tensorflow" &> /dev/null; then\n\
-    echo "TensorFlow específico para Jetson falhou, tentando instalar dependências..."\n\
-    apt-get update && apt-get install -y libhdf5-serial-dev hdf5-tools python3-h5py\n\
-    \n\
-    # Instalar dependências específicas para TensorFlow\n\
-    pip3 install -U --no-deps numpy==1.19.4 future==0.18.2 mock==3.0.5 \\\n\
-        keras_preprocessing==1.1.2 keras_applications==1.0.8 gast==0.4.0 \\\n\
-        protobuf==3.19.4 absl-py==0.11.0 h5py==3.1.0 tensorboard==2.4.1 \\\n\
-        tensorflow-estimator==2.4.0\n\
-    \n\
-    echo "Instalando TensorFlow com índice especial NVIDIA..."\n\
-    pip3 install --pre --extra-index-url https://developer.download.nvidia.com/compute/redist/jp/v46 tensorflow==2.4.0+nv21.5\n\
-fi\n\
-\n\
-echo "Verificando instalação de pacotes críticos..."\n\
-python3 -c "import tensorflow as tf; print(f\"TensorFlow versão: {tf.__version__}\")" || echo "TensorFlow não instalado corretamente"\n\
-python3 -c "import cv2; print(f\"OpenCV versão: {cv2.__version__}\")" || echo "OpenCV não instalado corretamente"\n\
-python3 -c "import numpy; print(f\"NumPy versão: {numpy.__version__}\")" || echo "NumPy não instalado corretamente"\n\
-\n\
-echo "Instalação concluída!"\n\
-' > /setup/install_dependencies.sh && chmod +x /setup/install_dependencies.sh
-
-# Cria um script de entrypoint melhorado
-RUN echo '#!/bin/bash\n\
-source /opt/ros/eloquent/setup.bash\n\
-\n\
-# Exibe informações úteis\n\
-echo "=================================================="\n\
-echo "Container ROS2 Eloquent para Jetson inicializado!"\n\
-echo "=================================================="\n\
-echo "Para instalar as dependências, execute:"\n\
-echo "  ./setup/install_dependencies.sh"\n\
-echo "=================================================="\n\
-\n\
-exec "$@"\n\
-' > /entrypoint.sh && chmod +x /entrypoint.sh
+# Copia o script de entrypoint externo para o container
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 WORKDIR /ros2_ws
 

@@ -93,6 +93,7 @@ chmod +x ./scripts/docker-helpers/docker-run.sh
 
 ```bash
 # Instale as dependências Python (se necessário)
+cd ..
 /setup/install_dependencies.sh
 
 # Instale as dependências do ROS

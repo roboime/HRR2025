@@ -15,19 +15,23 @@ export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 export PYTHONIOENCODING=utf-8
 
 # Exibe informações úteis
-echo "================================================"
+echo "=================================================="\n\
+echo "Container ROS2 Eloquent para Jetson inicializado!"\n\
+echo "=================================================="\n\
 echo "ROS_DISTRO: $ROS_DISTRO"
 echo "ROS_PYTHON_VERSION: $ROS_PYTHON_VERSION"
 echo "RMW_IMPLEMENTATION: $RMW_IMPLEMENTATION"
 echo "ROS_DOMAIN_ID: $ROS_DOMAIN_ID"
-echo "================================================"
+echo "================================================"\n\
 echo "Pacotes ROS2 disponíveis:"
 ros2 pkg list | grep -E "roboime|perception" || echo "Nenhum pacote personalizado encontrado"
-echo "================================================"
-
-# Verificar dispositivos de câmera disponíveis
+echo "================================================"\n\
 echo "Dispositivos de câmera disponíveis:"
 ls -la /dev/video* 2>/dev/null || echo "Nenhum dispositivo de câmera encontrado"
+echo "=================================================="\n\
+echo "Para instalar as dependências, execute:"
+echo "  ./setup/install_dependencies.sh"
+echo "=================================================="\n\
 
 # Executa o comando passado como argumento ou inicia um shell
 exec "$@" || exec /bin/bash
