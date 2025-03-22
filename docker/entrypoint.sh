@@ -66,9 +66,13 @@ verificar_disponibilidade "Pacotes ROS2 do projeto" \
 
 # Verifica GPU NVIDIA
 echo ""
-verificar_disponibilidade "Status da GPU NVIDIA" \
-    "nvidia-smi --query-gpu=name,temperature.gpu,utilization.gpu,utilization.memory --format=csv,noheader" \
-    "GPU NVIDIA não detectada ou drivers não instalados."
+if command -v tegrastats &> /dev/null; then
+    verificar_disponibilidade "Status da GPU Jetson" \
+        "tegrastats --interval 1 --count 1" \
+        "GPU Jetson não detectada ou drivers não instalados."
+else
+    echo -e "${CIANO}Status da GPU Jetson:${SEM_COR} Usando biblioteca NVIDIA alternativa"
+fi
 
 # Verifica dispositivos de câmera
 echo ""
