@@ -69,8 +69,7 @@ RUN echo 'source /opt/ros/eloquent/setup.bash' >> /root/.bashrc
 # Criar diretório para requirements e scripts
 RUN mkdir -p /setup
 
-# Copia o arquivo requirements.txt e script de instalação para o container
-COPY requirements.txt /setup/
+# Copia o arquivo de script de instalação para o container
 COPY docker/install_dependencies.sh /setup/
 RUN chmod +x /setup/install_dependencies.sh
 
