@@ -20,7 +20,7 @@
 - [🧩 Estrutura do Projeto](#-estrutura-do-projeto)
 - [💻 Requisitos do Sistema](#-requisitos-do-sistema)
 - [🚀 Instalação e Uso](#-instalação-e-uso)
-  - [🐳 Usando Docker (Recomendado)](#-usando-docker-recomendado)
+  - [🐳 Usando Docker )](#-usando-docker-recomendado)
 - [▶️ Executando o Robô](#️-executando-o-robô)
 - [🔄 Desenvolvimento](#-desenvolvimento)
 - [📡 Sincronização com o Jetson](#-sincronização-com-o-jetson)
@@ -64,7 +64,7 @@ Este projeto requer:
 
 ## 🚀 Instalação e Uso
 
-### 🐳 Usando Docker (Recomendado)
+### 🐳 Usando Docker
 
 Utilizar o ambiente Docker garante maior compatibilidade e facilidade de configuração:
 
