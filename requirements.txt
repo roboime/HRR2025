@@ -1,29 +1,25 @@
 # Requisitos para Sistema de Percepcao da RoboIME - Versao de Inferencia para Jetson
 
 # Dependencias Basicas - Essenciais para todas as funcionalidades
-numpy>=1.19.4
-# opencv-python>=4.5.0   # Será instalado via apt-get (python3-opencv)
-pyyaml>=5.1
-matplotlib>=3.3.0
-cvbridge3  # Ponte entre OpenCV e ROS2
+numpy==1.16.1
+# opencv-python  # Instalado via apt-get ou script
+pyyaml>=5.1,<6.0
+matplotlib==3.2.2
+# cvbridge3 será instalado pelo ROS2
 
 # Inferencia de Deep Learning
-# tensorflow==2.4.0+nv21.5  # Será instalado separadamente com pacotes NVIDIA
+# tensorflow==2.5.0+nv21.8  # Instalado separadamente com pacotes NVIDIA
 
-# TensorRT para aceleracao na Jetson (altamente recomendado para inferencia)
-# Obs: Esta biblioteca geralmente eh instalada com o JetPack, nao via pip
-# tensorrt 
+# Processamento de imagens
+pillow>=7.0.0,<8.0.0  # Compatível com Python 3.6 na Jetson
+protobuf<=3.17.3  # Compatível com Python 3.6
 
-# Basico para processamento do modelo YOEO
-pillow>=8.0.0  # Processamento de imagens
-protobuf<=3.20.0  # Compatibilidade com TensorFlow
+# Utilidades para pre-processamento de imagens
+scikit-image==0.16.2  # Versão compatível com Python 3.6 e numpy 1.16
 
-# Utilidades para pre-processamento de imagens na inferencia
-scikit-image  # Transformacoes e processamento de imagens
+# Transformações de imagens
+albumentations==0.4.6  # Versão compatível com as dependências acima
+scipy==1.4.1  # Compatível com Python 3.6 na Jetson
 
-# Bibliotecas especificas para Jetson - necessarias para aceleracao em GPU
+# Bibliotecas específicas para Jetson
 jetson-stats>=3.1.0  # Monitoramento de recursos
-# pycuda>=2021.1  # Aceleracao CUDA para Python (será instalado separadamente)
-
-# Bibliotecas minimas para modificacoes no sistema sem precisar treinar
-albumentations  # Transformacoes de imagem durante inferencia
