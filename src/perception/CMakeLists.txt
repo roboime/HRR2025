@@ -45,7 +45,6 @@ ament_python_install_package(${PROJECT_NAME})
 
 # Install Python scripts
 install(PROGRAMS
-  scripts/yoeo_detector_node.py
   scripts/yoeo_visualizer_node.py
   DESTINATION lib/${PROJECT_NAME}
 )

@@ -10,7 +10,7 @@ setup(
     packages=find_packages(),
     data_files=[
         ('share/ament_index/resource_index/packages',
-            ['resource/' + package_name]),
+            ['resources/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
     install_requires=['setuptools'],
@@ -22,7 +22,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'yoeo_detector = perception.scripts.yoeo_detector_node:main',
+            'yoeo_detector = perception.yoeo_detector_node:main',
             'yoeo_visualizer = perception.scripts.yoeo_visualizer_node:main',
         ],
     },
