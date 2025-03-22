@@ -62,15 +62,9 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}
 )
 
-# Install models directory
-install(DIRECTORY
-  models
-  DESTINATION share/${PROJECT_NAME}
-)
-
 # Install resource files
 install(DIRECTORY
-  resource
+  resources
   DESTINATION share/${PROJECT_NAME}
 )
 
