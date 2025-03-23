@@ -72,12 +72,17 @@ print_success "Pacote 'perception' construído."
 print_info "Configurando ambiente ROS 2..."
 source ./install/setup.bash
 
+# Adicionar caminho das bibliotecas Python do sistema ao PYTHONPATH
+print_info "Configurando caminhos para bibliotecas Python..."
+export PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH"
+print_success "PYTHONPATH configurado: $PYTHONPATH"
+
 # Verificar dependências
 print_header "Verificando dependências"
 
 # Verificar TensorFlow
 echo "Verificando TensorFlow..."
-if python3 -c "import tensorflow as tf; print(f'TensorFlow versão: {tf.__version__}')" 2>/dev/null; then
+if python3 -c "import sys; print('Python Path:', sys.path); import tensorflow as tf; print(f'TensorFlow versão: {tf.__version__}')" 2>/dev/null; then
     print_success "TensorFlow está funcionando."
     # Verificar GPU no TensorFlow
     if python3 -c "import tensorflow as tf; print(f'GPU disponível: {len(tf.config.list_physical_devices(\"GPU\")) > 0}')" 2>/dev/null; then
@@ -134,60 +139,60 @@ while true; do
         1)
             print_header "Iniciando sistema completo (unificado)"
             print_info "Pressione Ctrl+C para encerrar."
-            ros2 launch perception perception.launch.py mode:=unified
+            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" ros2 launch perception perception.launch.py mode:=unified
             ;;
         2)
             print_header "Iniciando apenas detector YOEO"
             print_info "Pressione Ctrl+C para encerrar."
-            ros2 launch perception perception.launch.py mode:=yoeo
+            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" ros2 launch perception perception.launch.py mode:=yoeo
             ;;
         3)
             print_header "Iniciando apenas detectores tradicionais"
             print_info "Pressione Ctrl+C para encerrar."
-            ros2 launch perception perception.launch.py mode:=traditional
+            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" ros2 launch perception perception.launch.py mode:=traditional
             ;;
         4)
             print_header "Testando detecção de bola (YOEO)"
             print_info "Será executado por 10 segundos."
-            timeout 10 ros2 launch perception perception.launch.py mode:=yoeo detector_ball:=yoeo
+            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 10 ros2 launch perception perception.launch.py mode:=yoeo detector_ball:=yoeo
             ;;
         5)
             print_header "Testando detecção de bola (Tradicional)"
             print_info "Será executado por 10 segundos."
-            timeout 10 ros2 launch perception perception.launch.py mode:=traditional detector_ball:=traditional
+            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 10 ros2 launch perception perception.launch.py mode:=traditional detector_ball:=traditional
             ;;
         6)
             print_header "Testando detecção de campo (Tradicional)"
             print_info "Será executado por 10 segundos."
-            timeout 10 ros2 launch perception perception.launch.py mode:=traditional detector_field:=traditional
+            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 10 ros2 launch perception perception.launch.py mode:=traditional detector_field:=traditional
             ;;
         7)
             print_header "Testando com câmera USB"
             print_info "Pressione Ctrl+C para encerrar."
-            ros2 launch perception perception.launch.py camera_src:=usb
+            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" ros2 launch perception perception.launch.py camera_src:=usb
             ;;
         8)
             print_header "Testando com câmera CSI (Jetson)"
             print_info "Pressione Ctrl+C para encerrar."
-            ros2 launch perception perception.launch.py camera_src:=csi
+            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" ros2 launch perception perception.launch.py camera_src:=csi
             ;;
         9)
             print_header "Executando todos os testes sequencialmente"
             
             print_info "Teste 1: Sistema unificado (5 segundos)"
-            timeout 5 ros2 launch perception perception.launch.py mode:=unified
+            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 5 ros2 launch perception perception.launch.py mode:=unified
             
             print_info "Teste 2: Apenas YOEO (5 segundos)"
-            timeout 5 ros2 launch perception perception.launch.py mode:=yoeo
+            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 5 ros2 launch perception perception.launch.py mode:=yoeo
             
             print_info "Teste 3: Apenas tradicional (5 segundos)"
-            timeout 5 ros2 launch perception perception.launch.py mode:=traditional
+            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 5 ros2 launch perception perception.launch.py mode:=traditional
             
             print_info "Teste 4: Detecção de bola YOEO (5 segundos)"
-            timeout 5 ros2 launch perception perception.launch.py mode:=yoeo detector_ball:=yoeo
+            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 5 ros2 launch perception perception.launch.py mode:=yoeo detector_ball:=yoeo
             
             print_info "Teste 5: Detecção de bola tradicional (5 segundos)"
-            timeout 5 ros2 launch perception perception.launch.py mode:=traditional detector_ball:=traditional
+            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 5 ros2 launch perception perception.launch.py mode:=traditional detector_ball:=traditional
             
             print_success "Testes concluídos!"
             ;;
