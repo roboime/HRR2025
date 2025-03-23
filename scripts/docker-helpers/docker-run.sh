@@ -20,11 +20,15 @@ else
       --name hsl-container \
       --runtime nvidia \
       --privileged \
+      --gpus all \
+      -e NVIDIA_VISIBLE_DEVICES=all \
+      -e NVIDIA_DRIVER_CAPABILITIES=all \
       -v /dev:/dev \
       --network host --ipc=host \
       -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix \
       -v /tmp/argus_socket:/tmp/argus_socket \
       -v $(pwd):/ros2_ws \
+      -v /usr/local/cuda:/usr/local/cuda \
       --device /dev/video0 \
       hsl:latest
 fi

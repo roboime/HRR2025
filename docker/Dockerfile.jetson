@@ -66,6 +66,11 @@ RUN mkdir -p /ros2_ws/src
 # Configura variáveis de ambiente para ROS2
 RUN echo 'source /opt/ros/eloquent/setup.bash' >> /root/.bashrc
 
+# Configura variáveis de ambiente para CUDA
+ENV CUDA_HOME=/usr/local/cuda-10.2
+ENV LD_LIBRARY_PATH=/usr/local/cuda-10.2/targets/aarch64-linux/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
+ENV PATH=/usr/local/cuda-10.2/bin:${PATH}
+
 # Criar diretório para requirements e scripts
 RUN mkdir -p /setup
 

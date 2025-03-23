@@ -100,6 +100,30 @@ if ! python3 -c "import tensorflow" 2>/dev/null; then
     python3 -m pip install --no-deps keras-preprocessing==1.1.2
     python3 -m pip install --no-deps gast==0.4.0
     python3 -m pip install --no-deps six==1.15.0
+    python3 -m pip install --no-deps typing_extensions==3.7.4.3
+    python3 -m pip install --no-deps wrapt==1.12.1
+    python3 -m pip install --no-deps absl-py==0.12.0
+    python3 -m pip install --no-deps astunparse==1.6.3
+    python3 -m pip install --no-deps termcolor==1.1.0
+    python3 -m pip install --no-deps flatbuffers==1.12
+    python3 -m pip install --no-deps google-pasta==0.2.0
+    python3 -m pip install --no-deps opt-einsum==3.3.0
+    
+    # Instalar bibliotecas CUDA e cuDNN para Jetson
+    echo -e "${VERDE}Instalando bibliotecas CUDA e cuDNN...${SEM_COR}"
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        cuda-cudart-10-2 \
+        cuda-cublas-10-2 \
+        cuda-cufft-10-2 \
+        cuda-curand-10-2 \
+        cuda-cusolver-10-2 \
+        cuda-cusparse-10-2 \
+        libcudnn8
+    
+    # Configurar variáveis de ambiente para CUDA
+    export CUDA_HOME=/usr/local/cuda-10.2
+    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda-10.2/targets/aarch64-linux/lib:$LD_LIBRARY_PATH
     
     # Instalar TensorFlow sem dependências
     python3 -m pip install --no-deps --extra-index-url https://developer.download.nvidia.com/compute/redist/jp/v46 tensorflow==2.5.0+nv21.8 || {
@@ -111,6 +135,10 @@ if ! python3 -c "import tensorflow" 2>/dev/null; then
             echo -e "${VERMELHO}Não foi possível instalar o TensorFlow. Verifique manualmente a versão compatível com sua Jetson.${SEM_COR}"
         }
     }
+    
+    # Instalar TensorBoard
+    echo -e "${VERDE}Instalando TensorBoard...${SEM_COR}"
+    python3 -m pip install tensorboard==2.5.0
 else
     echo -e "${VERDE}TensorFlow já está instalado.${SEM_COR}"
 fi
