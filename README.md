@@ -20,10 +20,12 @@
 - [🧩 Estrutura do Projeto](#-estrutura-do-projeto)
 - [💻 Requisitos do Sistema](#-requisitos-do-sistema)
 - [🚀 Instalação e Uso](#-instalação-e-uso)
-  - [🐳 Usando Docker )](#-usando-docker-recomendado)
+  - [🐳 Usando Docker](#-usando-docker-recomendado)
+  - [🔧 Configurando o Ambiente](#-configurando-o-ambiente)
 - [▶️ Executando o Robô](#️-executando-o-robô)
 - [🔄 Desenvolvimento](#-desenvolvimento)
 - [📡 Sincronização com o Jetson](#-sincronização-com-o-jetson)
+- [🔍 Solução de Problemas](#-solução-de-problemas)
 - [📜 Licença](#-licença)
 
 ## 🔍 Visão Geral
@@ -87,6 +89,24 @@ docker build -t hsl:latest -f docker/Dockerfile.jetson .
 chmod +x ./scripts/docker-helpers/docker-run.sh
 
 ./scripts/docker-helpers/docker-run.sh
+```
+
+### 🔧 Configurando o Ambiente
+
+Dentro do container, siga estas etapas para configurar corretamente o ambiente:
+
+1. **Configurar bibliotecas Python para ROS:**
+
+```bash
+# Torne os scripts executáveis
+chmod +x ./src/perception/setup_library_links.sh
+chmod +x ./src/perception/setup_rosdep.sh
+
+# Configure os links simbólicos para as bibliotecas Python
+sudo ./src/perception/setup_library_links.sh
+
+# Configure o rosdep para reconhecer dependências personalizadas
+sudo ./src/perception/setup_rosdep.sh
 ```
 
 4. **Dentro do container, instale as dependências e compile:**
@@ -160,6 +180,36 @@ Ou manualmente via `rsync`:
 ```bash
 rsync -avz --exclude 'build/' --exclude 'install/' --exclude '.git/' ./ jetson@192.168.1.xxx:/home/jetson/roboime_ws/
 ```
+
+## 🔍 Solução de Problemas
+
+### Bibliotecas Python não encontradas
+
+Se o TensorFlow ou OpenCV não forem encontrados pelo ROS:
+
+```bash
+# Execute o script de configuração de links
+sudo ./src/perception/setup_library_links.sh
+```
+
+### Erros com dependências rosdep
+
+Se o `rosdep` não conseguir resolver algumas dependências:
+
+```bash
+# Configure o rosdep personalizado
+sudo ./src/perception/setup_rosdep.sh
+```
+
+### Modelo YOEO não encontrado
+
+O modelo deve ser colocado em:
+
+```
+./src/perception/resources/models/yoeo_model.h5
+```
+
+Se não existir, o diretório será criado automaticamente pelo script `setup_library_links.sh`.
 
 ## 📜 Licença
 
