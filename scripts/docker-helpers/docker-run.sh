@@ -25,13 +25,12 @@ else
       -e NVIDIA_DRIVER_CAPABILITIES=all \
       -v /dev:/dev \
       --network host --ipc=host \
-      -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix \
+      -e DISPLAY=$DISPLAY \
+      -v /tmp/.X11-unix:/tmp/.X11-unix \
       -v /tmp/argus_socket:/tmp/argus_socket \
       -v $(pwd):/ros2_ws \
       -v /usr/local/cuda:/usr/local/cuda \
       --device /dev/video0 \
-      --entrypoint=/bin/bash
-      -v ./docker/entrypoint.sh:/docker/entrypoint.sh \
       --entrypoint=/docker/entrypoint.sh \
       hsl:latest
 fi
