@@ -31,6 +31,6 @@ else
       -v $(pwd):/ros2_ws \
       -v /usr/local/cuda:/usr/local/cuda \
       --device /dev/video0 \
-      --entrypoint=/docker/entrypoint.sh \
-      hsl:latest
+      hsl:latest \
+      /bin/bash
 fi
