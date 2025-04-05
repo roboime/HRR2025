@@ -83,7 +83,7 @@ def generate_launch_description():
         if camera_src_value == 'csi':
             camera_node = Node(
                 package='perception',
-                executable='src/jetson_camera/jetson_camera_node.py',
+                node_executable='src/jetson_camera/jetson_camera_node.py',
                 name='camera',
                 output='screen',
                 parameters=[{
@@ -104,7 +104,7 @@ def generate_launch_description():
         # Nó do pipeline de visão
         pipeline_node = Node(
             package='perception',
-            executable='src/vision_pipeline.py',
+            node_executable='src/vision_pipeline.py',
             name='vision_pipeline',
             output='screen',
             parameters=[{
@@ -133,7 +133,7 @@ def generate_launch_description():
         # Visualizador de debug (só é iniciado quando debug=true)
         debug_node = Node(
             package='rqt_image_view',
-            executable='rqt_image_view',
+            node_executable='rqt_image_view',
             name='image_view',
             arguments=['/vision/debug_image'],
             condition=IfCondition(debug)
