@@ -145,6 +145,49 @@ else
     fi
 fi
 
+# Configurar permissões de execução para os scripts Python
+print_header "Configurando permissões para scripts Python"
+
+# Verificar e definir permissões para arquivos Python
+find_python_files() {
+    find "$1" -name "*.py" -type f
+}
+
+# Listar e configurar permissões para scripts Python
+PYTHON_FILES=$(find_python_files "./src/perception")
+if [ -n "$PYTHON_FILES" ]; then
+    for py_file in $PYTHON_FILES; do
+        if [ -f "$py_file" ]; then
+            print_info "Configurando permissão para: $py_file"
+            chmod +x "$py_file"
+        fi
+    done
+    print_success "Permissões configuradas para scripts Python."
+else
+    print_info "Nenhum arquivo Python encontrado."
+fi
+
+# Reconstruir o pacote para atualizar os entry points
+print_info "Reconstruindo o pacote perception para atualizar os entry points..."
+colcon build --packages-select perception
+
+# Verificar se o pacote foi construído corretamente
+if [ ! -d "./install/perception" ]; then
+    print_error "Falha ao construir o pacote perception."
+    exit 1
+fi
+print_success "Pacote perception reconstruído com sucesso."
+
+# Verificar entry points
+if [ -f "./install/perception/lib/perception/vision_pipeline" ]; then
+    print_success "Entry point vision_pipeline encontrado."
+else
+    print_error "Entry point vision_pipeline não encontrado. Verificando arquivos instalados:"
+    find ./install/perception -type f -name "*vision*" | while read file; do
+        print_info "Arquivo encontrado: $file"
+    done
+fi
+
 # Menu de testes
 while true; do
     print_header "MENU DE TESTES DO SISTEMA DE PERCEPÇÃO"

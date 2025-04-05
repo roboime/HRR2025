@@ -12,6 +12,13 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resources/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        # Incluir arquivos de configuração
+        (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
+        # Incluir arquivos de lançamento
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
+        # Incluir pasta de recursos e modelos
+        (os.path.join('share', package_name, 'resources'), glob('resources/*')),
+        (os.path.join('share', package_name, 'resources/models'), glob('resources/models/*.*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -22,6 +29,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'vision_pipeline = perception.vision_pipeline:main',
             'yoeo_detector = perception.yoeo_detector_node:main',
             'yoeo_visualizer = perception.scripts.yoeo_visualizer_node:main',
         ],
