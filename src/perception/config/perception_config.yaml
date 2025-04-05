@@ -1,9 +1,7 @@
-/**
- * Configuração Unificada do Sistema de Percepção da RoboIME
- * 
- * Este arquivo contém todos os parâmetros de configuração para o sistema de percepção,
- * incluindo configurações de câmera, detectores tradicionais e YOEO.
- */
+# Configuração Unificada do Sistema de Percepção da RoboIME
+# 
+# Este arquivo contém todos os parâmetros de configuração para o sistema de percepção,
+# incluindo configurações de câmera, detectores tradicionais e YOEO.
 
 #=======================================#
 # CONFIGURAÇÃO GERAL
