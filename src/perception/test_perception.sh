@@ -3,6 +3,16 @@
 # Script simplificado para testar o sistema de percepção da RoboIME
 # Este script torna mais fácil testar diferentes configurações do sistema de percepção
 
+# Configurar ambiente com codificação UTF-8
+export PYTHONIOENCODING=utf8
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+
+# Adicionar caminhos de bibliotecas importantes
+# Usar o caminho completo para o Python do sistema e adicionar ao PYTHONPATH
+export PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH"
+export LD_LIBRARY_PATH="/usr/local/cuda-10.2/targets/aarch64-linux/lib:$LD_LIBRARY_PATH"
+
 # Cores para mensagens
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -68,38 +78,54 @@ if [ ! -d "./install/perception" ]; then
 fi
 print_success "Pacote 'perception' construído."
 
-# Configurar ambiente
+# Configurar ambiente ROS
 print_info "Configurando ambiente ROS 2..."
 source ./install/setup.bash
 
-# Adicionar caminho das bibliotecas Python do sistema ao PYTHONPATH
+# Adicionar caminho das bibliotecas Python do sistema ao PYTHONPATH de forma mais abrangente
 print_info "Configurando caminhos para bibliotecas Python..."
-export PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH"
+export PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH"
 print_success "PYTHONPATH configurado: $PYTHONPATH"
 
 # Verificar dependências
 print_header "Verificando dependências"
 
-# Verificar TensorFlow
+# Verificar TensorFlow com tratamento de erros mais robusto
 echo "Verificando TensorFlow..."
-if python3 -c "import sys; print('Python Path:', sys.path); import tensorflow as tf; print(f'TensorFlow versão: {tf.__version__}')" 2>/dev/null; then
+if python3 -c "import tensorflow as tf; print(f'TensorFlow versão: {tf.__version__}')" 2>tensorflow_error.log; then
     print_success "TensorFlow está funcionando."
     # Verificar GPU no TensorFlow
-    if python3 -c "import tensorflow as tf; print(f'GPU disponível: {len(tf.config.list_physical_devices(\"GPU\")) > 0}')" 2>/dev/null; then
+    if python3 -c "import tensorflow as tf; print(f'GPU disponível: {len(tf.config.list_physical_devices(\"GPU\")) > 0}')" 2>tensorflow_gpu_error.log; then
         print_success "GPU disponível para TensorFlow."
     else
         print_info "GPU não disponível para TensorFlow. O sistema funcionará mais lento."
     fi
 else
-    print_error "TensorFlow não encontrado ou com erro. O detector YOEO não funcionará."
+    print_error "TensorFlow não encontrado ou com erro. Tentando instalar..."
+    pip3 install tensorflow==2.4.0
+    
+    # Verificar novamente após instalação
+    if python3 -c "import tensorflow as tf; print(f'TensorFlow versão: {tf.__version__}')" 2>/dev/null; then
+        print_success "TensorFlow instalado com sucesso."
+    else
+        print_error "Não foi possível instalar o TensorFlow. O detector YOEO não funcionará."
+    fi
 fi
 
-# Verificar OpenCV
+# Verificar OpenCV com tratamento de erros mais robusto
 echo "Verificando OpenCV..."
-if python3 -c "import cv2; print(f'OpenCV versão: {cv2.__version__}')" 2>/dev/null; then
+if python3 -c "import cv2; print(f'OpenCV versão: {cv2.__version__}')" 2>opencv_error.log; then
     print_success "OpenCV está funcionando."
 else
-    print_error "OpenCV não encontrado ou com erro. Os detectores tradicionais não funcionarão."
+    print_error "OpenCV não encontrado ou com erro. Tentando instalar..."
+    pip3 install opencv-python
+    
+    # Verificar novamente após instalação
+    if python3 -c "import cv2; print(f'OpenCV versão: {cv2.__version__}')" 2>/dev/null; then
+        print_success "OpenCV instalado com sucesso."
+    else
+        print_error "Não foi possível instalar o OpenCV. Os detectores tradicionais não funcionarão."
+    fi
 fi
 
 # Verificar se o modelo YOEO existe
@@ -131,6 +157,7 @@ while true; do
     echo "7. Testar com câmera USB"
     echo "8. Testar com câmera CSI (Jetson)"
     echo "9. Executar todos os testes sequencialmente"
+    echo "10. Verificar configuração de codificação"
     echo "0. Sair"
     
     read -p "Escolha uma opção: " option
@@ -139,62 +166,85 @@ while true; do
         1)
             print_header "Iniciando sistema completo (unificado)"
             print_info "Pressione Ctrl+C para encerrar."
-            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" ros2 launch perception perception.launch.py mode:=unified
+            # Garantir que a codificação seja correta para o lançamento
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            ros2 launch perception perception.launch.py mode:=unified
             ;;
         2)
             print_header "Iniciando apenas detector YOEO"
             print_info "Pressione Ctrl+C para encerrar."
-            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" ros2 launch perception perception.launch.py mode:=yoeo
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            ros2 launch perception perception.launch.py mode:=yoeo
             ;;
         3)
             print_header "Iniciando apenas detectores tradicionais"
             print_info "Pressione Ctrl+C para encerrar."
-            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" ros2 launch perception perception.launch.py mode:=traditional
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            ros2 launch perception perception.launch.py mode:=traditional
             ;;
         4)
             print_header "Testando detecção de bola (YOEO)"
             print_info "Será executado por 10 segundos."
-            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 10 ros2 launch perception perception.launch.py mode:=yoeo detector_ball:=yoeo
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            timeout 10 ros2 launch perception perception.launch.py mode:=yoeo detector_ball:=yoeo
             ;;
         5)
             print_header "Testando detecção de bola (Tradicional)"
             print_info "Será executado por 10 segundos."
-            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 10 ros2 launch perception perception.launch.py mode:=traditional detector_ball:=traditional
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            timeout 10 ros2 launch perception perception.launch.py mode:=traditional detector_ball:=traditional
             ;;
         6)
             print_header "Testando detecção de campo (Tradicional)"
             print_info "Será executado por 10 segundos."
-            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 10 ros2 launch perception perception.launch.py mode:=traditional detector_field:=traditional
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            timeout 10 ros2 launch perception perception.launch.py mode:=traditional detector_field:=traditional
             ;;
         7)
             print_header "Testando com câmera USB"
             print_info "Pressione Ctrl+C para encerrar."
-            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" ros2 launch perception perception.launch.py camera_src:=usb
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            ros2 launch perception perception.launch.py camera_src:=usb
             ;;
         8)
             print_header "Testando com câmera CSI (Jetson)"
             print_info "Pressione Ctrl+C para encerrar."
-            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" ros2 launch perception perception.launch.py camera_src:=csi
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            ros2 launch perception perception.launch.py camera_src:=csi
             ;;
         9)
             print_header "Executando todos os testes sequencialmente"
             
             print_info "Teste 1: Sistema unificado (5 segundos)"
-            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 5 ros2 launch perception perception.launch.py mode:=unified
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            timeout 5 ros2 launch perception perception.launch.py mode:=unified
             
             print_info "Teste 2: Apenas YOEO (5 segundos)"
-            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 5 ros2 launch perception perception.launch.py mode:=yoeo
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            timeout 5 ros2 launch perception perception.launch.py mode:=yoeo
             
             print_info "Teste 3: Apenas tradicional (5 segundos)"
-            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 5 ros2 launch perception perception.launch.py mode:=traditional
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            timeout 5 ros2 launch perception perception.launch.py mode:=traditional
             
             print_info "Teste 4: Detecção de bola YOEO (5 segundos)"
-            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 5 ros2 launch perception perception.launch.py mode:=yoeo detector_ball:=yoeo
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            timeout 5 ros2 launch perception perception.launch.py mode:=yoeo detector_ball:=yoeo
             
             print_info "Teste 5: Detecção de bola tradicional (5 segundos)"
-            PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH" timeout 5 ros2 launch perception perception.launch.py mode:=traditional detector_ball:=traditional
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            timeout 5 ros2 launch perception perception.launch.py mode:=traditional detector_ball:=traditional
             
             print_success "Testes concluídos!"
+            ;;
+        10)
+            print_header "Verificando configuração de codificação"
+            echo "PYTHONIOENCODING: $PYTHONIOENCODING"
+            echo "LANG: $LANG"
+            echo "LC_ALL: $LC_ALL"
+            echo "PYTHONPATH: $PYTHONPATH"
+            echo "Configuração Python:" 
+            python3 -c 'import sys; print(f"Codificação padrão: {sys.getdefaultencoding()}\nCaminhos Python: {sys.path}")'
             ;;
         0)
             print_info "Saindo..."
