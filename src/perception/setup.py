@@ -30,6 +30,7 @@ setup(
     entry_points={
         'console_scripts': [
             'vision_pipeline = perception.vision_pipeline:main',
+            'jetson_camera = perception.jetson_camera.jetson_camera_node:main',
             'yoeo_detector = perception.yoeo_detector_node:main',
             'yoeo_visualizer = perception.scripts.yoeo_visualizer_node:main',
         ],

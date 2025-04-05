@@ -188,6 +188,21 @@ else
     done
 fi
 
+# Adicionar opção para debug de lançamento
+print_header "Verificando configuração"
+
+# Verificar entry points instalados
+print_info "Entry points instalados:"
+find /ros2_ws/install/perception/lib -type f -executable | while read file; do
+    echo "- $file"
+done
+
+# Verificar se os arquivos Python foram instalados
+print_info "Verificando módulos Python instalados:"
+find /ros2_ws/install/perception -name "*.py" | grep -v "__pycache__" | head -n 10 | while read file; do
+    echo "- $file"
+done
+
 # Menu de testes
 while true; do
     print_header "MENU DE TESTES DO SISTEMA DE PERCEPÇÃO"
@@ -201,6 +216,7 @@ while true; do
     echo "8. Testar com câmera CSI (Jetson)"
     echo "9. Executar todos os testes sequencialmente"
     echo "10. Verificar configuração de codificação"
+    echo "11. Executar lançamento com debug"
     echo "0. Sair"
     
     read -p "Escolha uma opção: " option
@@ -288,6 +304,12 @@ while true; do
             echo "PYTHONPATH: $PYTHONPATH"
             echo "Configuração Python:" 
             python3 -c 'import sys; print(f"Codificação padrão: {sys.getdefaultencoding()}\nCaminhos Python: {sys.path}")'
+            ;;
+        11)
+            print_header "Executando lançamento com debug"
+            print_info "Pressione Ctrl+C para encerrar."
+            PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
+            ros2 launch --debug perception perception.launch.py mode:=traditional
             ;;
         0)
             print_info "Saindo..."

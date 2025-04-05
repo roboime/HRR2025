@@ -83,7 +83,7 @@ def generate_launch_description():
         if camera_src_value == 'csi':
             camera_node = Node(
                 package='perception',
-                node_executable='perception/jetson_camera/jetson_camera_node.py',
+                node_executable='jetson_camera',  # Precisa ter um entry point para isso no setup.py
                 name='camera',
                 output='screen',
                 parameters=[{
@@ -104,7 +104,7 @@ def generate_launch_description():
         # Nó do pipeline de visão
         pipeline_node = Node(
             package='perception',
-            node_executable='perception/vision_pipeline.py',
+            node_executable='vision_pipeline',  # Usar o nome do entry point
             name='vision_pipeline',
             output='screen',
             parameters=[{
