@@ -17,7 +17,7 @@ apt-get update && apt-get install -y build-essential cmake python3-dev libhdf5-d
 echo -e "${VERDE}Instalando dependências adicionais do sistema...${SEM_COR}"
 apt-get install -y libfreetype6-dev libpng-dev pkg-config \
     libgtk2.0-dev libcanberra-gtk-module libcanberra-gtk3-module \
-    python3-pil.imagetk python3-tk
+    python3-pil.imagetk python3-tk ros-eloquent-rqt ros-eloquent-rqt-common-plugins
 
 echo -e "${VERDE}Atualizando pip e ferramentas essenciais...${SEM_COR}"
 python3 -m pip install --upgrade pip setuptools wheel

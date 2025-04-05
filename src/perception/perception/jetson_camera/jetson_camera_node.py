@@ -58,7 +58,8 @@ class IMX219CameraNode(Node):
         
         # Ajustar FPS baseado no modo
         requested_fps = min(self.get_parameter('camera_fps').value, self.max_fps)
-        self.set_parameter(rclpy.Parameter('camera_fps', value=requested_fps))
+        self.get_logger().info(f'Ajustando FPS para {requested_fps} (máximo permitido para o modo selecionado)')
+        self.camera_fps = requested_fps  # Armazenar o valor ajustado
         
         # Publishers
         self.image_pub = self.create_publisher(Image, 'camera/image_raw', 10)
@@ -95,7 +96,7 @@ class IMX219CameraNode(Node):
             f"ispdigitalgainrange='1 2' "  # Otimização do ganho digital
             f"! video/x-raw(memory:NVMM), "
             f"width=(int){self.width}, height=(int){self.height}, "
-            f"format=(string)NV12, framerate=(fraction){self.get_parameter('camera_fps').value}/1 ! "
+            f"format=(string)NV12, framerate=(fraction){self.camera_fps}/1 ! "
         )
         
         # Adicionar processamento ISP se habilitado
@@ -212,7 +213,7 @@ class IMX219CameraNode(Node):
                 self.get_logger().error(f'Erro na captura: {e}')
                 
             # Controle de taxa
-            time.sleep(1.0 / self.get_parameter('camera_fps').value)
+            time.sleep(1.0 / self.camera_fps)
 
     def publish_camera_info(self, header):
         """Publica informações da câmera."""

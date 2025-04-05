@@ -10,10 +10,10 @@ através de uma interface simplificada.
 
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument, OpaqueFunction, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, ExecuteProcess, LogInfo
 from launch.substitutions import LaunchConfiguration, TextSubstitution
 from launch.conditions import IfCondition, UnlessCondition
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 
 import os
 import yaml
@@ -132,20 +132,30 @@ def generate_launch_description():
             output='screen'
         )
         
-        # Visualizador de debug (só é iniciado quando debug=true)
-        debug_node = Node(
-            package='rqt_image_view',
-            node_executable='rqt_image_view',
-            name='image_view',
-            arguments=['/vision/debug_image'],
-            condition=IfCondition(debug)
-        )
+        # Visualizador de debug (verificar se o pacote existe antes de adicionar)
+        debug_node = None
+        try:
+            if debug_value == 'true':
+                # Verificar se o pacote rqt_image_view está disponível
+                get_package_share_directory('rqt_image_view')
+                debug_node = Node(
+                    package='rqt_image_view',
+                    node_executable='rqt_image_view',
+                    name='image_view',
+                    arguments=['/vision/debug_image']
+                )
+        except PackageNotFoundError:
+            # Adicionar um aviso em vez de falhar
+            debug_node = LogInfo(
+                msg="[AVISO] Pacote 'rqt_image_view' não encontrado. Visualização não disponível."
+            )
         
         processes = []
         if camera_process:
             processes.append(camera_process)
         processes.append(pipeline_process)
-        processes.append(debug_node)
+        if debug_node:
+            processes.append(debug_node)
         
         return processes
     
