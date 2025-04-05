@@ -10,7 +10,7 @@ através de uma interface simplificada.
 
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, ExecuteProcess
 from launch.substitutions import LaunchConfiguration, TextSubstitution
 from launch.conditions import IfCondition, UnlessCondition
 from ament_index_python.packages import get_package_share_directory
@@ -78,56 +78,58 @@ def generate_launch_description():
         use_yoeo = True if mode_value in ['unified', 'yoeo'] else False
         use_traditional = True if mode_value in ['unified', 'traditional'] else False
         
-        # Nó da câmera
-        camera_node = None
+        # Configurar os parâmetros como argumentos para o processo
+        pipeline_params = [
+            '--ros-args',
+            '-p', f"camera_topic:={config['camera']['topic']}",
+            '-p', f"camera_info_topic:={config['camera']['info_topic']}",
+            '-p', f"debug_image:={debug_value == 'true'}",
+            '-p', f"processing_fps:={config['pipeline']['processing_fps']}",
+            '-p', f"use_yoeo:={use_yoeo}",
+            '-p', f"use_traditional:={use_traditional}",
+            '-p', f"detector_ball:={config['pipeline']['detector_ball'] if mode_value == 'unified' else 'yoeo' if mode_value == 'yoeo' else 'traditional'}",
+            '-p', f"detector_field:={config['pipeline']['detector_field'] if mode_value == 'unified' else 'yoeo' if mode_value == 'yoeo' else 'traditional'}",
+            '-p', f"detector_lines:={config['pipeline']['detector_lines'] if mode_value == 'unified' else 'yoeo' if mode_value == 'yoeo' else 'traditional'}",
+            '-p', f"detector_goals:={config['pipeline']['detector_goals'] if mode_value == 'unified' else 'yoeo' if mode_value == 'yoeo' else 'traditional'}",
+            '-p', f"detector_robots:={config['pipeline']['detector_robots'] if mode_value == 'unified' else 'yoeo' if mode_value == 'yoeo' else 'traditional'}",
+            '-p', f"yoeo_model_path:={config['yoeo']['model_path']}",
+            '-p', f"yoeo_confidence_threshold:={config['yoeo']['confidence_threshold']}",
+            '-p', f"use_tensorrt:={config['yoeo']['use_tensorrt']}",
+            '-p', f"enable_ball_detection:={config['traditional']['ball']['enabled']}",
+            '-p', f"enable_field_detection:={config['traditional']['field']['enabled']}",
+            '-p', f"enable_line_detection:={config['traditional']['lines']['enabled']}",
+            '-p', f"enable_goal_detection:={config['traditional']['goals']['enabled']}",
+            '-p', f"enable_obstacle_detection:={config['traditional']['robots']['enabled']}",
+        ]
+        
+        # Nó da câmera (usando ExecuteProcess em vez de Node)
+        camera_process = None
         if camera_src_value == 'csi':
-            camera_node = Node(
-                package='perception',
-                node_executable='jetson_camera',  # Precisa ter um entry point para isso no setup.py
+            camera_params = [
+                '--ros-args',
+                '-p', f"camera_mode:=2",
+                '-p', f"camera_fps:={config['camera']['fps']}",
+                '-p', f"flip_method:=0",
+                '-p', f"exposure_time:=13333",
+                '-p', f"gain:=1.0",
+                '-p', f"awb_mode:=1",
+                '-p', f"brightness:=0",
+                '-p', f"saturation:=1.0",
+                '-p', f"enable_cuda:=True",
+                '-p', f"enable_hdr:=False",
+                '-p', f"enable_display:={debug_value == 'true'}"
+            ]
+            camera_process = ExecuteProcess(
+                cmd=['/ros2_ws/src/perception/scripts/jetson_camera_wrapper.sh'] + camera_params,
                 name='camera',
-                output='screen',
-                parameters=[{
-                    'camera_mode': 2,  # 0=3280x2464, 1=1920x1080, 2=1280x720
-                    'camera_fps': config['camera']['fps'],
-                    'flip_method': 0,
-                    'exposure_time': 13333,  # Otimizado para iluminação indoor
-                    'gain': 1.0,
-                    'awb_mode': 1,  # Auto white balance
-                    'brightness': 0,
-                    'saturation': 1.0,
-                    'enable_cuda': True,
-                    'enable_hdr': False,  # Habilitar se necessário
-                    'enable_display': debug_value == 'true'
-                }]
+                output='screen'
             )
         
-        # Nó do pipeline de visão
-        pipeline_node = Node(
-            package='perception',
-            node_executable='vision_pipeline',  # Usar o nome do entry point
+        # Nó do pipeline de visão (usando ExecuteProcess em vez de Node)
+        pipeline_process = ExecuteProcess(
+            cmd=['/ros2_ws/src/perception/scripts/vision_pipeline_wrapper.sh'] + pipeline_params,
             name='vision_pipeline',
-            output='screen',
-            parameters=[{
-                'camera_topic': config['camera']['topic'],
-                'camera_info_topic': config['camera']['info_topic'],
-                'debug_image': debug_value == 'true',
-                'processing_fps': config['pipeline']['processing_fps'],
-                'use_yoeo': use_yoeo,
-                'use_traditional': use_traditional,
-                'detector_ball': config['pipeline']['detector_ball'] if mode_value == 'unified' else 'yoeo' if mode_value == 'yoeo' else 'traditional',
-                'detector_field': config['pipeline']['detector_field'] if mode_value == 'unified' else 'yoeo' if mode_value == 'yoeo' else 'traditional',
-                'detector_lines': config['pipeline']['detector_lines'] if mode_value == 'unified' else 'yoeo' if mode_value == 'yoeo' else 'traditional',
-                'detector_goals': config['pipeline']['detector_goals'] if mode_value == 'unified' else 'yoeo' if mode_value == 'yoeo' else 'traditional',
-                'detector_robots': config['pipeline']['detector_robots'] if mode_value == 'unified' else 'yoeo' if mode_value == 'yoeo' else 'traditional',
-                'yoeo_model_path': config['yoeo']['model_path'],
-                'yoeo_confidence_threshold': config['yoeo']['confidence_threshold'],
-                'use_tensorrt': config['yoeo']['use_tensorrt'],
-                'enable_ball_detection': config['traditional']['ball']['enabled'],
-                'enable_field_detection': config['traditional']['field']['enabled'],
-                'enable_line_detection': config['traditional']['lines']['enabled'],
-                'enable_goal_detection': config['traditional']['goals']['enabled'],
-                'enable_obstacle_detection': config['traditional']['robots']['enabled'],
-            }]
+            output='screen'
         )
         
         # Visualizador de debug (só é iniciado quando debug=true)
@@ -139,13 +141,13 @@ def generate_launch_description():
             condition=IfCondition(debug)
         )
         
-        nodes = []
-        if camera_node:
-            nodes.append(camera_node)
-        nodes.append(pipeline_node)
-        nodes.append(debug_node)
+        processes = []
+        if camera_process:
+            processes.append(camera_process)
+        processes.append(pipeline_process)
+        processes.append(debug_node)
         
-        return nodes
+        return processes
     
     return LaunchDescription([
         # Argumentos

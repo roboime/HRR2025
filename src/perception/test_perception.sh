@@ -203,6 +203,41 @@ find /ros2_ws/install/perception -name "*.py" | grep -v "__pycache__" | head -n 
     echo "- $file"
 done
 
+# Dar permissão de execução para os scripts wrapper
+print_info "Dando permissão de execução aos scripts wrapper..."
+chmod +x src/perception/scripts/vision_pipeline_wrapper.sh
+chmod +x src/perception/scripts/jetson_camera_wrapper.sh
+print_success "Permissões configuradas para scripts wrapper."
+
+# Testar se os scripts wrapper funcionam
+print_info "Verificando se os scripts wrapper funcionam..."
+if [ -f "/ros2_ws/src/perception/scripts/vision_pipeline_wrapper.sh" ]; then
+    print_success "Script vision_pipeline_wrapper.sh encontrado."
+else
+    print_error "Script vision_pipeline_wrapper.sh não encontrado. Verificando caminho..."
+    find /ros2_ws/src/perception -name "*wrapper*" | while read file; do
+        print_info "Arquivo encontrado: $file"
+    done
+fi
+
+# Verificar arquivos Python
+print_info "Verificando arquivos Python do pipeline..."
+if [ -f "/ros2_ws/src/perception/perception/vision_pipeline.py" ]; then
+    print_success "Arquivo vision_pipeline.py encontrado."
+    # Verificar se é executável
+    if [ -x "/ros2_ws/src/perception/perception/vision_pipeline.py" ]; then
+        print_success "Arquivo vision_pipeline.py é executável."
+    else
+        print_info "Configurando permissão de execução para vision_pipeline.py..."
+        chmod +x /ros2_ws/src/perception/perception/vision_pipeline.py
+    fi
+else
+    print_error "Arquivo vision_pipeline.py não encontrado. Verificando caminhos..."
+    find /ros2_ws/src/perception -name "vision_pipeline.py" | while read file; do
+        print_info "Arquivo encontrado: $file"
+    done
+fi
+
 # Menu de testes
 while true; do
     print_header "MENU DE TESTES DO SISTEMA DE PERCEPÇÃO"
@@ -217,6 +252,7 @@ while true; do
     echo "9. Executar todos os testes sequencialmente"
     echo "10. Verificar configuração de codificação"
     echo "11. Executar lançamento com debug"
+    echo "12. Testar script wrapper diretamente"
     echo "0. Sair"
     
     read -p "Escolha uma opção: " option
@@ -310,6 +346,16 @@ while true; do
             print_info "Pressione Ctrl+C para encerrar."
             PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
             ros2 launch --debug perception perception.launch.py mode:=traditional
+            ;;
+        12)
+            print_header "Testando script wrapper diretamente"
+            print_info "Executando vision_pipeline_wrapper.sh diretamente..."
+            if [ -f "/ros2_ws/src/perception/scripts/vision_pipeline_wrapper.sh" ]; then
+                # Executar o script diretamente
+                /ros2_ws/src/perception/scripts/vision_pipeline_wrapper.sh --ros-args -p use_traditional:=true -p use_yoeo:=false
+            else
+                print_error "Script wrapper não encontrado."
+            fi
             ;;
         0)
             print_info "Saindo..."
