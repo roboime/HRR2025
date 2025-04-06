@@ -299,13 +299,13 @@ while true; do
             print_header "Testando com câmera USB"
             print_info "Pressione Ctrl+C para encerrar."
             PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
-            ros2 launch perception perception.launch.py camera_src:=usb
+            ros2 launch perception perception.launch.py camera_src:=usb enable_display:=true
             ;;
         8)
             print_header "Testando com câmera CSI (Jetson)"
             print_info "Pressione Ctrl+C para encerrar."
             PYTHONIOENCODING=utf8 LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH" \
-            ros2 launch perception perception.launch.py camera_src:=csi
+            ros2 launch perception perception.launch.py camera_src:=csi enable_display:=true
             ;;
         9)
             print_header "Executando todos os testes sequencialmente"

@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# Wrapper para o comando ros2 com configurações UTF-8
+# Uso: ./ros2_utf8 <comandos ros2 normais>
+# Exemplo: ./ros2_utf8 launch perception perception.launch.py camera_src:=csi
+
+# Configurar ambiente com codificação UTF-8
+export PYTHONIOENCODING=utf8
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+
+# Adicionar caminhos de bibliotecas importantes para Python
+export PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH"
+
+# Mensagem de uso
+if [ "$#" -eq 0 ]; then
+    echo "Uso: $(basename $0) <comandos ros2>"
+    echo "Exemplo: $(basename $0) launch perception perception.launch.py camera_src:=csi"
+    exit 0
+fi
+
+# Executar comando ros2 com as variáveis de ambiente configuradas
+ros2 "$@" 
