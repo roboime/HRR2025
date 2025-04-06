@@ -10,6 +10,7 @@ from cv_bridge import CvBridge, CvBridgeError
 import threading
 import time
 import subprocess
+import os
 
 class IMX219CameraNode(Node):
     """
@@ -88,6 +89,9 @@ class IMX219CameraNode(Node):
 
     def init_camera(self):
         """Inicializa a câmera com configurações otimizadas."""
+        # Verificar se os dispositivos da câmera estão disponíveis
+        self.debug_camera_devices()
+        
         # Pipeline GStreamer otimizado para IMX219
         pipeline = (
             f"nvarguscamerasrc sensor-id=0 "
@@ -133,13 +137,96 @@ class IMX219CameraNode(Node):
             f"appsink max-buffers=1 drop=True"
         )
         
-        self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+        self.get_logger().info(f'Pipeline GStreamer: {pipeline}')
         
-        if not self.cap.isOpened():
-            self.get_logger().error('Falha ao abrir câmera!')
-            raise RuntimeError('Falha ao abrir câmera!')
+        try:
+            self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
             
-        self.get_logger().info('Câmera inicializada com sucesso')
+            if not self.cap.isOpened():
+                self.get_logger().warn('Falha ao abrir câmera com o primeiro método. Tentando método alternativo...')
+                
+                # Tentar método alternativo com pipeline mais simples
+                alt_pipeline = (
+                    f"nvarguscamerasrc sensor-id=0 ! "
+                    f"video/x-raw(memory:NVMM), "
+                    f"width=(int){self.width}, height=(int){self.height}, "
+                    f"format=(string)NV12, framerate=(fraction){self.camera_fps}/1 ! "
+                    f"nvvidconv flip-method={self.get_parameter('flip_method').value} ! "
+                    f"video/x-raw, format=(string)BGRx ! "
+                    f"videoconvert ! "
+                    f"video/x-raw, format=(string)BGR ! "
+                    f"appsink"
+                )
+                
+                self.get_logger().info(f'Pipeline alternativo: {alt_pipeline}')
+                self.cap = cv2.VideoCapture(alt_pipeline, cv2.CAP_GSTREAMER)
+                
+                if not self.cap.isOpened():
+                    # Tentar método direto com dispositivo V4L2
+                    for dev_id in range(10):  # Tentar dispositivos de 0 a 9
+                        dev_path = f"/dev/video{dev_id}"
+                        if os.path.exists(dev_path):
+                            self.get_logger().info(f'Tentando abrir diretamente: {dev_path}')
+                            self.cap = cv2.VideoCapture(dev_id)
+                            if self.cap.isOpened():
+                                self.get_logger().info(f'Dispositivo {dev_path} aberto com sucesso')
+                                
+                                # Configurar propriedades
+                                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                                self.cap.set(cv2.CAP_PROP_FPS, self.camera_fps)
+                                
+                                # Verificar se as configurações foram aplicadas
+                                actual_width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                                actual_height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                                actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
+                                
+                                self.get_logger().info(f'Configurações aplicadas: {actual_width}x{actual_height} @ {actual_fps}fps')
+                                break
+                    
+                    if not self.cap.isOpened():
+                        # Como último recurso, tentar abrir a câmera USB
+                        self.get_logger().warn('Tentando abrir câmera USB como último recurso...')
+                        self.cap = cv2.VideoCapture(0)
+                        
+                        if not self.cap.isOpened():
+                            self.get_logger().error('Falha ao abrir qualquer câmera!')
+                            raise RuntimeError('Falha ao abrir câmera!')
+                
+            self.get_logger().info('Câmera inicializada com sucesso')
+        except Exception as e:
+            self.get_logger().error(f'Exceção ao inicializar câmera: {e}')
+            self.debug_camera_devices()
+            raise RuntimeError(f'Falha ao abrir câmera: {e}')
+
+    def debug_camera_devices(self):
+        """Debugar dispositivos de câmera disponíveis."""
+        try:
+            # Verificar dispositivos de vídeo
+            self.get_logger().info('Verificando dispositivos de câmera disponíveis:')
+            try:
+                result = subprocess.check_output(['ls', '-l', '/dev/video*']).decode('utf-8')
+                self.get_logger().info(f'Dispositivos de vídeo:\n{result}')
+            except subprocess.CalledProcessError:
+                self.get_logger().error('Não foram encontrados dispositivos de vídeo (/dev/video*)')
+            
+            # Verificar módulos de kernel
+            try:
+                modules = subprocess.check_output(['lsmod']).decode('utf-8')
+                if 'tegra_camera' in modules:
+                    self.get_logger().info('Módulo tegra_camera está carregado')
+                else:
+                    self.get_logger().warn('Módulo tegra_camera não está carregado')
+            except Exception as e:
+                self.get_logger().error(f'Erro ao verificar módulos: {e}')
+            
+            # Verificar permissões
+            uid = os.getuid()
+            gid = os.getgid()
+            self.get_logger().info(f'UID: {uid}, GID: {gid}')
+            self.get_logger().info(f'CUDA_VISIBLE_DEVICES: {os.environ.get("CUDA_VISIBLE_DEVICES", "não definido")}')
+        except Exception as e:
+            self.get_logger().error(f'Erro ao debugar dispositivos: {e}')
 
     def capture_loop(self):
         """Loop principal de captura com processamento CUDA."""
