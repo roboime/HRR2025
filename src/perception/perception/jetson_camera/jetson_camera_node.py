@@ -207,6 +207,20 @@ class IMX219CameraNode(Node):
             try:
                 result = subprocess.check_output(['ls', '-l', '/dev/video*']).decode('utf-8')
                 self.get_logger().info(f'Dispositivos de vídeo:\n{result}')
+                
+                # Verificar mais detalhes sobre a câmera detectada
+                for dev_id in range(10):
+                    dev_path = f"/dev/video{dev_id}"
+                    if os.path.exists(dev_path):
+                        try:
+                            # Verificar detalhes da câmera com v4l2-ctl se disponível
+                            try:
+                                caps = subprocess.check_output(['v4l2-ctl', '--device', dev_path, '--list-formats-ext']).decode('utf-8')
+                                self.get_logger().info(f'Capacidades da câmera {dev_path}:\n{caps}')
+                            except (subprocess.SubprocessError, FileNotFoundError):
+                                self.get_logger().info(f'v4l2-ctl não disponível para verificar {dev_path}')
+                        except Exception as e:
+                            self.get_logger().warn(f'Erro ao verificar detalhes de {dev_path}: {e}')
             except subprocess.CalledProcessError:
                 self.get_logger().error('Não foram encontrados dispositivos de vídeo (/dev/video*)')
             
@@ -217,14 +231,29 @@ class IMX219CameraNode(Node):
                     self.get_logger().info('Módulo tegra_camera está carregado')
                 else:
                     self.get_logger().warn('Módulo tegra_camera não está carregado')
-            except Exception as e:
-                self.get_logger().error(f'Erro ao verificar módulos: {e}')
+            except (subprocess.SubprocessError, FileNotFoundError):
+                self.get_logger().warn('Comando lsmod não disponível no container')
             
             # Verificar permissões
             uid = os.getuid()
             gid = os.getgid()
             self.get_logger().info(f'UID: {uid}, GID: {gid}')
             self.get_logger().info(f'CUDA_VISIBLE_DEVICES: {os.environ.get("CUDA_VISIBLE_DEVICES", "não definido")}')
+            
+            # Verificar se estamos em um ambiente containerizado
+            if os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv'):
+                self.get_logger().info('Executando em ambiente containerizado')
+            
+            # Verificar se o GStreamer NVARGUS está disponível
+            try:
+                gst_output = subprocess.check_output(['gst-inspect-1.0', 'nvarguscamerasrc'], stderr=subprocess.STDOUT).decode('utf-8')
+                if 'nvarguscamerasrc' in gst_output:
+                    self.get_logger().info('Plugin GStreamer nvarguscamerasrc disponível')
+                else:
+                    self.get_logger().warn('Plugin GStreamer nvarguscamerasrc não está disponível')
+            except (subprocess.SubprocessError, FileNotFoundError):
+                self.get_logger().warn('Não foi possível verificar o plugin nvarguscamerasrc. GStreamer pode não estar disponível')
+            
         except Exception as e:
             self.get_logger().error(f'Erro ao debugar dispositivos: {e}')
 
@@ -332,17 +361,37 @@ class IMX219CameraNode(Node):
     def monitor_resources(self):
         """Monitora recursos do sistema."""
         try:
-            # Temperatura
-            temp = float(subprocess.check_output(['cat', '/sys/class/thermal/thermal_zone0/temp']).decode()) / 1000.0
+            # Temperatura - tratamento para ambiente containerizado
+            try:
+                temp = float(subprocess.check_output(['cat', '/sys/class/thermal/thermal_zone0/temp']).decode()) / 1000.0
+                self.get_logger().info(f'Temperatura: {temp:.1f}°C')
+                
+                # Alertar se temperatura muito alta
+                if temp > 80.0:
+                    self.get_logger().warn('Temperatura muito alta! Considere reduzir FPS ou resolução')
+            except (subprocess.SubprocessError, FileNotFoundError, ValueError):
+                self.get_logger().debug('Não foi possível ler a temperatura')
             
-            # Uso de GPU via tegrastats
-            tegrastats = subprocess.check_output(['tegrastats', '--interval', '1', '--count', '1']).decode()
+            # Estatísticas do GPU via tegrastats (quando disponível)
+            try:
+                tegrastats = subprocess.check_output(['tegrastats', '--interval', '1', '--count', '1']).decode()
+                self.get_logger().info(f'Tegrastats: {tegrastats}')
+            except (subprocess.SubprocessError, FileNotFoundError):
+                # Tentar nvidia-smi como alternativa
+                try:
+                    gpu_stats = subprocess.check_output(['nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total', '--format=csv']).decode()
+                    self.get_logger().info(f'GPU Stats: {gpu_stats}')
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    self.get_logger().debug('Não foi possível obter estatísticas da GPU')
             
-            self.get_logger().info(f'Temperatura: {temp:.1f}°C | Tegrastats: {tegrastats}')
-            
-            # Alertar se temperatura muito alta
-            if temp > 80.0:
-                self.get_logger().warn('Temperatura muito alta! Considere reduzir FPS ou resolução')
+            # Verificar estatísticas da câmera
+            if hasattr(self, 'cap') and self.cap.isOpened():
+                try:
+                    frame_count = self.cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                    current_fps = self.cap.get(cv2.CAP_PROP_FPS)
+                    self.get_logger().info(f'Câmera: FPS={current_fps:.1f}')
+                except:
+                    pass
                 
         except Exception as e:
             self.get_logger().error(f'Erro ao monitorar recursos: {e}')
