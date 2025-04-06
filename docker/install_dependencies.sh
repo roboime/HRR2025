@@ -11,7 +11,7 @@ echo -e "${VERDE}Instalando dependências básicas do sistema...${SEM_COR}"
 apt-get update && apt-get install -y build-essential cmake python3-dev libhdf5-dev \
     libopencv-dev python3-pip python3-setuptools \
     libhdf5-serial-dev hdf5-tools zlib1g-dev zip libjpeg8-dev \
-    liblapack-dev libblas-dev gfortran pkg-config
+    liblapack-dev libblas-dev gfortran pkg-config x11-apps
 
 # Instalando dependências adicionais do sistema
 echo -e "${VERDE}Instalando dependências adicionais do sistema...${SEM_COR}"

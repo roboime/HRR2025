@@ -107,7 +107,7 @@ def generate_launch_description():
         if camera_src_value == 'csi':
             camera_params = [
                 '--ros-args',
-                '-p', f"camera_mode:=2",
+                '-p', f"camera_mode:=6",
                 '-p', f"camera_fps:={config['camera']['fps']}",
                 '-p', f"flip_method:=0",
                 '-p', f"exposure_time:=13333",

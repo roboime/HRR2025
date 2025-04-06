@@ -17,8 +17,8 @@ def generate_launch_description():
     # Declarar argumentos de inicialização
     camera_mode = DeclareLaunchArgument(
         'camera_mode',
-        default_value='2',  # 0=3280x2464@21fps, 1=1920x1080@60fps, 2=1280x720@120fps
-        description='Modo da câmera IMX219'
+        default_value='6',  # Modo identificado pelo nvgstcapture para 1280x720@120fps
+        description='Modo da câmera IMX219 (0=3280x2464@21fps, 1=1920x1080@60fps, 2=1280x720@120fps, 3=1280x720@60fps, 4=1920x1080@30fps, 5=1640x1232@30fps, 6=1280x720@120fps)'
     )
     
     camera_fps = DeclareLaunchArgument(

@@ -49,7 +49,11 @@ class IMX219CameraNode(Node):
         self.camera_modes = {
             0: (3280, 2464, 21),  # Máxima resolução
             1: (1920, 1080, 60),  # Full HD
-            2: (1280, 720, 120)   # HD
+            2: (1280, 720, 120),  # HD
+            3: (1280, 720, 60),   # HD (60fps)
+            4: (1920, 1080, 30),  # Full HD (30fps)
+            5: (1640, 1232, 30),  # 4:3 (30fps)
+            6: (1280, 720, 120)   # HD (120fps, modo da câmera IMX219)
         }
         
         # Obter modo da câmera
