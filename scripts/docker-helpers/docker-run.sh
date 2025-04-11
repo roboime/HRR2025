@@ -28,12 +28,16 @@ else
       --runtime nvidia \
       --privileged \
       --gpus all \
+      --env="DISPLAY" \
+      --env="QT_X11_NO_MITSHM=1" \
       -e NVIDIA_VISIBLE_DEVICES=all \
       -e NVIDIA_DRIVER_CAPABILITIES=all,compute,video,utility,graphics \
       -v /dev:/dev \
       --network host --ipc=host \
       -e DISPLAY=$DISPLAY \
-      -v /tmp/.X11-unix:/tmp/.X11-unix \
+      -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+      -v $HOME/.Xauthority:/root/.Xauthority:ro \
+      --env="XAUTHORITY=/root/.Xauthority"
       -v /tmp/argus_socket:/tmp/argus_socket \
       -v $(pwd):/ros2_ws \
       -v /usr/local/cuda:/usr/local/cuda \
