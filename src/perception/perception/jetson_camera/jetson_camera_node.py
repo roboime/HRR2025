@@ -90,7 +90,13 @@ class IMX219CameraNode(Node):
     def init_camera(self):
         """Inicializa a câmera com configurações otimizadas."""
         # Verificar se os dispositivos da câmera estão disponíveis
-        self.debug_camera_devices()
+        devices_available = self.debug_camera_devices()
+        
+        # Se não houver dispositivos disponíveis, tentar modo de simulação
+        if not devices_available:
+            self.get_logger().warn('Nenhum dispositivo de câmera encontrado. Iniciando modo de simulação.')
+            self.setup_simulation_mode()
+            return
         
         # Pipeline GStreamer otimizado para IMX219
         pipeline = (
@@ -200,39 +206,64 @@ class IMX219CameraNode(Node):
             raise RuntimeError(f'Falha ao abrir câmera: {e}')
 
     def debug_camera_devices(self):
-        """Debugar dispositivos de câmera disponíveis."""
+        """
+        Debugar dispositivos de câmera disponíveis.
+        Retorna: True se pelo menos um dispositivo de câmera está disponível, False caso contrário
+        """
+        devices_available = False
+        
         try:
             # Verificar dispositivos de vídeo
             self.get_logger().info('Verificando dispositivos de câmera disponíveis:')
             try:
-                result = subprocess.check_output(['ls', '-l', '/dev/video*']).decode('utf-8')
-                self.get_logger().info(f'Dispositivos de vídeo:\n{result}')
-                
-                # Verificar mais detalhes sobre a câmera detectada
-                for dev_id in range(10):
+                # Verificar diretamente se /dev/video0 existe em vez de usar 'ls'
+                if os.path.exists('/dev/video0'):
+                    self.get_logger().info('Dispositivo /dev/video0 encontrado')
+                    devices_available = True
+                else:
+                    self.get_logger().warn('Dispositivo /dev/video0 não encontrado')
+                    
+                # Também verificar outros dispositivos
+                for dev_id in range(1, 10):  # Verificar dispositivos de 1 a 9 (0 já verificado acima)
                     dev_path = f"/dev/video{dev_id}"
                     if os.path.exists(dev_path):
-                        try:
-                            # Verificar detalhes da câmera com v4l2-ctl se disponível
+                        self.get_logger().info(f'Dispositivo {dev_path} encontrado')
+                        devices_available = True
+                
+                # Verificar mais detalhes apenas se um dispositivo for encontrado
+                if devices_available:
+                    for dev_id in range(10):
+                        dev_path = f"/dev/video{dev_id}"
+                        if os.path.exists(dev_path):
                             try:
-                                caps = subprocess.check_output(['v4l2-ctl', '--device', dev_path, '--list-formats-ext']).decode('utf-8')
-                                self.get_logger().info(f'Capacidades da câmera {dev_path}:\n{caps}')
-                            except (subprocess.SubprocessError, FileNotFoundError):
-                                self.get_logger().info(f'v4l2-ctl não disponível para verificar {dev_path}')
-                        except Exception as e:
-                            self.get_logger().warn(f'Erro ao verificar detalhes de {dev_path}: {e}')
-            except subprocess.CalledProcessError:
-                self.get_logger().error('Não foram encontrados dispositivos de vídeo (/dev/video*)')
-            
-            # Verificar módulos de kernel
-            try:
-                modules = subprocess.check_output(['lsmod']).decode('utf-8')
-                if 'tegra_camera' in modules:
-                    self.get_logger().info('Módulo tegra_camera está carregado')
-                else:
-                    self.get_logger().warn('Módulo tegra_camera não está carregado')
-            except (subprocess.SubprocessError, FileNotFoundError):
-                self.get_logger().warn('Comando lsmod não disponível no container')
+                                # Verificar se o dispositivo é acessível (permissões)
+                                mode = os.stat(dev_path).st_mode
+                                readable = bool(mode & 0o444)  # Verificar permissão de leitura
+                                self.get_logger().info(f'Dispositivo {dev_path} é legível: {readable}')
+                                
+                                # Verificar grupos do dispositivo
+                                group_id = os.stat(dev_path).st_gid
+                                user_groups = os.getgroups()
+                                self.get_logger().info(f'Grupo do dispositivo: {group_id}, Grupos do usuário: {user_groups}')
+                                
+                                # Verificar detalhes da câmera com v4l2-ctl se disponível
+                                try:
+                                    caps = subprocess.check_output(['v4l2-ctl', '--device', dev_path, '--list-formats-ext']).decode('utf-8')
+                                    self.get_logger().info(f'Capacidades da câmera {dev_path}:\n{caps}')
+                                except (subprocess.SubprocessError, FileNotFoundError):
+                                    self.get_logger().info(f'v4l2-ctl não disponível para verificar {dev_path}')
+                                    
+                                # Tentar abrir o dispositivo diretamente com OpenCV para testar acesso
+                                test_cap = cv2.VideoCapture(dev_id)
+                                if test_cap.isOpened():
+                                    self.get_logger().info(f'Teste de abertura do dispositivo {dev_path} com OpenCV: SUCESSO')
+                                    test_cap.release()
+                                else:
+                                    self.get_logger().warn(f'Teste de abertura do dispositivo {dev_path} com OpenCV: FALHA')
+                            except Exception as e:
+                                self.get_logger().warn(f'Erro ao verificar detalhes de {dev_path}: {e}')
+            except Exception as e:
+                self.get_logger().warn(f'Erro ao verificar dispositivos: {e}')
             
             # Verificar permissões
             uid = os.getuid()
@@ -243,6 +274,17 @@ class IMX219CameraNode(Node):
             # Verificar se estamos em um ambiente containerizado
             if os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv'):
                 self.get_logger().info('Executando em ambiente containerizado')
+                
+                # Verificar mapeamento de dispositivos no Docker
+                try:
+                    mounts = subprocess.check_output(['cat', '/proc/self/mounts']).decode('utf-8')
+                    if '/dev/video' in mounts:
+                        self.get_logger().info('Dispositivos de vídeo estão montados no container')
+                    else:
+                        self.get_logger().warn('Não há montagem de dispositivos de vídeo no container')
+                        self.get_logger().info('Talvez seja necessário executar o Docker com --device=/dev/video0:/dev/video0')
+                except Exception:
+                    pass
             
             # Verificar se o GStreamer NVARGUS está disponível
             try:
@@ -254,8 +296,19 @@ class IMX219CameraNode(Node):
             except (subprocess.SubprocessError, FileNotFoundError):
                 self.get_logger().warn('Não foi possível verificar o plugin nvarguscamerasrc. GStreamer pode não estar disponível')
             
+            # Verificar diretório de dispositivos no Windows (WSL)
+            if os.name == 'nt' or ('WSL' in os.uname().release if hasattr(os, 'uname') else False):
+                self.get_logger().info('Ambiente Windows/WSL detectado. Verificando dispositivos de vídeo disponíveis:')
+                try:
+                    # No Windows, usar DirectShow para listar dispositivos
+                    self.get_logger().info('Ambiente Windows não suporta diretamente /dev/video*. Use webcam USB.')
+                except Exception:
+                    pass
+            
         except Exception as e:
             self.get_logger().error(f'Erro ao debugar dispositivos: {e}')
+        
+        return devices_available
 
     def capture_loop(self):
         """Loop principal de captura com processamento CUDA."""
@@ -387,11 +440,17 @@ class IMX219CameraNode(Node):
             # Verificar estatísticas da câmera
             if hasattr(self, 'cap') and self.cap.isOpened():
                 try:
-                    frame_count = self.cap.get(cv2.CAP_PROP_FRAME_COUNT)
-                    current_fps = self.cap.get(cv2.CAP_PROP_FPS)
+                    # Se o FPS não puder ser obtido, use o valor configurado
+                    try:
+                        current_fps = self.cap.get(cv2.CAP_PROP_FPS)
+                        if current_fps <= 0:
+                            current_fps = self.camera_fps
+                    except:
+                        current_fps = self.camera_fps
+                        
                     self.get_logger().info(f'Câmera: FPS={current_fps:.1f}')
-                except:
-                    pass
+                except Exception as e:
+                    self.get_logger().warn(f'Erro ao obter estatísticas da câmera: {e}')
                 
         except Exception as e:
             self.get_logger().error(f'Erro ao monitorar recursos: {e}')

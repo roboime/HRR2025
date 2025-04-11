@@ -122,12 +122,17 @@ if ! python3 -c "import tensorflow" 2>/dev/null; then
         libcudnn8
         
     #Instalação de plugins gstreamer
-    apt-get update && apt-get install -y \
+    sudo apt-get update && sudo apt-get install -y \
+    gstreamer1.0-tools \
+    gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
     gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav \
     gstreamer1.0-x \
-    gstreamer1.0-tools \
-    libgstreamer1.0-dev
+    libgstreamer1.0-dev \
+
+
     
     # Configurar variáveis de ambiente para CUDA
     export CUDA_HOME=/usr/local/cuda-10.2
