@@ -380,6 +380,100 @@ class IMX219CameraNode(Node):
         # Configurar um timer para atualizar a imagem simulada (simulando FPS real)
         self.sim_timer = self.create_timer(1.0/self.camera_fps, self.update_simulated_frame)
 
+    def debug_camera_devices(self):
+        """
+        Debugar dispositivos de câmera disponíveis.
+        Retorna: True se pelo menos um dispositivo de câmera está disponível, False caso contrário
+        """
+        devices_available = False
+        
+        try:
+            # Verificar dispositivos de vídeo
+            self.get_logger().info('Verificando dispositivos de câmera disponíveis:')
+            try:
+                # Verificar diretamente se /dev/video0 existe em vez de usar 'ls'
+                if os.path.exists('/dev/video0'):
+                    self.get_logger().info('Dispositivo /dev/video0 encontrado')
+                    devices_available = True
+                else:
+                    self.get_logger().warn('Dispositivo /dev/video0 não encontrado')
+                    
+                # Também verificar outros dispositivos
+                for dev_id in range(1, 10):  # Verificar dispositivos de 1 a 9 (0 já verificado acima)
+                    dev_path = f"/dev/video{dev_id}"
+                    if os.path.exists(dev_path):
+                        self.get_logger().info(f'Dispositivo {dev_path} encontrado')
+                        devices_available = True
+                
+                # Verificar mais detalhes apenas se um dispositivo for encontrado
+                if devices_available:
+                    for dev_id in range(10):
+                        dev_path = f"/dev/video{dev_id}"
+                        if os.path.exists(dev_path):
+                            try:
+                                # Verificar se o dispositivo é acessível (permissões)
+                                mode = os.stat(dev_path).st_mode
+                                readable = bool(mode & 0o444)  # Verificar permissão de leitura
+                                self.get_logger().info(f'Dispositivo {dev_path} é legível: {readable}')
+                                
+                                # Verificar grupos do dispositivo
+                                group_id = os.stat(dev_path).st_gid
+                                user_groups = os.getgroups()
+                                self.get_logger().info(f'Grupo do dispositivo: {group_id}, Grupos do usuário: {user_groups}')
+                                
+                                # Verificar detalhes da câmera com v4l2-ctl se disponível
+                                try:
+                                    caps = subprocess.check_output(['v4l2-ctl', '--device', dev_path, '--list-formats-ext']).decode('utf-8')
+                                    self.get_logger().info(f'Capacidades da câmera {dev_path}:\n{caps}')
+                                except (subprocess.SubprocessError, FileNotFoundError):
+                                    self.get_logger().info(f'v4l2-ctl não disponível para verificar {dev_path}')
+                                    
+                                # Tentar abrir o dispositivo diretamente com OpenCV para testar acesso
+                                test_cap = cv2.VideoCapture(dev_id)
+                                if test_cap.isOpened():
+                                    self.get_logger().info(f'Teste de abertura do dispositivo {dev_path} com OpenCV: SUCESSO')
+                                    test_cap.release()
+                                else:
+                                    self.get_logger().warn(f'Teste de abertura do dispositivo {dev_path} com OpenCV: FALHA')
+                            except Exception as e:
+                                self.get_logger().warn(f'Erro ao verificar detalhes de {dev_path}: {str(e)}')
+            except Exception as e:
+                self.get_logger().warn(f'Erro ao verificar dispositivos: {str(e)}')
+            
+            # Verificar permissões
+            uid = os.getuid()
+            gid = os.getgid()
+            self.get_logger().info(f'UID: {uid}, GID: {gid}')
+            self.get_logger().info(f'CUDA_VISIBLE_DEVICES: {os.environ.get("CUDA_VISIBLE_DEVICES", "não definido")}')
+            
+            # Verificar se estamos em um ambiente containerizado
+            if os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv'):
+                self.get_logger().info('Executando em ambiente containerizado')
+            
+            # Verificar se o GStreamer NVARGUS está disponível
+            try:
+                gst_output = subprocess.check_output(['gst-inspect-1.0', 'nvarguscamerasrc'], stderr=subprocess.STDOUT).decode('utf-8')
+                if 'nvarguscamerasrc' in gst_output:
+                    self.get_logger().info('Plugin GStreamer nvarguscamerasrc disponível')
+                else:
+                    self.get_logger().warn('Plugin GStreamer nvarguscamerasrc não está disponível')
+            except (subprocess.SubprocessError, FileNotFoundError):
+                self.get_logger().warn('Não foi possível verificar o plugin nvarguscamerasrc. GStreamer pode não estar disponível')
+            
+            # Verificar diretório de dispositivos no Windows (WSL)
+            if os.name == 'nt' or ('WSL' in os.uname().release if hasattr(os, 'uname') else False):
+                self.get_logger().info('Ambiente Windows/WSL detectado. Verificando dispositivos de vídeo disponíveis:')
+                try:
+                    # No Windows, usar DirectShow para listar dispositivos
+                    self.get_logger().info('Ambiente Windows não suporta diretamente /dev/video*. Use webcam USB.')
+                except Exception:
+                    pass
+            
+        except Exception as e:
+            self.get_logger().error(f'Erro ao debugar dispositivos: {str(e)}')
+        
+        return devices_available
+
     def capture_loop(self):
         """Loop principal de captura com processamento CUDA."""
         # Verificar se estamos no modo simulado
