@@ -98,6 +98,11 @@ class IMX219CameraNode(Node):
             self.setup_simulation_mode()
             return
         
+        # Verificar se estamos em ambiente containerizado
+        is_container = os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv')
+        if is_container:
+            self.get_logger().info('Ambiente containerizado detectado, ajustando pipeline para compatibilidade.')
+            
         # Verificar se o plugin nvarguscamerasrc está disponível
         try:
             gst_check = subprocess.check_output(['gst-inspect-1.0', 'nvarguscamerasrc'], stderr=subprocess.STDOUT).decode('utf-8')
@@ -108,10 +113,74 @@ class IMX219CameraNode(Node):
             self.get_logger().error('GStreamer não disponível ou não configurado corretamente.')
             raise RuntimeError('GStreamer não disponível')
             
-        # Verificar se estamos em ambiente containerizado
-        is_container = os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv')
+        # Em ambientes containerizados, verificar se gst-launch básico funciona com nvarguscamerasrc
         if is_container:
-            self.get_logger().info('Ambiente containerizado detectado, ajustando pipeline para compatibilidade.')
+            gst_test_success = False
+            try:
+                self.get_logger().info('Testando funcionalidade básica de nvarguscamerasrc...')
+                test_pipeline = "gst-launch-1.0 nvarguscamerasrc sensor-id=0 num-buffers=1 ! fakesink"
+                subprocess.check_call(test_pipeline, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.get_logger().info('Teste básico de nvarguscamerasrc bem-sucedido.')
+                gst_test_success = True
+            except subprocess.CalledProcessError as e:
+                self.get_logger().error(f'Teste de nvarguscamerasrc falhou: {str(e)}')
+                self.get_logger().error('Problema fundamental com o acesso à câmera CSI.')
+                raise RuntimeError('Falha no teste básico de nvarguscamerasrc')
+                
+            if gst_test_success:
+                # Configurar variáveis de ambiente específicas para NVIDIA
+                os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+                if "DISPLAY" in os.environ:
+                    self.get_logger().info(f'Variável DISPLAY encontrada: {os.environ["DISPLAY"]}')
+                
+                # Para ambientes containerizados, desabilitar EGL e configurar corretamente
+                os.environ["GST_GL_API"] = "gles2"
+                os.environ["GST_GL_PLATFORM"] = "egl"
+                os.environ["NVIDIA_DRIVER_CAPABILITIES"] = "compute,video,utility"
+                if "NVIDIA_VISIBLE_DEVICES" not in os.environ:
+                    os.environ["NVIDIA_VISIBLE_DEVICES"] = "all"
+                
+                # Importante: desativar o GL nos pipelines GStreamer para evitar problemas de EGL
+                os.environ["GST_GL_XINITTHREADS"] = "0"
+                os.environ["__GL_SYNC_TO_VBLANK"] = "0"
+                
+                self.get_logger().info('Variáveis de ambiente configuradas para contêiner.')
+                
+                # Testar diretamente com um pipeline V4L2
+                self.get_logger().info('Em ambiente containerizado, testando acesso direto V4L2 primeiro...')
+                try:
+                    # Abrir diretamente com OpenCV via V4L2
+                    for dev_id in range(10):
+                        dev_path = f"/dev/video{dev_id}"
+                        if os.path.exists(dev_path):
+                            self.get_logger().info(f'Tentando abrir diretamente: {dev_path}')
+                            self.cap = cv2.VideoCapture(dev_id)
+                            if self.cap.isOpened():
+                                self.get_logger().info(f'Dispositivo {dev_path} aberto com sucesso via V4L2 direto')
+                                
+                                # Configurar propriedades
+                                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                                self.cap.set(cv2.CAP_PROP_FPS, self.camera_fps)
+                                
+                                # Verificar se as configurações foram aplicadas
+                                actual_width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                                actual_height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                                actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
+                                
+                                self.get_logger().info(f'Configurações aplicadas: {actual_width}x{actual_height} @ {actual_fps}fps')
+                                
+                                # Configurar cálculo de FPS real
+                                self.frame_count = 0
+                                self.last_fps_time = time.time()
+                                self.real_fps = 0.0
+                                
+                                self.get_logger().info('Câmera inicializada com sucesso via acesso direto V4L2')
+                                return  # Sucesso, sair do método
+                                
+                except Exception as e:
+                    self.get_logger().warn(f'Falha ao abrir diretamente via V4L2: {str(e)}')
+                    self.get_logger().info('Tentando GStreamer como alternativa...')
         
         # Pipeline GStreamer otimizado para IMX219 com aceleração CUDA
         # Calcular framerate como fração reduzida para evitar problemas
@@ -148,131 +217,129 @@ class IMX219CameraNode(Node):
         # Pipeline principal com envio para appsink (para ROS) e opcionalmente para ximagesink (display)
         display_enabled = self.get_parameter('enable_display').value and has_display
         
-        # Definir pipeline base com nvarguscamerasrc
-        pipeline = (
-            f"nvarguscamerasrc sensor-id=0 "
-            f"exposuretimerange='{self.get_parameter('exposure_time').value} {self.get_parameter('exposure_time').value}' "
-            f"gainrange='{self.get_parameter('gain').value} {self.get_parameter('gain').value}' "
-            f"wbmode={self.get_parameter('awb_mode').value} "
-            f"tnr-mode=2 ee-mode=2 "  # Redução de ruído temporal e aprimoramento de bordas
-            f"saturation={self.get_parameter('saturation').value} "
-            f"brightness={self.get_parameter('brightness').value} "
-            f"ispdigitalgainrange='1 2' "  # Otimização do ganho digital
-            f"! video/x-raw(memory:NVMM), "
-            f"width=(int){self.width}, height=(int){self.height}, "
-            f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} ! "
-        )
-        
-        # Adicionar processamento ISP se habilitado
-        if self.get_parameter('enable_isp').value:
-            pipeline += (
-                f"nvvidconv "
-                f"interpolation-method=5 "  # Melhor qualidade de interpolação
-                f"flip-method={self.get_parameter('flip_method').value} "
+        # Definir pipeline dependendo do ambiente
+        if is_container:
+            # Pipeline mais simples para ambiente containerizado sem EGL
+            pipeline = (
+                f"nvarguscamerasrc sensor-id=0 ! "
+                f"video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
+                f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} ! "
+                f"nvvidconv flip-method={self.get_parameter('flip_method').value} ! "
+                f"video/x-raw, format=(string)BGRx ! "
+                f"videoconvert ! video/x-raw, format=(string)BGR ! "
+                f"appsink max-buffers=2 drop=true sync=false"
             )
         else:
-            pipeline += f"nvvidconv flip-method={self.get_parameter('flip_method').value} "
-        
-        # Adicionar HDR se habilitado
-        if self.get_parameter('enable_hdr').value:
-            pipeline += "post-processing=1 "
-        
-        # Adicionar redução de ruído se habilitada
-        if self.get_parameter('enable_noise_reduction').value:
-            pipeline += "noise-reduction=1 "
-        
-        # Adicionar aprimoramento de bordas se habilitado
-        if self.get_parameter('enable_edge_enhancement').value:
-            pipeline += "edge-enhancement=1 "
-
-        # Em ambientes sem display, usar formato que não depende de EGL
-        pipeline += "! video/x-raw, format=(string)BGRx ! "
-        
-        # Usar tee apenas se tiver display habilitado e disponível
-        if display_enabled:
-            # Com display ativado, usar tee para dividir o fluxo
-            pipeline += (
-                "tee name=t ! queue ! "
-                "videoconvert ! video/x-raw, format=(string)BGR ! "
-                "appsink name=appsink max-buffers=2 drop=true sync=false "
-                "t. ! queue ! "
-                "videoconvert ! ximagesink sync=false"
-            )
-        else:
-            # Sem display, apenas enviar para appsink
-            pipeline += (
-                "videoconvert ! video/x-raw, format=(string)BGR ! "
-                "appsink max-buffers=2 drop=true sync=false"
+            # Pipeline completo para ambiente nativo
+            pipeline = (
+                f"nvarguscamerasrc sensor-id=0 "
+                f"exposuretimerange='{self.get_parameter('exposure_time').value} {self.get_parameter('exposure_time').value}' "
+                f"gainrange='{self.get_parameter('gain').value} {self.get_parameter('gain').value}' "
+                f"wbmode={self.get_parameter('awb_mode').value} "
+                f"tnr-mode=2 ee-mode=2 "  # Redução de ruído temporal e aprimoramento de bordas
+                f"saturation={self.get_parameter('saturation').value} "
+                f"brightness={self.get_parameter('brightness').value} "
+                f"ispdigitalgainrange='1 2' "  # Otimização do ganho digital
+                f"! video/x-raw(memory:NVMM), "
+                f"width=(int){self.width}, height=(int){self.height}, "
+                f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} ! "
+                f"nvvidconv flip-method={self.get_parameter('flip_method').value} ! "
+                f"video/x-raw, format=(string)BGRx ! "
+                f"videoconvert ! video/x-raw, format=(string)BGR ! "
+                f"appsink max-buffers=2 drop=true sync=false"
             )
         
         self.get_logger().info(f'Pipeline GStreamer: {pipeline}')
         
-        # Definir variáveis de ambiente para CUDA
-        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+        # Definir variáveis de ambiente para CUDA se ainda não estiverem definidas
+        if "CUDA_VISIBLE_DEVICES" not in os.environ:
+            os.environ["CUDA_VISIBLE_DEVICES"] = "0"
         
-        # Tentar abrir a câmera com o pipeline completo
+        # Tentar abrir a câmera com o pipeline GStreamer
         try:
-            # Limpar qualquer variável que possa interferir com EGL em contêiner
-            if is_container:
-                if "DISPLAY" in os.environ:
-                    self.get_logger().info(f'Variável DISPLAY encontrada: {os.environ["DISPLAY"]}')
-                
-                # Para ambientes containerizados, pode ser necessário desabilitar EGL
-                os.environ["GST_GL_API"] = "gles2"
-                os.environ["GST_GL_PLATFORM"] = "egl"
-                
-                # Configurar variáveis específicas para NVIDIA em contêineres
-                os.environ["NVIDIA_DRIVER_CAPABILITIES"] = "compute,video,utility"
-                if "NVIDIA_VISIBLE_DEVICES" not in os.environ:
-                    os.environ["NVIDIA_VISIBLE_DEVICES"] = "all"
-                
-                self.get_logger().info('Configurando variáveis de ambiente para GStreamer em contêiner')
-            
             # Abrir a câmera com o pipeline GStreamer
             self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
             
             if not self.cap.isOpened():
-                self.get_logger().error('Falha ao abrir câmera com o pipeline GStreamer. Testando pipeline simplificado...')
-                
-                # Tentar com pipeline simplificado para ambientes containerizados
-                simplified_pipeline = (
-                    f"nvarguscamerasrc sensor-id=0 ! "
-                    f"video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
-                    f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} ! "
-                    f"nvvidconv flip-method={self.get_parameter('flip_method').value} ! "
-                    f"video/x-raw, format=(string)BGRx ! "
-                    f"videoconvert ! video/x-raw, format=(string)BGR ! "
-                    f"appsink max-buffers=2 drop=true sync=false"
-                )
-                
-                self.get_logger().info(f'Pipeline simplificado: {simplified_pipeline}')
-                self.cap = cv2.VideoCapture(simplified_pipeline, cv2.CAP_GSTREAMER)
-                
-                if not self.cap.isOpened():
-                    # Executar gst-launch diretamente para diagnóstico
-                    self.get_logger().error('Falha com o pipeline simplificado. Executando teste de diagnóstico.')
+                if is_container:
+                    self.get_logger().error('Falha ao abrir câmera com GStreamer em ambiente containerizado.')
+                    self.get_logger().error('A integração entre GStreamer e OpenCV pode ser problemática em contêineres.')
+                    self.get_logger().info('Tentando método GST-LAUNCH integrado...')
                     
+                    # Tentar com abordagem alternativa que usa gst-launch diretamente
+                    # Esta abordagem contorna problemas de integração OpenCV-GStreamer em contêineres
                     try:
-                        # Teste mais básico possível
-                        test_pipeline = "gst-launch-1.0 nvarguscamerasrc sensor-id=0 num-buffers=1 ! fakesink"
-                        subprocess.check_call(test_pipeline, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                        self.get_logger().info('Teste básico de nvarguscamerasrc bem-sucedido.')
+                        # Criar um pipe nomeado temporário
+                        import tempfile
+                        import atexit
                         
-                        # Se o teste básico funcionou, tente identificar o problema específico
-                        self.get_logger().info('O dispositivo de câmera está funcionando, mas há problemas de integração com OpenCV.')
-                        self.get_logger().info('Verificando se há problemas de permissão ou configuração...')
-                        
-                        # Tentar obter mais informações sobre o dispositivo
-                        try:
-                            dev_info = subprocess.check_output(['ls', '-la', '/dev/video0']).decode()
-                            self.get_logger().info(f'Informações do dispositivo: {dev_info}')
-                        except:
-                            pass
+                        # Criar diretório temporário se não existir
+                        temp_dir = "/tmp/camera_pipes"
+                        if not os.path.exists(temp_dir):
+                            os.makedirs(temp_dir)
                             
-                    except subprocess.CalledProcessError as e:
-                        self.get_logger().error(f'Teste de nvarguscamerasrc falhou: {str(e)}')
-                        self.get_logger().error('Problema fundamental com o acesso à câmera CSI.')
-                    
+                        pipe_path = f"{temp_dir}/camera_pipe_{os.getpid()}"
+                        if os.path.exists(pipe_path):
+                            os.unlink(pipe_path)
+                        os.mkfifo(pipe_path)
+                        
+                        # Registrar limpeza ao sair
+                        def cleanup_pipe():
+                            if os.path.exists(pipe_path):
+                                os.unlink(pipe_path)
+                        atexit.register(cleanup_pipe)
+                        
+                        # Construir comando gst-launch para escrever frames em formato bruto para o pipe
+                        gst_cmd = (
+                            f"gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! "
+                            f"video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
+                            f"format=NV12, framerate={fps_num}/{fps_den} ! "
+                            f"nvvidconv flip-method={self.get_parameter('flip_method').value} ! "
+                            f"video/x-raw, format=BGRx ! "
+                            f"videoconvert ! video/x-raw, format=BGR ! "
+                            f"filesink location={pipe_path} append=true buffer-size=16777216"
+                        )
+                        
+                        # Executar gst-launch em background
+                        self.gst_process = subprocess.Popen(
+                            gst_cmd, 
+                            shell=True, 
+                            stdout=subprocess.PIPE, 
+                            stderr=subprocess.PIPE
+                        )
+                        
+                        # Aguardar um pouco para o pipeline iniciar
+                        time.sleep(2)
+                        
+                        # Verificar se o processo está rodando
+                        if self.gst_process.poll() is not None:
+                            stderr = self.gst_process.stderr.read().decode()
+                            self.get_logger().error(f"Falha ao iniciar gst-launch: {stderr}")
+                            raise RuntimeError(f"gst-launch falhou: {stderr}")
+                            
+                        # Criar VideoCapture para ler do pipe
+                        self.cap = cv2.VideoCapture(pipe_path)
+                        if not self.cap.isOpened():
+                            self.get_logger().error("Falha ao abrir pipe para leitura de frames")
+                            raise RuntimeError("Falha ao abrir pipe para leitura")
+                            
+                        self.get_logger().info("Câmera inicializada com sucesso via método GST-LAUNCH integrado")
+                        
+                        # Configurar variáveis para cálculo de FPS real
+                        self.frame_count = 0
+                        self.last_fps_time = time.time()
+                        self.real_fps = 0.0
+                        
+                        # Flag que indica que estamos usando o método alternativo
+                        self.using_gst_launch_direct = True
+                        return
+                        
+                    except Exception as pipe_error:
+                        self.get_logger().error(f"Falha com método GST-LAUNCH integrado: {str(pipe_error)}")
+                        raise RuntimeError(f"Todos os métodos de acesso à câmera falharam: {str(pipe_error)}")
+                else:
+                    # Em ambiente não-containerizado, tentar solução padrão
+                    self.get_logger().error('Falha ao abrir câmera com o pipeline GStreamer. Verifique conexões e drivers.')
                     raise RuntimeError('Falha ao abrir câmera com GStreamer')
             
             # Configurar cálculo de FPS real
@@ -290,99 +357,28 @@ class IMX219CameraNode(Node):
             self.debug_camera_devices()
             raise RuntimeError(f'Falha ao abrir câmera: {str(e)}')
 
-    def debug_camera_devices(self):
-        """
-        Debugar dispositivos de câmera disponíveis.
-        Retorna: True se pelo menos um dispositivo de câmera está disponível, False caso contrário
-        """
-        devices_available = False
+    def setup_simulation_mode(self):
+        """Configura o modo de simulação para a câmera quando dispositivos físicos não estão disponíveis."""
+        self.get_logger().info('Iniciando modo de simulação da câmera...')
         
-        try:
-            # Verificar dispositivos de vídeo
-            self.get_logger().info('Verificando dispositivos de câmera disponíveis:')
-            try:
-                # Verificar diretamente se /dev/video0 existe em vez de usar 'ls'
-                if os.path.exists('/dev/video0'):
-                    self.get_logger().info('Dispositivo /dev/video0 encontrado')
-                    devices_available = True
-                else:
-                    self.get_logger().warn('Dispositivo /dev/video0 não encontrado')
-                    
-                # Também verificar outros dispositivos
-                for dev_id in range(1, 10):  # Verificar dispositivos de 1 a 9 (0 já verificado acima)
-                    dev_path = f"/dev/video{dev_id}"
-                    if os.path.exists(dev_path):
-                        self.get_logger().info(f'Dispositivo {dev_path} encontrado')
-                        devices_available = True
-                
-                # Verificar mais detalhes apenas se um dispositivo for encontrado
-                if devices_available:
-                    for dev_id in range(10):
-                        dev_path = f"/dev/video{dev_id}"
-                        if os.path.exists(dev_path):
-                            try:
-                                # Verificar se o dispositivo é acessível (permissões)
-                                mode = os.stat(dev_path).st_mode
-                                readable = bool(mode & 0o444)  # Verificar permissão de leitura
-                                self.get_logger().info(f'Dispositivo {dev_path} é legível: {readable}')
-                                
-                                # Verificar grupos do dispositivo
-                                group_id = os.stat(dev_path).st_gid
-                                user_groups = os.getgroups()
-                                self.get_logger().info(f'Grupo do dispositivo: {group_id}, Grupos do usuário: {user_groups}')
-                                
-                                # Verificar detalhes da câmera com v4l2-ctl se disponível
-                                try:
-                                    caps = subprocess.check_output(['v4l2-ctl', '--device', dev_path, '--list-formats-ext']).decode('utf-8')
-                                    self.get_logger().info(f'Capacidades da câmera {dev_path}:\n{caps}')
-                                except (subprocess.SubprocessError, FileNotFoundError):
-                                    self.get_logger().info(f'v4l2-ctl não disponível para verificar {dev_path}')
-                                    
-                                # Tentar abrir o dispositivo diretamente com OpenCV para testar acesso
-                                test_cap = cv2.VideoCapture(dev_id)
-                                if test_cap.isOpened():
-                                    self.get_logger().info(f'Teste de abertura do dispositivo {dev_path} com OpenCV: SUCESSO')
-                                    test_cap.release()
-                                else:
-                                    self.get_logger().warn(f'Teste de abertura do dispositivo {dev_path} com OpenCV: FALHA')
-                            except Exception as e:
-                                self.get_logger().warn(f'Erro ao verificar detalhes de {dev_path}: {e}')
-            except Exception as e:
-                self.get_logger().warn(f'Erro ao verificar dispositivos: {e}')
-            
-            # Verificar permissões
-            uid = os.getuid()
-            gid = os.getgid()
-            self.get_logger().info(f'UID: {uid}, GID: {gid}')
-            self.get_logger().info(f'CUDA_VISIBLE_DEVICES: {os.environ.get("CUDA_VISIBLE_DEVICES", "não definido")}')
-            
-            # Verificar se estamos em um ambiente containerizado
-            if os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv'):
-                self.get_logger().info('Executando em ambiente containerizado')
-            
-            # Verificar se o GStreamer NVARGUS está disponível
-            try:
-                gst_output = subprocess.check_output(['gst-inspect-1.0', 'nvarguscamerasrc'], stderr=subprocess.STDOUT).decode('utf-8')
-                if 'nvarguscamerasrc' in gst_output:
-                    self.get_logger().info('Plugin GStreamer nvarguscamerasrc disponível')
-                else:
-                    self.get_logger().warn('Plugin GStreamer nvarguscamerasrc não está disponível')
-            except (subprocess.SubprocessError, FileNotFoundError):
-                self.get_logger().warn('Não foi possível verificar o plugin nvarguscamerasrc. GStreamer pode não estar disponível')
-            
-            # Verificar diretório de dispositivos no Windows (WSL)
-            if os.name == 'nt' or ('WSL' in os.uname().release if hasattr(os, 'uname') else False):
-                self.get_logger().info('Ambiente Windows/WSL detectado. Verificando dispositivos de vídeo disponíveis:')
-                try:
-                    # No Windows, usar DirectShow para listar dispositivos
-                    self.get_logger().info('Ambiente Windows não suporta diretamente /dev/video*. Use webcam USB.')
-                except Exception:
-                    pass
-            
-        except Exception as e:
-            self.get_logger().error(f'Erro ao debugar dispositivos: {e}')
+        # Criar uma imagem de teste
+        self.simulated_frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         
-        return devices_available
+        # Desenhar um padrão de teste na imagem para que seja visível
+        cv2.putText(self.simulated_frame, 'CAMERA SIMULADA', (self.width//2-150, self.height//2), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        
+        # Desenhar um círculo que se move para mostrar que é um vídeo simulado
+        self.circle_position = [self.width//4, self.height//4]
+        self.circle_direction = [5, 5]
+        
+        # Flag de simulação
+        self.is_simulated = True
+        
+        self.get_logger().info('Modo de simulação da câmera inicializado com sucesso')
+        
+        # Configurar um timer para atualizar a imagem simulada (simulando FPS real)
+        self.sim_timer = self.create_timer(1.0/self.camera_fps, self.update_simulated_frame)
 
     def capture_loop(self):
         """Loop principal de captura com processamento CUDA."""
@@ -391,6 +387,9 @@ class IMX219CameraNode(Node):
             # No modo simulado, a atualização é feita pelo timer
             return
             
+        # Verificar se estamos usando o método direto gst-launch
+        using_gst_direct = hasattr(self, 'using_gst_launch_direct') and self.using_gst_launch_direct
+        
         cuda_enabled = self.get_parameter('enable_cuda').value
         
         if cuda_enabled:
@@ -398,7 +397,7 @@ class IMX219CameraNode(Node):
             self.cuda_stream = cv2.cuda_Stream()
             self.cuda_upload = cv2.cuda_GpuMat()
             self.cuda_color = cv2.cuda_GpuMat()
-            self.cuda_download = cv2.cuda_GpuMat()  # Adicionando a variável que estava faltando
+            self.cuda_download = cv2.cuda_GpuMat()
         
         # Variáveis para cálculo de FPS real
         fps_update_interval = 1.0  # segundos
@@ -582,6 +581,14 @@ class IMX219CameraNode(Node):
         if hasattr(self, 'capture_thread') and self.capture_thread.is_alive():
             self.capture_thread.join(timeout=1.0)
         
+        # Encerrar processo gst-launch se estiver usando o método direto
+        if hasattr(self, 'gst_process') and hasattr(self, 'using_gst_launch_direct'):
+            try:
+                self.gst_process.terminate()
+                self.gst_process.wait(timeout=2)
+            except:
+                pass
+                
         if hasattr(self, 'cap') and self.cap.isOpened():
             self.cap.release()
             
