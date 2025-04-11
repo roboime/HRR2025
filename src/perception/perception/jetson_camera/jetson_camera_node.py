@@ -108,6 +108,11 @@ class IMX219CameraNode(Node):
             self.get_logger().error('GStreamer não disponível ou não configurado corretamente.')
             raise RuntimeError('GStreamer não disponível')
             
+        # Verificar se estamos em ambiente containerizado
+        is_container = os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv')
+        if is_container:
+            self.get_logger().info('Ambiente containerizado detectado, ajustando pipeline para compatibilidade.')
+        
         # Pipeline GStreamer otimizado para IMX219 com aceleração CUDA
         # Calcular framerate como fração reduzida para evitar problemas
         import math
@@ -122,10 +127,28 @@ class IMX219CameraNode(Node):
         fps_num //= divisor
         fps_den //= divisor
         
-        # Pipeline principal com envio para appsink (para ROS) e opcionalmente para ximagesink (display)
-        display_enabled = self.get_parameter('enable_display').value
+        # Detectar se temos acesso a EGL (necessário para alguns recursos NVMM)
+        try:
+            # Checar se a variável de ambiente DISPLAY está definida
+            has_display = "DISPLAY" in os.environ and os.environ["DISPLAY"]
+            # Em contêineres, mesmo que DISPLAY exista, pode não haver acesso real
+            if is_container:
+                has_display = False
+                # Adicionar tentativa de testar com comando simples
+                try:
+                    subprocess.check_call(['xdpyinfo'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    has_display = True
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    has_display = False
+        except Exception:
+            has_display = False
         
-        # Construir o pipeline base com nvarguscamerasrc
+        self.get_logger().info(f'Ambiente com display X11: {"Sim" if has_display else "Não"}')
+        
+        # Pipeline principal com envio para appsink (para ROS) e opcionalmente para ximagesink (display)
+        display_enabled = self.get_parameter('enable_display').value and has_display
+        
+        # Definir pipeline base com nvarguscamerasrc
         pipeline = (
             f"nvarguscamerasrc sensor-id=0 "
             f"exposuretimerange='{self.get_parameter('exposure_time').value} {self.get_parameter('exposure_time').value}' "
@@ -161,11 +184,11 @@ class IMX219CameraNode(Node):
         # Adicionar aprimoramento de bordas se habilitado
         if self.get_parameter('enable_edge_enhancement').value:
             pipeline += "edge-enhancement=1 "
-            
-        # Converter para BGRx para processamento
+
+        # Em ambientes sem display, usar formato que não depende de EGL
         pipeline += "! video/x-raw, format=(string)BGRx ! "
         
-        # Usar tee para enviar para appsink e para ximagesink (se display estiver habilitado)
+        # Usar tee apenas se tiver display habilitado e disponível
         if display_enabled:
             # Com display ativado, usar tee para dividir o fluxo
             pipeline += (
@@ -179,7 +202,7 @@ class IMX219CameraNode(Node):
             # Sem display, apenas enviar para appsink
             pipeline += (
                 "videoconvert ! video/x-raw, format=(string)BGR ! "
-                "appsink name=appsink max-buffers=2 drop=true sync=false"
+                "appsink max-buffers=2 drop=true sync=false"
             )
         
         self.get_logger().info(f'Pipeline GStreamer: {pipeline}')
@@ -187,22 +210,70 @@ class IMX219CameraNode(Node):
         # Definir variáveis de ambiente para CUDA
         os.environ["CUDA_VISIBLE_DEVICES"] = "0"
         
+        # Tentar abrir a câmera com o pipeline completo
         try:
-            # Abrir a câmera com o pipeline GStreamer e verificar se foi bem-sucedido
+            # Limpar qualquer variável que possa interferir com EGL em contêiner
+            if is_container:
+                if "DISPLAY" in os.environ:
+                    self.get_logger().info(f'Variável DISPLAY encontrada: {os.environ["DISPLAY"]}')
+                
+                # Para ambientes containerizados, pode ser necessário desabilitar EGL
+                os.environ["GST_GL_API"] = "gles2"
+                os.environ["GST_GL_PLATFORM"] = "egl"
+                
+                # Configurar variáveis específicas para NVIDIA em contêineres
+                os.environ["NVIDIA_DRIVER_CAPABILITIES"] = "compute,video,utility"
+                if "NVIDIA_VISIBLE_DEVICES" not in os.environ:
+                    os.environ["NVIDIA_VISIBLE_DEVICES"] = "all"
+                
+                self.get_logger().info('Configurando variáveis de ambiente para GStreamer em contêiner')
+            
+            # Abrir a câmera com o pipeline GStreamer
             self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
             
             if not self.cap.isOpened():
-                self.get_logger().error('Falha ao abrir câmera com o pipeline GStreamer. Verifique se nvarguscamerasrc está instalado e se a câmera CSI está conectada corretamente.')
+                self.get_logger().error('Falha ao abrir câmera com o pipeline GStreamer. Testando pipeline simplificado...')
                 
-                # Executar gst-launch diretamente para diagnóstico
-                try:
-                    test_pipeline = f"gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! fakesink"
-                    subprocess.check_call(test_pipeline, shell=True, stderr=subprocess.STDOUT)
-                    self.get_logger().info('Teste básico de nvarguscamerasrc bem-sucedido.')
-                except subprocess.CalledProcessError as e:
-                    self.get_logger().error(f'Teste de nvarguscamerasrc falhou: {e.output if hasattr(e, "output") else str(e)}')
+                # Tentar com pipeline simplificado para ambientes containerizados
+                simplified_pipeline = (
+                    f"nvarguscamerasrc sensor-id=0 ! "
+                    f"video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
+                    f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} ! "
+                    f"nvvidconv flip-method={self.get_parameter('flip_method').value} ! "
+                    f"video/x-raw, format=(string)BGRx ! "
+                    f"videoconvert ! video/x-raw, format=(string)BGR ! "
+                    f"appsink max-buffers=2 drop=true sync=false"
+                )
                 
-                raise RuntimeError('Falha ao abrir câmera com GStreamer')
+                self.get_logger().info(f'Pipeline simplificado: {simplified_pipeline}')
+                self.cap = cv2.VideoCapture(simplified_pipeline, cv2.CAP_GSTREAMER)
+                
+                if not self.cap.isOpened():
+                    # Executar gst-launch diretamente para diagnóstico
+                    self.get_logger().error('Falha com o pipeline simplificado. Executando teste de diagnóstico.')
+                    
+                    try:
+                        # Teste mais básico possível
+                        test_pipeline = "gst-launch-1.0 nvarguscamerasrc sensor-id=0 num-buffers=1 ! fakesink"
+                        subprocess.check_call(test_pipeline, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        self.get_logger().info('Teste básico de nvarguscamerasrc bem-sucedido.')
+                        
+                        # Se o teste básico funcionou, tente identificar o problema específico
+                        self.get_logger().info('O dispositivo de câmera está funcionando, mas há problemas de integração com OpenCV.')
+                        self.get_logger().info('Verificando se há problemas de permissão ou configuração...')
+                        
+                        # Tentar obter mais informações sobre o dispositivo
+                        try:
+                            dev_info = subprocess.check_output(['ls', '-la', '/dev/video0']).decode()
+                            self.get_logger().info(f'Informações do dispositivo: {dev_info}')
+                        except:
+                            pass
+                            
+                    except subprocess.CalledProcessError as e:
+                        self.get_logger().error(f'Teste de nvarguscamerasrc falhou: {str(e)}')
+                        self.get_logger().error('Problema fundamental com o acesso à câmera CSI.')
+                    
+                    raise RuntimeError('Falha ao abrir câmera com GStreamer')
             
             # Configurar cálculo de FPS real
             self.frame_count = 0
@@ -215,9 +286,9 @@ class IMX219CameraNode(Node):
             self.get_logger().info('Câmera inicializada com sucesso usando GStreamer')
             
         except Exception as e:
-            self.get_logger().error(f'Exceção ao inicializar câmera: {e}')
+            self.get_logger().error(f'Exceção ao inicializar câmera: {str(e)}')
             self.debug_camera_devices()
-            raise RuntimeError(f'Falha ao abrir câmera: {e}')
+            raise RuntimeError(f'Falha ao abrir câmera: {str(e)}')
 
     def debug_camera_devices(self):
         """
@@ -327,11 +398,27 @@ class IMX219CameraNode(Node):
             self.cuda_stream = cv2.cuda_Stream()
             self.cuda_upload = cv2.cuda_GpuMat()
             self.cuda_color = cv2.cuda_GpuMat()
+            self.cuda_download = cv2.cuda_GpuMat()  # Adicionando a variável que estava faltando
         
         # Variáveis para cálculo de FPS real
         fps_update_interval = 1.0  # segundos
         frame_times = []
         max_frame_times = 30  # Para média móvel
+        
+        # Tentar detectar problemas com CUDA em ambiente containerizado
+        is_container = os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv')
+        if is_container and cuda_enabled:
+            try:
+                # Verificar se CUDA está realmente disponível no contêiner
+                cuda_available = cv2.cuda.getCudaEnabledDeviceCount() > 0
+                if not cuda_available:
+                    self.get_logger().warn('CUDA está habilitado nas configurações, mas dispositivos CUDA não foram detectados!')
+                    self.get_logger().warn('Desabilitando processamento CUDA.')
+                    cuda_enabled = False
+            except Exception as e:
+                self.get_logger().warn(f'Erro ao verificar suporte CUDA: {str(e)}')
+                self.get_logger().warn('Desabilitando processamento CUDA.')
+                cuda_enabled = False
         
         while self.is_running and rclpy.ok():
             try:
@@ -366,38 +453,44 @@ class IMX219CameraNode(Node):
                 
                 if cuda_enabled:
                     # Processamento CUDA
-                    self.cuda_upload.upload(frame)
-                    
-                    # Redução de ruído e aprimoramento
-                    cv2.cuda.fastNlMeansDenoisingColored(
-                        self.cuda_upload,
-                        None,
-                        h_luminance=3,
-                        photo_render=1,
-                        stream=self.cuda_stream
-                    )
-                    
-                    # Ajuste de cor e contraste
-                    cv2.cuda.gammaCorrection(
-                        self.cuda_upload,
-                        self.cuda_color,
-                        stream=self.cuda_stream
-                    )
-                    
-                    # Aprimoramento de bordas
-                    if self.get_parameter('enable_edge_enhancement').value:
-                        cv2.cuda.createSobelFilter(
-                            cv2.CV_8UC3,
-                            cv2.CV_16S,
-                            1, 0
-                        ).apply(
-                            self.cuda_color,
-                            self.cuda_download,
-                            self.cuda_stream
+                    try:
+                        self.cuda_upload.upload(frame)
+                        
+                        # Redução de ruído e aprimoramento
+                        cv2.cuda.fastNlMeansDenoisingColored(
+                            self.cuda_upload,
+                            None,
+                            h_luminance=3,
+                            photo_render=1,
+                            stream=self.cuda_stream
                         )
-                    
-                    # Download do resultado
-                    frame = self.cuda_color.download()
+                        
+                        # Ajuste de cor e contraste
+                        cv2.cuda.gammaCorrection(
+                            self.cuda_upload,
+                            self.cuda_color,
+                            stream=self.cuda_stream
+                        )
+                        
+                        # Aprimoramento de bordas
+                        if self.get_parameter('enable_edge_enhancement').value:
+                            cv2.cuda.createSobelFilter(
+                                cv2.CV_8UC3,
+                                cv2.CV_16S,
+                                1, 0
+                            ).apply(
+                                self.cuda_color,
+                                self.cuda_download,
+                                self.cuda_stream
+                            )
+                            frame = self.cuda_download.download()
+                        else:
+                            # Download do resultado
+                            frame = self.cuda_color.download()
+                    except Exception as cuda_error:
+                        self.get_logger().error(f'Erro no processamento CUDA: {str(cuda_error)}')
+                        self.get_logger().warn('Continuando sem processamento CUDA.')
+                        # Não modificar o frame, usar o original
                 
                 # Publicar imagem
                 timestamp = self.get_clock().now().to_msg()
