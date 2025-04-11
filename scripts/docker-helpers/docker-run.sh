@@ -37,7 +37,7 @@ else
       -e DISPLAY=$DISPLAY \
       -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
       -v $HOME/.Xauthority:/root/.Xauthority:ro \
-      --env="XAUTHORITY=/root/.Xauthority"
+      --env="XAUTHORITY=/root/.Xauthority" \
       -v /tmp/argus_socket:/tmp/argus_socket \
       -v $(pwd):/ros2_ws \
       -v /usr/local/cuda:/usr/local/cuda \
