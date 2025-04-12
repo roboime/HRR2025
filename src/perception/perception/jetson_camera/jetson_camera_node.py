@@ -219,18 +219,20 @@ class IMX219CameraNode(Node):
         
         # Definir pipeline dependendo do ambiente
         if is_container:
-            # Pipeline mais simples para ambiente containerizado sem EGL
+            # Pipeline mais simples para ambiente containerizado com CUDA
             pipeline = (
                 f"nvarguscamerasrc sensor-id=0 ! "
                 f"video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
                 f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} ! "
                 f"nvvidconv flip-method={self.get_parameter('flip_method').value} ! "
-                f"video/x-raw, format=(string)BGRx ! "
+                f"video/x-raw(memory:NVMM), format=(string)I420 ! "
+                f"nvv4l2h264enc bitrate=8000000 ! h264parse ! nvv4l2decoder ! "  # Processamento com CUDA
+                f"nvvidconv ! video/x-raw, format=(string)BGRx ! "
                 f"videoconvert ! video/x-raw, format=(string)BGR ! "
                 f"appsink max-buffers=2 drop=true sync=false"
             )
         else:
-            # Pipeline completo para ambiente nativo
+            # Pipeline completo para ambiente nativo com aceleração CUDA
             pipeline = (
                 f"nvarguscamerasrc sensor-id=0 "
                 f"exposuretimerange='{self.get_parameter('exposure_time').value} {self.get_parameter('exposure_time').value}' "
@@ -244,7 +246,9 @@ class IMX219CameraNode(Node):
                 f"width=(int){self.width}, height=(int){self.height}, "
                 f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} ! "
                 f"nvvidconv flip-method={self.get_parameter('flip_method').value} ! "
-                f"video/x-raw, format=(string)BGRx ! "
+                f"video/x-raw(memory:NVMM), format=(string)I420 ! "
+                f"nvv4l2h264enc bitrate=8000000 ! h264parse ! nvv4l2decoder ! "  # Processamento com CUDA
+                f"nvvidconv ! video/x-raw, format=(string)BGRx ! "
                 f"videoconvert ! video/x-raw, format=(string)BGR ! "
                 f"appsink max-buffers=2 drop=true sync=false"
             )
@@ -257,6 +261,9 @@ class IMX219CameraNode(Node):
         
         # Tentar abrir a câmera com o pipeline GStreamer
         try:
+            # Verificar permissões para CUDA antes de tentar abrir a câmera
+            self.check_cuda_permissions()
+            
             # Abrir a câmera com o pipeline GStreamer
             self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
             
@@ -290,12 +297,15 @@ class IMX219CameraNode(Node):
                         atexit.register(cleanup_pipe)
                         
                         # Construir comando gst-launch para escrever frames em formato bruto para o pipe
+                        # Otimizado para usar CUDA diretamente
                         gst_cmd = (
                             f"gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! "
                             f"video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
                             f"format=NV12, framerate={fps_num}/{fps_den} ! "
                             f"nvvidconv flip-method={self.get_parameter('flip_method').value} ! "
-                            f"video/x-raw, format=BGRx ! "
+                            f"video/x-raw(memory:NVMM), format=I420 ! "
+                            f"nvv4l2h264enc bitrate=8000000 ! h264parse ! nvv4l2decoder ! "
+                            f"nvvidconv ! video/x-raw, format=BGRx ! "
                             f"videoconvert ! video/x-raw, format=BGR ! "
                             f"filesink location={pipe_path} append=true buffer-size=16777216"
                         )
@@ -380,6 +390,62 @@ class IMX219CameraNode(Node):
         # Configurar um timer para atualizar a imagem simulada (simulando FPS real)
         self.sim_timer = self.create_timer(1.0/self.camera_fps, self.update_simulated_frame)
 
+    def update_simulated_frame(self):
+        """Atualiza o frame simulado com um padrão em movimento."""
+        if not hasattr(self, 'simulated_frame'):
+            return
+            
+        # Limpar frame
+        self.simulated_frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+        
+        # Texto de simulação
+        cv2.putText(self.simulated_frame, 'CAMERA SIMULADA', (self.width//2-150, self.height//2), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        
+        # Atualizar posição do círculo
+        self.circle_position[0] += self.circle_direction[0]
+        self.circle_position[1] += self.circle_direction[1]
+        
+        # Verificar colisão com bordas
+        if self.circle_position[0] <= 0 or self.circle_position[0] >= self.width:
+            self.circle_direction[0] *= -1
+        if self.circle_position[1] <= 0 or self.circle_position[1] >= self.height:
+            self.circle_direction[1] *= -1
+            
+        # Desenhar círculo
+        cv2.circle(self.simulated_frame, 
+                  (int(self.circle_position[0]), int(self.circle_position[1])), 
+                  50, (0, 0, 255), -1)
+        
+        # Adicionar timestamp
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
+        cv2.putText(self.simulated_frame, timestamp, (10, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        
+        # Publicar frame simulado
+        try:
+            timestamp = self.get_clock().now().to_msg()
+            img_msg = self.bridge.cv2_to_imgmsg(self.simulated_frame, "bgr8")
+            img_msg.header.stamp = timestamp
+            img_msg.header.frame_id = "camera_optical_frame"
+            self.image_pub.publish(img_msg)
+            
+            # Publicar info da câmera
+            self.publish_camera_info(img_msg.header)
+            
+            # Atualizar cálculo de FPS real
+            self.frame_count += 1
+            current_time = time.time()
+            elapsed = current_time - self.last_fps_time
+            if elapsed >= 1.0:  # Atualizar a cada segundo
+                self.real_fps = self.frame_count / elapsed
+                self.frame_count = 0
+                self.last_fps_time = current_time
+                self.get_logger().debug(f'FPS simulado: {self.real_fps:.1f}')
+                
+        except CvBridgeError as e:
+            self.get_logger().error(f'Erro no CvBridge: {e}')
+
     def debug_camera_devices(self):
         """
         Debugar dispositivos de câmera disponíveis.
@@ -404,6 +470,16 @@ class IMX219CameraNode(Node):
                     if os.path.exists(dev_path):
                         self.get_logger().info(f'Dispositivo {dev_path} encontrado')
                         devices_available = True
+                
+                # Verificar se dispositivos CSI estão disponíveis (diferentes de V4L2)
+                try:
+                    # Verificar se a câmera CSI está conectada através do i2cdetect
+                    i2c_output = subprocess.check_output(['i2cdetect', '-y', '0'], stderr=subprocess.STDOUT).decode('utf-8')
+                    if '36' in i2c_output or '10' in i2c_output:  # Endereços comuns para câmeras IMX219
+                        self.get_logger().info('Câmera CSI detectada pelo i2cdetect')
+                        devices_available = True
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    self.get_logger().info('i2cdetect não disponível para verificar câmera CSI')
                 
                 # Verificar mais detalhes apenas se um dispositivo for encontrado
                 if devices_available:
@@ -473,6 +549,73 @@ class IMX219CameraNode(Node):
             self.get_logger().error(f'Erro ao debugar dispositivos: {str(e)}')
         
         return devices_available
+
+    def check_cuda_permissions(self):
+        """Verifica permissões de CUDA e tenta resolver problemas comuns."""
+        try:
+            # Verificar se o usuário tem acesso aos dispositivos NVIDIA
+            nvidia_devices = ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-modeset']
+            for device in nvidia_devices:
+                if os.path.exists(device):
+                    try:
+                        mode = os.stat(device).st_mode
+                        readable = bool(mode & 0o444)  # Verificar permissão de leitura
+                        writeable = bool(mode & 0o222)  # Verificar permissão de escrita
+                        self.get_logger().info(f'Dispositivo {device} - Leitura: {readable}, Escrita: {writeable}')
+                    except Exception as e:
+                        self.get_logger().warn(f'Erro ao verificar permissões de {device}: {str(e)}')
+            
+            # Verificar se CUDA está disponível no OpenCV
+            try:
+                cuda_devices = cv2.cuda.getCudaEnabledDeviceCount()
+                self.get_logger().info(f'Dispositivos CUDA disponíveis no OpenCV: {cuda_devices}')
+                
+                if cuda_devices == 0:
+                    self.get_logger().warn('Nenhum dispositivo CUDA disponível no OpenCV!')
+                    self.get_logger().info('Verificando variáveis de ambiente CUDA...')
+                    
+                    # Verificar se as variáveis de ambiente CUDA estão configuradas
+                    cuda_vars = ['CUDA_VISIBLE_DEVICES', 'LD_LIBRARY_PATH', 'PATH']
+                    for var in cuda_vars:
+                        self.get_logger().info(f'{var}: {os.environ.get(var, "não definido")}')
+            except Exception as e:
+                self.get_logger().warn(f'Erro ao verificar dispositivos CUDA no OpenCV: {str(e)}')
+            
+            # Verificar se o módulo nvarguscamerasrc está disponível e funcionando
+            try:
+                # Testar se o módulo nvarguscamerasrc pode ser carregado
+                test_cmd = "gst-launch-1.0 nvarguscamerasrc num-buffers=0 ! fakesink"
+                result = subprocess.run(test_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=2)
+                
+                # Se o comando falhar rapidamente, provavelmente há um problema com nvarguscamerasrc
+                if result.returncode != 0:
+                    stderr = result.stderr.decode('utf-8')
+                    if "no element" in stderr and "nvarguscamerasrc" in stderr:
+                        self.get_logger().error('Plugin GStreamer nvarguscamerasrc não está disponível!')
+                        self.get_logger().info('Verifique se o Jetpack está instalado corretamente.')
+                    elif "could not link" in stderr:
+                        self.get_logger().error('Problemas de compatibilidade entre elementos GStreamer no pipeline.')
+                    elif "Resource error" in stderr:
+                        self.get_logger().error('Erro de recurso com nvarguscamerasrc - câmera pode estar em uso por outro processo.')
+                        self.get_logger().info('Tentando identificar processos usando a câmera...')
+                        
+                        try:
+                            # Tentar identificar processos que podem estar usando a câmera
+                            camera_procs = subprocess.check_output(['fuser', '-v', '/dev/video0'], stderr=subprocess.STDOUT).decode('utf-8')
+                            self.get_logger().info(f'Processos usando a câmera: {camera_procs}')
+                        except:
+                            self.get_logger().info('Não foi possível identificar processos usando a câmera.')
+                    else:
+                        self.get_logger().error(f'Erro ao testar nvarguscamerasrc: {stderr}')
+                        
+            except subprocess.TimeoutExpired:
+                # Se o comando não retornar dentro do timeout, provavelmente está funcionando mas pendurando
+                self.get_logger().info('Teste de nvarguscamerasrc executado sem erros imediatos.')
+            except Exception as e:
+                self.get_logger().warn(f'Erro ao testar nvarguscamerasrc: {str(e)}')
+            
+        except Exception as e:
+            self.get_logger().error(f'Erro ao verificar permissões CUDA: {str(e)}')
 
     def capture_loop(self):
         """Loop principal de captura com processamento CUDA."""
@@ -658,16 +801,85 @@ class IMX219CameraNode(Node):
             # Verificar estatísticas da câmera
             if hasattr(self, 'cap') and self.cap.isOpened():
                 try:
-                    # Usar o FPS real calculado em vez de tentar obter da câmera
-                    if hasattr(self, 'real_fps'):
+                    # Usar o FPS real calculado internamente em vez de tentar obter da câmera
+                    if hasattr(self, 'real_fps') and self.real_fps > 0:
                         self.get_logger().info(f'Câmera: FPS real={self.real_fps:.1f}')
                     else:
+                        # Se real_fps não estiver disponível, usar o valor configurado
                         self.get_logger().info(f'Câmera: FPS configurado={self.camera_fps}')
+                        
+                        # Se real_fps estiver definido mas for 0, pode haver um problema
+                        if hasattr(self, 'real_fps') and self.real_fps == 0:
+                            self.get_logger().warn('FPS real é zero. Verificando câmera...')
+                            # Capturar um frame para verificar se a câmera está funcionando
+                            ret, _ = self.cap.read()
+                            if not ret:
+                                self.get_logger().error('Não foi possível obter imagem da câmera - "Unable to get camera FPS"')
+                                self.get_logger().info('Tentando reiniciar a câmera...')
+                                # Tentar reiniciar os contadores de FPS
+                                self.frame_count = 0
+                                self.last_fps_time = time.time()
+                                
+                                # Tentar obter informações diretamente do GStreamer
+                                self.get_camera_info_gstreamer()
                 except Exception as e:
                     self.get_logger().warn(f'Erro ao obter estatísticas da câmera: {e}')
                 
         except Exception as e:
             self.get_logger().error(f'Erro ao monitorar recursos: {e}')
+
+    def get_camera_info_gstreamer(self):
+        """Tenta obter informações da câmera diretamente usando GStreamer"""
+        try:
+            self.get_logger().info('Tentando obter informações da câmera diretamente pelo GStreamer...')
+            
+            # Verificar se nvarguscamerasrc está disponível
+            try:
+                # Buscar informações detalhadas da câmera
+                cmd = "gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! fakesink -v"
+                result = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)
+                output = result.stderr.decode('utf-8')
+                
+                if "framerate" in output:
+                    # Extrair informações úteis do output
+                    self.get_logger().info("Informações do GStreamer sobre a câmera:")
+                    for line in output.split('\n'):
+                        if any(s in line for s in ['framerate', 'width', 'height', 'format']):
+                            self.get_logger().info(line.strip())
+                else:
+                    self.get_logger().warn("Não foi possível obter informações da câmera via GStreamer")
+                    
+                # Tentar verificar se o driver da câmera está carregado
+                kernel_modules = subprocess.check_output(['lsmod'], stderr=subprocess.STDOUT).decode('utf-8')
+                self.get_logger().info("Verificando módulos do kernel relacionados à câmera:")
+                for line in kernel_modules.split('\n'):
+                    if any(s in line for s in ['camera', 'tegra', 'video', 'v4l', 'nvhost']):
+                        self.get_logger().info(line.strip())
+                        
+                # Verificar se a placa consegue se comunicar com a câmera CSI
+                try:
+                    i2c_output = subprocess.check_output(['i2cdetect', '-y', '0'], stderr=subprocess.STDOUT).decode('utf-8')
+                    self.get_logger().info(f"Dispositivos I2C detectados:\n{i2c_output}")
+                except:
+                    pass
+                    
+            except subprocess.TimeoutExpired:
+                self.get_logger().warn("Timeout ao tentar obter informações da câmera")
+            except Exception as e:
+                self.get_logger().warn(f"Erro ao obter informações via GStreamer: {str(e)}")
+                
+            # Tentar capturar um único frame como teste final
+            test_cmd = "gst-launch-1.0 nvarguscamerasrc sensor-id=0 num-buffers=1 ! fakesink"
+            try:
+                subprocess.run(test_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                self.get_logger().info("Teste de captura de um único frame bem-sucedido")
+            except subprocess.TimeoutExpired:
+                self.get_logger().error("Timeout no teste de captura - câmera pode estar indisponível")
+            except Exception as e:
+                self.get_logger().error(f"Falha no teste de captura: {str(e)}")
+                
+        except Exception as e:
+            self.get_logger().error(f'Erro ao obter informações da câmera: {str(e)}')
 
     def destroy_node(self):
         """Limpa recursos ao encerrar."""
@@ -688,6 +900,10 @@ class IMX219CameraNode(Node):
             
         if self.get_parameter('enable_display').value:
             cv2.destroyAllWindows()
+        
+        # Cancelar timer de simulação se estiver ativo
+        if hasattr(self, 'sim_timer'):
+            self.sim_timer.cancel()
             
         super().destroy_node()
 
