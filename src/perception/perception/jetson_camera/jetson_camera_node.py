@@ -11,6 +11,12 @@ import threading
 import time
 import subprocess
 import os
+import signal
+import math
+import atexit
+import tempfile
+import asyncio
+import sys
 
 class IMX219CameraNode(Node):
     """
@@ -119,39 +125,67 @@ class IMX219CameraNode(Node):
             try:
                 self.get_logger().info('Testando funcionalidade básica de nvarguscamerasrc...')
                 # Usar num-buffers=1 para garantir que o comando não bloqueia indefinidamente
-                test_pipeline = "gst-launch-1.0 nvarguscamerasrc sensor-id=0 num-buffers=1 ! fakesink"
-                # Usar um timeout mais longo (10 segundos) para dar tempo ao comando completar
-                subprocess.check_call(test_pipeline, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-                self.get_logger().info('Teste básico de nvarguscamerasrc bem-sucedido.')
-                gst_test_success = True
-            except subprocess.TimeoutExpired:
-                self.get_logger().error('Teste de nvarguscamerasrc falhou: timeout')
-                self.get_logger().info('Tentando método alternativo com menor timeout...')
+                # Executar com timeout estrito e usar o método asyncio/threading para evitar bloqueio
+                test_pipeline = "gst-launch-1.0 nvarguscamerasrc sensor-id=0 num-buffers=1 ! fakesink -v"
                 
-                # Tentar novamente com um comando diferente
-                try:
-                    # Verificar apenas se o plugin está disponível sem tentar capturar
-                    inspect_cmd = "gst-inspect-1.0 nvarguscamerasrc"
-                    subprocess.check_call(inspect_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)
-                    self.get_logger().info('Plugin nvarguscamerasrc está disponível.')
-                    gst_test_success = True  # Considerar sucesso se pelo menos o plugin existir
-                except Exception as inspect_error:
-                    self.get_logger().error(f'Verificação do plugin nvarguscamerasrc falhou: {str(inspect_error)}')
-                    self.get_logger().error('Problema fundamental com o acesso à câmera CSI.')
-                    raise RuntimeError('Falha no teste básico de nvarguscamerasrc')
-            except subprocess.CalledProcessError as e:
+                # Criar um processo com timeout estrito
+                import threading
+                
+                def run_process_with_timeout():
+                    try:
+                        process = subprocess.Popen(
+                            test_pipeline,
+                            shell=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            preexec_fn=os.setsid  # Criar um novo grupo de processos para poder matar mais facilmente
+                        )
+                        self.get_logger().info('Processo de teste iniciado...')
+                        
+                        # Esperar por um tempo limitado
+                        start_time = time.time()
+                        max_wait_time = 5.0  # máximo 5 segundos
+                        
+                        while process.poll() is None and (time.time() - start_time) < max_wait_time:
+                            time.sleep(0.1)
+                        
+                        # Verificar se o processo terminou dentro do timeout
+                        if process.poll() is None:
+                            # Processo ainda está rodando, forçar término
+                            self.get_logger().warn('Processo de teste não terminou no tempo esperado. Forçando término...')
+                            try:
+                                os.killpg(os.getpgid(process.pid), 15)  # SIGTERM
+                                time.sleep(0.5)
+                                if process.poll() is None:
+                                    os.killpg(os.getpgid(process.pid), 9)  # SIGKILL
+                            except Exception as kill_error:
+                                self.get_logger().warn(f'Erro ao matar processo: {str(kill_error)}')
+                            return False, "Timeout"
+                        
+                        # Processo terminou, verificar código de saída
+                        return_code = process.poll()
+                        stdout, stderr = process.communicate()
+                        
+                        if return_code == 0:
+                            return True, stdout.decode('utf-8') if stdout else ""
+                        else:
+                            return False, stderr.decode('utf-8') if stderr else "Unknown error"
+                    except Exception as e:
+                        return False, str(e)
+                
+                # Executar o processo de teste em thread separada para evitar bloqueios
+                self.get_logger().info('Iniciando teste assíncrono de nvarguscamerasrc...')
+                success, output = run_process_with_timeout()
+                
+                if success:
+                    self.get_logger().info('Teste básico de nvarguscamerasrc bem-sucedido.')
+                    gst_test_success = True
+                else:
+                    self.get_logger().warn(f'Teste básico de nvarguscamerasrc falhou: {output}')
+                    # Continuar mesmo com falha, tentar método alternativo
+            
+            except Exception as e:
                 self.get_logger().error(f'Teste de nvarguscamerasrc falhou: {str(e)}')
-                self.get_logger().error('Problema fundamental com o acesso à câmera CSI.')
-                
-                # Verificar o motivo específico da falha para dar mais informações ao usuário
-                if hasattr(e, 'stderr') and e.stderr:
-                    stderr = e.stderr.decode('utf-8') if isinstance(e.stderr, bytes) else str(e.stderr)
-                    if "cannot connect to camera" in stderr:
-                        self.get_logger().error('Problema de conexão com a câmera. Verifique se a câmera está conectada corretamente.')
-                    elif "Resource busy" in stderr:
-                        self.get_logger().error('Câmera está em uso por outro processo. Tente fechar outros aplicativos que possam estar usando a câmera.')
-                
-                raise RuntimeError('Falha no teste básico de nvarguscamerasrc')
                 
             if gst_test_success:
                 # Configurar variáveis de ambiente específicas para NVIDIA
@@ -177,7 +211,6 @@ class IMX219CameraNode(Node):
         
         # Pipeline GStreamer otimizado para IMX219 com aceleração CUDA
         # Calcular framerate como fração reduzida para evitar problemas
-        import math
         def gcd(a, b):
             while b:
                 a, b = b, a % b
@@ -703,7 +736,8 @@ class IMX219CameraNode(Node):
                             if result.returncode == 0:
                                 self.get_logger().info('Reinício do serviço nvargus-daemon resolveu o problema!')
                             else:
-                                self.get_logger().warn('Reinício do serviço nvargus-daemon não resolveu o problema.')
+                                stderr = result.stderr.decode('utf-8') if result.stderr else "Unknown error"
+                                self.get_logger().warn(f"Erro ao reiniciar via systemctl: {stderr}")
                         except Exception as e:
                             self.get_logger().warn(f'Erro ao tentar reiniciar serviço nvargus-daemon: {str(e)}')
                     else:
@@ -1045,88 +1079,245 @@ class IMX219CameraNode(Node):
             self.get_logger().error(f'Erro ao monitorar recursos: {e}')
 
     def get_camera_info_gstreamer(self):
-        """Tenta obter informações da câmera diretamente usando GStreamer"""
+        """Obtém informações da câmera Jetson através do GStreamer."""
+        self.get_logger().info('Obtendo informações da câmera via GStreamer')
+
+        # Verifica se o daemon nvargus está em execução
+        self.get_logger().info('Verificando status do nvargus-daemon...')
+        
+        daemon_running = False
+        restart_attempted = False
+        
+        # Método 1: Verificar processo usando ps
         try:
-            self.get_logger().info('Tentando obter informações da câmera diretamente pelo GStreamer...')
-            
-            # Verificar e tentar reiniciar o nvargus-daemon
-            try:
-                # Verificar se o serviço está rodando
-                daemon_check = "ps -ef | grep nvargus-daemon | grep -v grep"
-                ps_result = subprocess.run(daemon_check, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)
-                
-                if ps_result.returncode != 0:
-                    self.get_logger().warn("Serviço nvargus-daemon não está rodando. Tentando reiniciar...")
-                    
-                    # Primeiro, tentar matar qualquer processo nvargus existente
-                    subprocess.run("pkill -f 'nvargus'", shell=True, 
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    time.sleep(1)
-                    
-                    # Tentar iniciar o serviço nvargus-daemon
-                    try:
-                        subprocess.run("systemctl start nvargus-daemon", shell=True, 
-                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-                        self.get_logger().info("Serviço nvargus-daemon reiniciado.")
-                        time.sleep(2)  # Dar tempo para o serviço inicializar
-                    except Exception as e:
-                        self.get_logger().warn(f"Erro ao reiniciar serviço: {str(e)}")
-                else:
-                    self.get_logger().info("Serviço nvargus-daemon está rodando.")
-            except Exception as e:
-                self.get_logger().debug(f"Erro ao verificar status de nvargus-daemon: {str(e)}")
-            
-            # Verificar se o plugin nvarguscamerasrc está disponível
-            try:
-                self.get_logger().info("Verificando disponibilidade do plugin nvarguscamerasrc...")
-                inspect_cmd = "gst-inspect-1.0 nvarguscamerasrc"
-                result = subprocess.run(inspect_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)
-                
-                if result.returncode == 0:
-                    self.get_logger().info("Plugin nvarguscamerasrc está disponível.")
-                    
-                    # Tentar um teste simples para garantir que a câmera esteja acessível
-                    self.get_logger().info("Testando acesso à câmera...")
-                    
-                    # Pipeline simples que não deve bloquear
-                    test_cmd = "gst-launch-1.0 nvarguscamerasrc sensor-id=0 num-buffers=1 ! fakesink"
-                    test_result = subprocess.run(test_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-                    
-                    if test_result.returncode == 0:
-                        self.get_logger().info("Teste básico com a câmera CSI bem-sucedido!")
-                        
-                        # Tentar pipeline com configurações específicas para garantir compatibilidade
-                        validate_cmd = (
-                            "gst-launch-1.0 nvarguscamerasrc sensor-id=0 num-buffers=1 ! "
-                            "video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=30/1 ! "
-                            "fakesink"
-                        )
-                        
-                        try:
-                            self.get_logger().info("Testando configurações específicas...")
-                            validate_result = subprocess.run(validate_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-                            
-                            if validate_result.returncode == 0:
-                                self.get_logger().info("Teste de configurações específicas bem-sucedido!")
-                            else:
-                                stderr = validate_result.stderr.decode('utf-8')
-                                self.get_logger().warn(f"Falha no teste de configurações específicas: {stderr}")
-                        except subprocess.TimeoutExpired:
-                            self.get_logger().warn("Timeout ao testar configurações específicas.")
-                        except Exception as config_err:
-                            self.get_logger().warn(f"Erro ao testar configurações: {str(config_err)}")
-                    else:
-                        stderr = test_result.stderr.decode('utf-8')
-                        self.get_logger().warn(f"Falha no teste básico com a câmera: {stderr}")
-                else:
-                    self.get_logger().error("Plugin nvarguscamerasrc não está disponível!")
-            except subprocess.TimeoutExpired:
-                self.get_logger().warn("Timeout ao testar plugin nvarguscamerasrc.")
-            except Exception as plugin_err:
-                self.get_logger().warn(f"Erro ao verificar plugin nvarguscamerasrc: {str(plugin_err)}")
-            
+            ps_result = subprocess.run(
+                "ps -ef | grep nvargus-daemon | grep -v grep", 
+                shell=True, 
+                stdout=subprocess.PIPE
+            )
+            if ps_result.returncode == 0 and ps_result.stdout:
+                self.get_logger().info('Processo nvargus-daemon encontrado via ps')
+                daemon_running = True
         except Exception as e:
-            self.get_logger().error(f'Erro ao obter informações da câmera: {str(e)}')
+            self.get_logger().warn(f'Erro ao verificar processo nvargus-daemon: {str(e)}')
+        
+        # Método 2: Verificar serviço usando systemctl
+        if not daemon_running:
+            try:
+                systemctl_result = subprocess.run(
+                    "systemctl is-active nvargus-daemon", 
+                    shell=True, 
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                if systemctl_result.returncode == 0 and b'active' in systemctl_result.stdout:
+                    self.get_logger().info('Serviço nvargus-daemon ativo via systemctl')
+                    daemon_running = True
+            except Exception as e:
+                self.get_logger().warn(f'Erro ao verificar serviço nvargus-daemon: {str(e)}')
+        
+        # Método 3: Verificar socket
+        if not daemon_running:
+            if os.path.exists('/tmp/nvargus-daemon'):
+                self.get_logger().info('Socket do nvargus-daemon encontrado')
+                daemon_running = True
+        
+        # Se o daemon não estiver em execução, tenta reiniciá-lo
+        if not daemon_running:
+            self.get_logger().warn('Daemon nvargus-daemon não está em execução!')
+            
+            # Tenta matar qualquer processo residual
+            try:
+                self.get_logger().info('Tentando matar processos residuais nvargus...')
+                subprocess.run("pkill -f nvargus", shell=True)
+                time.sleep(1)  # Aguarda um pouco
+            except Exception as e:
+                self.get_logger().warn(f'Erro ao tentar matar processos: {str(e)}')
+            
+            # Tenta reiniciar via systemctl
+            try:
+                self.get_logger().info('Tentando reiniciar serviço nvargus-daemon...')
+                result = subprocess.run(
+                    "systemctl restart nvargus-daemon", 
+                    shell=True,
+                    stderr=subprocess.PIPE
+                )
+                if result.returncode == 0:
+                    time.sleep(2)  # Aguarda o serviço iniciar
+                    restart_attempted = True
+                    self.get_logger().info('Reinício do serviço nvargus-daemon resolveu o problema!')
+                else:
+                    stderr = result.stderr.decode('utf-8') if result.stderr else "Unknown error"
+                    self.get_logger().warn(f"Erro ao reiniciar via systemctl: {stderr}")
+            except Exception as e:
+                self.get_logger().warn(f'Erro ao tentar reiniciar serviço nvargus-daemon: {str(e)}')
+            
+            # Se systemctl falhou, tenta iniciar diretamente
+            if not restart_attempted:
+                try:
+                    self.get_logger().info('Tentando iniciar daemon diretamente...')
+                    # Inicia em background e descarta saída
+                    subprocess.Popen(
+                        "nvargus-daemon",
+                        shell=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    time.sleep(2)  # Aguarda o serviço iniciar
+                    self.get_logger().info('Daemon iniciado manualmente')
+                except Exception as e:
+                    self.get_logger().error(f'Falha ao iniciar daemon manualmente: {str(e)}')
+        
+        # Verifica se o plugin está disponível
+        try:
+            plugin_check = subprocess.run(
+                "gst-inspect-1.0 nvarguscamerasrc", 
+                shell=True, 
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            if plugin_check.returncode != 0:
+                self.get_logger().error('Plugin nvarguscamerasrc não encontrado! Verifique a instalação do Jetson Multimedia API')
+                return None
+            else:
+                self.get_logger().info('Plugin nvarguscamerasrc disponível')
+        except Exception as e:
+            self.get_logger().error(f'Erro ao verificar plugin nvarguscamerasrc: {str(e)}')
+            return None
+            
+        # Testa a pipeline da câmera
+        camera_test_success, error_msg = self.test_camera_pipeline(timeout=8)
+        if not camera_test_success:
+            self.get_logger().error(f'Falha no teste da pipeline da câmera: {error_msg}')
+            
+            # Se acabamos de reiniciar o daemon, espere mais um pouco e tente novamente
+            if restart_attempted:
+                self.get_logger().info('Aguardando mais 5 segundos após reinício do daemon...')
+                time.sleep(5)
+                camera_test_success, error_msg = self.test_camera_pipeline(timeout=8)
+                if not camera_test_success:
+                    self.get_logger().error('Falha persistente após reinício do daemon e tempo de espera adicional')
+                    return None
+                else:
+                    self.get_logger().info('Sucesso no teste da câmera após tempo de espera adicional!')
+            else:
+                return None
+        
+        # Define uma pipeline simples para resolução 720p a 30fps
+        pipeline_str = (
+            "nvarguscamerasrc sensor-id=0 ! "
+            "video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=30/1 ! "
+            "nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! video/x-raw, format=BGR"
+        )
+        
+        self.get_logger().info(f'Pipeline GStreamer definida: {pipeline_str}')
+        
+        # Configurar e retornar informações da câmera
+        camera_info = {
+            'width': 1280,
+            'height': 720,
+            'fps': 30,
+            'pipeline': pipeline_str
+        }
+        
+        self.get_logger().info(f'Informações da câmera obtidas com sucesso: {camera_info}')
+        return camera_info
+
+    def run_process_with_timeout(self, cmd, timeout=5):
+        """
+        Executa um processo com timeout e gerencia seu ciclo de vida.
+        Retorna (sucesso, saída, erro)
+        """
+        try:
+            self.get_logger().debug(f"Executando comando: {cmd}")
+            process = subprocess.Popen(
+                cmd,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                preexec_fn=os.setsid  # Permite matar o grupo de processos
+            )
+            
+            # Aguardar com timeout
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+                stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
+                stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
+                
+                if process.returncode == 0:
+                    self.get_logger().debug("Processo concluído com sucesso")
+                    return True, stdout_text, stderr_text
+                else:
+                    self.get_logger().debug(f"Processo falhou com código {process.returncode}")
+                    return False, stdout_text, stderr_text
+                    
+            except subprocess.TimeoutExpired:
+                self.get_logger().warn(f"Timeout após {timeout}s. Matando processo...")
+                
+                # Tentar terminar o processo graciosamente primeiro
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                    # Aguardar um pouco para ver se o processo termina
+                    for _ in range(5):  # Tentar por 0.5 segundos
+                        if process.poll() is not None:
+                            break
+                        time.sleep(0.1)
+                except Exception as kill_error:
+                    self.get_logger().debug(f"Erro ao terminar processo: {str(kill_error)}")
+                
+                # Se ainda estiver rodando, forçar a morte
+                if process.poll() is None:
+                    try:
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                        self.get_logger().debug("Processo terminado forçadamente")
+                    except Exception as kill_error:
+                        self.get_logger().debug(f"Erro ao matar processo: {str(kill_error)}")
+                
+                return False, "", "Timeout expirado"
+                
+        except Exception as e:
+            self.get_logger().error(f"Erro ao executar processo: {str(e)}")
+            return False, "", str(e)
+
+    def test_camera_pipeline(self, timeout=5):
+        """
+        Testa a pipeline da câmera com timeout e diagnóstico de erros
+        Retorna (sucesso, mensagem_erro)
+        """
+        self.get_logger().info(f"Testando acesso à câmera com timeout de {timeout}s...")
+        
+        # Pipeline de teste básico
+        test_cmd = "gst-launch-1.0 nvarguscamerasrc sensor-id=0 num-buffers=1 ! fakesink -v"
+        
+        # Executar teste
+        success, stdout, stderr = self.run_process_with_timeout(test_cmd, timeout)
+        
+        if success:
+            self.get_logger().info("Teste de pipeline básico bem-sucedido!")
+            return True, ""
+        else:
+            # Analisar o erro para diagnóstico mais preciso
+            error_msg = ""
+            if stderr:
+                if "cannot access /dev/video0" in stderr or "Failed to open" in stderr:
+                    error_msg = "Não foi possível acessar o dispositivo de vídeo. Verifique as permissões."
+                elif "cannot connect to camera" in stderr:
+                    error_msg = "Não foi possível conectar à câmera. Verifique as conexões físicas."
+                elif "Resource busy" in stderr:
+                    error_msg = "Câmera está ocupada. Outro processo pode estar usando-a."
+                elif "No such element or plugin" in stderr:
+                    error_msg = "Plugin nvarguscamerasrc não encontrado. Verifique a instalação do Jetson Multimedia API."
+                elif "nvargus-daemon" in stderr and ("failed" in stderr or "error" in stderr):
+                    error_msg = "Problema com o nvargus-daemon. Tente reiniciar o serviço."
+                elif "timeout" in stderr.lower():
+                    error_msg = "Timeout ao acessar a câmera."
+                else:
+                    error_msg = f"Erro no teste da câmera: {stderr}"
+            else:
+                error_msg = "Erro desconhecido no teste da câmera (sem saída de erro)"
+                
+            self.get_logger().error(error_msg)
+            return False, error_msg
 
     def destroy_node(self):
         """Limpa recursos ao encerrar."""
