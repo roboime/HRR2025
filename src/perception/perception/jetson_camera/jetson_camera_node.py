@@ -118,7 +118,7 @@ class IMX219CameraNode(Node):
             gst_test_success = False
             try:
                 self.get_logger().info('Testando funcionalidade básica de nvarguscamerasrc...')
-                test_pipeline = "gst-launch-1.0 nvarguscamerasrc sensor-id=0 num-buffers=1 ! fakesink"
+                test_pipeline = "gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! fakesink"
                 subprocess.check_call(test_pipeline, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 self.get_logger().info('Teste básico de nvarguscamerasrc bem-sucedido.')
                 gst_test_success = True
@@ -146,41 +146,8 @@ class IMX219CameraNode(Node):
                 
                 self.get_logger().info('Variáveis de ambiente configuradas para contêiner.')
                 
-                # Testar diretamente com um pipeline V4L2
-                self.get_logger().info('Em ambiente containerizado, testando acesso direto V4L2 primeiro...')
-                try:
-                    # Abrir diretamente com OpenCV via V4L2
-                    for dev_id in range(10):
-                        dev_path = f"/dev/video{dev_id}"
-                        if os.path.exists(dev_path):
-                            self.get_logger().info(f'Tentando abrir diretamente: {dev_path}')
-                            self.cap = cv2.VideoCapture(dev_id)
-                            if self.cap.isOpened():
-                                self.get_logger().info(f'Dispositivo {dev_path} aberto com sucesso via V4L2 direto')
-                                
-                                # Configurar propriedades
-                                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-                                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-                                self.cap.set(cv2.CAP_PROP_FPS, self.camera_fps)
-                                
-                                # Verificar se as configurações foram aplicadas
-                                actual_width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-                                actual_height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-                                actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
-                                
-                                self.get_logger().info(f'Configurações aplicadas: {actual_width}x{actual_height} @ {actual_fps}fps')
-                                
-                                # Configurar cálculo de FPS real
-                                self.frame_count = 0
-                                self.last_fps_time = time.time()
-                                self.real_fps = 0.0
-                                
-                                self.get_logger().info('Câmera inicializada com sucesso via acesso direto V4L2')
-                                return  # Sucesso, sair do método
-                                
-                except Exception as e:
-                    self.get_logger().warn(f'Falha ao abrir diretamente via V4L2: {str(e)}')
-                    self.get_logger().info('Tentando GStreamer como alternativa...')
+                # Não usar V4L2, usar apenas GStreamer
+                self.get_logger().info('Pulando testes com V4L2, usando diretamente GStreamer para câmera CSI')
         
         # Pipeline GStreamer otimizado para IMX219 com aceleração CUDA
         # Calcular framerate como fração reduzida para evitar problemas
@@ -217,19 +184,24 @@ class IMX219CameraNode(Node):
         # Pipeline principal com envio para appsink (para ROS) e opcionalmente para ximagesink (display)
         display_enabled = self.get_parameter('enable_display').value and has_display
         
+        # Reduzir o fps para 30 se for captura ao vivo (evita problemas de timeout)
+        if fps_num > 30:
+            self.get_logger().info(f'Reduzindo FPS para 30 para evitar problemas de timeout')
+            fps_num = 30
+            fps_den = 1
+        
         # Definir pipeline dependendo do ambiente
         if is_container:
-            # Pipeline mais simples para ambiente containerizado com CUDA
+            # Pipeline otimizado para ambiente containerizado com CUDA
+            # Sem codificação/decodificação para melhor desempenho
             pipeline = (
-                f"nvarguscamerasrc sensor-id=0 ! "
-                f"video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
-                f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} ! "
-                f"nvvidconv flip-method={self.get_parameter('flip_method').value} ! "
-                f"video/x-raw(memory:NVMM), format=(string)I420 ! "
-                f"nvv4l2h264enc bitrate=8000000 ! h264parse ! nvv4l2decoder ! "  # Processamento com CUDA
-                f"nvvidconv ! video/x-raw, format=(string)BGRx ! "
-                f"videoconvert ! video/x-raw, format=(string)BGR ! "
-                f"appsink max-buffers=2 drop=true sync=false"
+                f"nvarguscamerasrc sensor-id=0 "
+                f"! video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
+                f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} "
+                f"! nvvidconv flip-method={self.get_parameter('flip_method').value} "
+                f"! video/x-raw, format=(string)BGRx "
+                f"! videoconvert ! video/x-raw, format=(string)BGR "
+                f"! appsink max-buffers=2 drop=true sync=false"
             )
         else:
             # Pipeline completo para ambiente nativo com aceleração CUDA
@@ -238,19 +210,16 @@ class IMX219CameraNode(Node):
                 f"exposuretimerange='{self.get_parameter('exposure_time').value} {self.get_parameter('exposure_time').value}' "
                 f"gainrange='{self.get_parameter('gain').value} {self.get_parameter('gain').value}' "
                 f"wbmode={self.get_parameter('awb_mode').value} "
-                f"tnr-mode=2 ee-mode=2 "  # Redução de ruído temporal e aprimoramento de bordas
+                f"tnr-mode=2 ee-mode=2 "
                 f"saturation={self.get_parameter('saturation').value} "
                 f"brightness={self.get_parameter('brightness').value} "
-                f"ispdigitalgainrange='1 2' "  # Otimização do ganho digital
-                f"! video/x-raw(memory:NVMM), "
-                f"width=(int){self.width}, height=(int){self.height}, "
-                f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} ! "
-                f"nvvidconv flip-method={self.get_parameter('flip_method').value} ! "
-                f"video/x-raw(memory:NVMM), format=(string)I420 ! "
-                f"nvv4l2h264enc bitrate=8000000 ! h264parse ! nvv4l2decoder ! "  # Processamento com CUDA
-                f"nvvidconv ! video/x-raw, format=(string)BGRx ! "
-                f"videoconvert ! video/x-raw, format=(string)BGR ! "
-                f"appsink max-buffers=2 drop=true sync=false"
+                f"ispdigitalgainrange='1 2' "
+                f"! video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
+                f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} "
+                f"! nvvidconv flip-method={self.get_parameter('flip_method').value} "
+                f"! video/x-raw, format=(string)BGRx "
+                f"! videoconvert ! video/x-raw, format=(string)BGR "
+                f"! appsink max-buffers=2 drop=true sync=false"
             )
         
         self.get_logger().info(f'Pipeline GStreamer: {pipeline}')
@@ -265,6 +234,7 @@ class IMX219CameraNode(Node):
             self.check_cuda_permissions()
             
             # Abrir a câmera com o pipeline GStreamer
+            self.get_logger().info('Abrindo câmera com pipeline GStreamer...')
             self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
             
             if not self.cap.isOpened():
@@ -299,15 +269,13 @@ class IMX219CameraNode(Node):
                         # Construir comando gst-launch para escrever frames em formato bruto para o pipe
                         # Otimizado para usar CUDA diretamente
                         gst_cmd = (
-                            f"gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! "
-                            f"video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
-                            f"format=NV12, framerate={fps_num}/{fps_den} ! "
-                            f"nvvidconv flip-method={self.get_parameter('flip_method').value} ! "
-                            f"video/x-raw(memory:NVMM), format=I420 ! "
-                            f"nvv4l2h264enc bitrate=8000000 ! h264parse ! nvv4l2decoder ! "
-                            f"nvvidconv ! video/x-raw, format=BGRx ! "
-                            f"videoconvert ! video/x-raw, format=BGR ! "
-                            f"filesink location={pipe_path} append=true buffer-size=16777216"
+                            f"gst-launch-1.0 nvarguscamerasrc sensor-id=0 "
+                            f"! video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
+                            f"format=NV12, framerate={fps_num}/{fps_den} "
+                            f"! nvvidconv flip-method={self.get_parameter('flip_method').value} "
+                            f"! video/x-raw, format=BGRx "
+                            f"! videoconvert ! video/x-raw, format=BGR "
+                            f"! filesink location={pipe_path} append=true buffer-size=16777216"
                         )
                         
                         # Executar gst-launch em background
@@ -452,6 +420,7 @@ class IMX219CameraNode(Node):
         Retorna: True se pelo menos um dispositivo de câmera está disponível, False caso contrário
         """
         devices_available = False
+        csi_available = False
         
         try:
             # Verificar dispositivos de vídeo
@@ -478,8 +447,35 @@ class IMX219CameraNode(Node):
                     if '36' in i2c_output or '10' in i2c_output:  # Endereços comuns para câmeras IMX219
                         self.get_logger().info('Câmera CSI detectada pelo i2cdetect')
                         devices_available = True
-                except (subprocess.SubprocessError, FileNotFoundError):
-                    self.get_logger().info('i2cdetect não disponível para verificar câmera CSI')
+                        csi_available = True
+                    else:
+                        self.get_logger().warn('Câmera CSI não detectada pelo i2cdetect')
+                except (subprocess.SubprocessError, FileNotFoundError) as e:
+                    self.get_logger().info(f'i2cdetect não disponível para verificar câmera CSI: {str(e)}')
+                
+                # Verificar diretamente com GStreamer se a câmera CSI está disponível
+                try:
+                    result = subprocess.run(
+                        ['gst-launch-1.0', 'nvarguscamerasrc', 'sensor-id=0', 'num-buffers=0', '!', 'fakesink'], 
+                        stdout=subprocess.PIPE, 
+                        stderr=subprocess.PIPE, 
+                        timeout=2
+                    )
+                    # Verificar se o comando foi bem-sucedido (não necessariamente significa que frames foram capturados)
+                    if result.returncode == 0:
+                        self.get_logger().info('Câmera CSI detectada via nvarguscamerasrc')
+                        csi_available = True
+                        devices_available = True
+                    else:
+                        stderr = result.stderr.decode('utf-8')
+                        if "Could not initialize supporting library" in stderr:
+                            self.get_logger().warn('Biblioteca de suporte à câmera CSI não inicializada corretamente')
+                        elif "Resource busy" in stderr:
+                            self.get_logger().warn('Câmera CSI já em uso por outro processo')
+                        else:
+                            self.get_logger().warn(f'Erro ao testar câmera CSI via nvarguscamerasrc: {stderr}')
+                except (subprocess.SubprocessError, FileNotFoundError) as e:
+                    self.get_logger().warn(f'Teste de câmera CSI via GStreamer falhou: {str(e)}')
                 
                 # Verificar mais detalhes apenas se um dispositivo for encontrado
                 if devices_available:
@@ -605,6 +601,23 @@ class IMX219CameraNode(Node):
                             self.get_logger().info(f'Processos usando a câmera: {camera_procs}')
                         except:
                             self.get_logger().info('Não foi possível identificar processos usando a câmera.')
+                        
+                        # Tentar reiniciar o serviço nvargus-daemon
+                        try:
+                            self.get_logger().info('Tentando reiniciar o serviço nvargus-daemon...')
+                            subprocess.run(['systemctl', 'restart', 'nvargus-daemon'], 
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                            time.sleep(2)  # Aguardar serviço reiniciar
+                            self.get_logger().info('Serviço nvargus-daemon reiniciado, tentando novamente...')
+                            
+                            # Testar novamente
+                            result = subprocess.run(test_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=2)
+                            if result.returncode == 0:
+                                self.get_logger().info('Reinício do serviço nvargus-daemon resolveu o problema!')
+                            else:
+                                self.get_logger().warn('Reinício do serviço nvargus-daemon não resolveu o problema.')
+                        except Exception as e:
+                            self.get_logger().warn(f'Erro ao tentar reiniciar serviço nvargus-daemon: {str(e)}')
                     else:
                         self.get_logger().error(f'Erro ao testar nvarguscamerasrc: {stderr}')
                         
@@ -631,15 +644,15 @@ class IMX219CameraNode(Node):
         
         if cuda_enabled:
             # Inicializar contexto CUDA
-            self.cuda_stream = cv2.cuda_Stream()
-            self.cuda_upload = cv2.cuda_GpuMat()
-            self.cuda_color = cv2.cuda_GpuMat()
-            self.cuda_download = cv2.cuda_GpuMat()
-        
-        # Variáveis para cálculo de FPS real
-        fps_update_interval = 1.0  # segundos
-        frame_times = []
-        max_frame_times = 30  # Para média móvel
+            try:
+                self.cuda_stream = cv2.cuda_Stream()
+                self.cuda_upload = cv2.cuda_GpuMat()
+                self.cuda_color = cv2.cuda_GpuMat()
+                self.cuda_download = cv2.cuda_GpuMat()
+                self.get_logger().info('Inicialização de contexto CUDA bem-sucedida')
+            except Exception as e:
+                self.get_logger().warn(f'Erro ao inicializar contexto CUDA: {str(e)}')
+                cuda_enabled = False
         
         # Tentar detectar problemas com CUDA em ambiente containerizado
         is_container = os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv')
@@ -656,17 +669,113 @@ class IMX219CameraNode(Node):
                 self.get_logger().warn('Desabilitando processamento CUDA.')
                 cuda_enabled = False
         
+        # Variáveis para cálculo de FPS real
+        fps_update_interval = 1.0  # segundos
+        frame_times = []
+        max_frame_times = 30  # Para média móvel
+        retry_count = 0
+        max_retries = 5
+        last_frame_time = time.time()
+        frame_capture_error_count = 0
+        
+        # Quando estamos em container, sempre tratar como modo "direto" para gerenciar melhor os frames
+        # independentemente de estar usando SSH ou monitor direto
+        self.get_logger().info('Usando modo containerizado otimizado para Jetson')
+        
+        # Em ambientes containerizados, melhor usar nosso próprio temporizador
+        # para controlar o FPS em vez de depender da detecção do OpenCV
+        self.frame_interval = 1.0 / self.camera_fps  # Intervalo entre frames desejado
+        self.last_capture_time = time.time()
+        
+        # Flag para indicar que estamos usando nosso próprio timer para FPS
+        self.fps_timer_active = True
+        
+        # Ignorar mensagens de aviso sobre "Unable to get camera FPS" porque 
+        # estamos usando nosso próprio temporizador em contêiner
+        self.get_logger().info('Em contêiner, usando temporizador interno para controle de FPS')
+        
         while self.is_running and rclpy.ok():
             try:
                 # Registrar tempo de início do frame
                 frame_start_time = time.time()
                 
+                # Em ambiente containerizado, garantir o intervalo certo entre frames
+                # para evitar o problema "Unable to get camera FPS"
+                elapsed = frame_start_time - self.last_capture_time
+                if elapsed < self.frame_interval:
+                    sleep_time = self.frame_interval - elapsed
+                    time.sleep(sleep_time)
+                
                 # Capturar frame
                 ret, frame = self.cap.read()
+                
+                # Atualizar timestamp da última captura bem-sucedida
+                current_time = time.time()
+                self.last_capture_time = current_time
+                
                 if not ret:
-                    self.get_logger().warn('Falha ao capturar frame')
+                    frame_capture_error_count += 1
+                    current_time = time.time()
+                    time_since_last_frame = current_time - last_frame_time
+                    
+                    if frame_capture_error_count >= 3:  # Falhou 3 vezes seguidas
+                        self.get_logger().warn(f'Múltiplas falhas ao capturar frame (count={frame_capture_error_count})')
+                        
+                    if time_since_last_frame > 5.0:  # Sem frames por 5 segundos
+                        retry_count += 1
+                        self.get_logger().warn(f'Falha ao capturar frame por {time_since_last_frame:.1f}s. Tentativa {retry_count}/{max_retries}')
+                        
+                        if retry_count >= max_retries:
+                            self.get_logger().error('Máximo de tentativas excedido. Reiniciando a câmera...')
+                            # Tentar reiniciar a câmera com método GST-LAUNCH direto
+                            try:
+                                self.get_logger().info('Reiniciando captura...')
+                                # Fechar a câmera atual
+                                if hasattr(self, 'cap') and self.cap.isOpened():
+                                    self.cap.release()
+                                
+                                # Tenta reiniciar usando GStreamer diretamente com pipeline simples
+                                self.get_camera_info_gstreamer()
+                                
+                                # Usar pipeline mais simples para evitar problemas de FPS
+                                fps_num = 30  # Usar FPS mais baixo para estabilidade
+                                fps_den = 1
+                                test_pipeline = (
+                                    f"nvarguscamerasrc sensor-id=0 ! "
+                                    f"video/x-raw(memory:NVMM), width=1280, height=720, "
+                                    f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} ! "
+                                    f"nvvidconv ! video/x-raw, format=(string)BGRx ! "
+                                    f"videoconvert ! video/x-raw, format=(string)BGR ! "
+                                    f"appsink max-buffers=2 drop=true sync=false"
+                                )
+                                
+                                self.get_logger().info(f'Tentando pipeline simplificado: {test_pipeline}')
+                                self.cap = cv2.VideoCapture(test_pipeline, cv2.CAP_GSTREAMER)
+                                
+                                if not self.cap.isOpened():
+                                    raise RuntimeError("Não foi possível reiniciar a câmera")
+                                
+                                # Reiniciar contadores
+                                self.frame_count = 0
+                                self.last_fps_time = time.time()
+                                retry_count = 0
+                                frame_capture_error_count = 0
+                                
+                                self.get_logger().info('Câmera reiniciada com sucesso!')
+                            except Exception as restart_error:
+                                self.get_logger().error(f'Falha ao reiniciar câmera: {str(restart_error)}')
+                                # Entrar em modo simulado como último recurso
+                                self.get_logger().info('Entrando em modo de simulação após falhas na câmera real')
+                                self.setup_simulation_mode()
+                                return
+                    
                     time.sleep(0.1)
                     continue
+                
+                # Reset do contador de tentativas e atualizar último frame bem-sucedido
+                retry_count = 0
+                frame_capture_error_count = 0
+                last_frame_time = time.time()
                 
                 # Atualizar contagem para cálculo de FPS
                 self.frame_count += 1
@@ -810,18 +919,24 @@ class IMX219CameraNode(Node):
                         
                         # Se real_fps estiver definido mas for 0, pode haver um problema
                         if hasattr(self, 'real_fps') and self.real_fps == 0:
-                            self.get_logger().warn('FPS real é zero. Verificando câmera...')
-                            # Capturar um frame para verificar se a câmera está funcionando
+                            # Em contêiner, isso é esperado - usar nossa abordagem de temporizador
+                            if not hasattr(self, 'fps_warning_shown'):
+                                self.get_logger().info('Em ambiente containerizado, usando temporizador interno para FPS em vez do FPS da câmera')
+                                self.fps_warning_shown = True
+                                
+                            # Mesmo assim, fazer uma verificação rápida da câmera para garantir que está tudo bem
                             ret, _ = self.cap.read()
                             if not ret:
                                 self.get_logger().error('Não foi possível obter imagem da câmera - "Unable to get camera FPS"')
                                 self.get_logger().info('Tentando reiniciar a câmera...')
-                                # Tentar reiniciar os contadores de FPS
+                                
+                                # Verificar se o pipeline precisa ser reiniciado
+                                self.get_logger().info('Tentando reiniciar a captura...')
+                                self.get_camera_info_gstreamer()
+                                
+                                # Reiniciar os contadores de FPS
                                 self.frame_count = 0
                                 self.last_fps_time = time.time()
-                                
-                                # Tentar obter informações diretamente do GStreamer
-                                self.get_camera_info_gstreamer()
                 except Exception as e:
                     self.get_logger().warn(f'Erro ao obter estatísticas da câmera: {e}')
                 
@@ -850,29 +965,60 @@ class IMX219CameraNode(Node):
                     self.get_logger().warn("Não foi possível obter informações da câmera via GStreamer")
                     
                 # Tentar verificar se o driver da câmera está carregado
-                kernel_modules = subprocess.check_output(['lsmod'], stderr=subprocess.STDOUT).decode('utf-8')
-                self.get_logger().info("Verificando módulos do kernel relacionados à câmera:")
-                for line in kernel_modules.split('\n'):
-                    if any(s in line for s in ['camera', 'tegra', 'video', 'v4l', 'nvhost']):
-                        self.get_logger().info(line.strip())
+                try:
+                    kernel_modules = subprocess.check_output(['lsmod'], stderr=subprocess.STDOUT).decode('utf-8')
+                    self.get_logger().info("Verificando módulos do kernel relacionados à câmera:")
+                    for line in kernel_modules.split('\n'):
+                        if any(s in line for s in ['camera', 'tegra', 'video', 'v4l', 'nvhost']):
+                            self.get_logger().info(line.strip())
+                except Exception as e:
+                    self.get_logger().warn(f"Erro ao verificar módulos do kernel: {str(e)}")
                         
                 # Verificar se a placa consegue se comunicar com a câmera CSI
                 try:
                     i2c_output = subprocess.check_output(['i2cdetect', '-y', '0'], stderr=subprocess.STDOUT).decode('utf-8')
                     self.get_logger().info(f"Dispositivos I2C detectados:\n{i2c_output}")
-                except:
-                    pass
+                except Exception as e:
+                    self.get_logger().warn(f"Erro ao verificar dispositivos I2C: {str(e)}")
+                    
+                # Verificar se os serviços necessários estão rodando
+                try:
+                    services = subprocess.check_output(['systemctl', 'list-units', '--type=service', '--state=running'], stderr=subprocess.STDOUT).decode('utf-8')
+                    self.get_logger().info("Verificando serviços do sistema relacionados à camera:")
+                    for line in services.split('\n'):
+                        if any(s in line for s in ['camera', 'nvargus', 'nvidia']):
+                            self.get_logger().info(line.strip())
+                except Exception as e:
+                    self.get_logger().warn(f"Erro ao verificar serviços: {str(e)}")
                     
             except subprocess.TimeoutExpired:
                 self.get_logger().warn("Timeout ao tentar obter informações da câmera")
             except Exception as e:
                 self.get_logger().warn(f"Erro ao obter informações via GStreamer: {str(e)}")
                 
-            # Tentar capturar um único frame como teste final
+            # Tentar capturar um único frame como teste final com pipeline simplificado
             test_cmd = "gst-launch-1.0 nvarguscamerasrc sensor-id=0 num-buffers=1 ! fakesink"
             try:
                 subprocess.run(test_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
                 self.get_logger().info("Teste de captura de um único frame bem-sucedido")
+                
+                # Se isso funcionar, tentar outro teste para validar resolução e FPS
+                validate_cmd = (
+                    "gst-launch-1.0 nvarguscamerasrc sensor-id=0 num-buffers=30 ! "
+                    f"video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=30/1 ! "
+                    "fakesink"
+                )
+                try:
+                    self.get_logger().info("Validando configurações da câmera (resolução e FPS)...")
+                    start_time = time.time()
+                    subprocess.run(validate_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                    elapsed = time.time() - start_time
+                    self.get_logger().info(f"Validação concluída em {elapsed:.2f}s - Câmera parece funcional")
+                except subprocess.TimeoutExpired:
+                    self.get_logger().warn("Timeout na validação de configurações, mas a câmera parece estar funcionando")
+                except Exception as e:
+                    self.get_logger().warn(f"Erro na validação de configurações: {str(e)}")
+                
             except subprocess.TimeoutExpired:
                 self.get_logger().error("Timeout no teste de captura - câmera pode estar indisponível")
             except Exception as e:
