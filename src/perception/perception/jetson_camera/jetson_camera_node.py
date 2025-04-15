@@ -155,6 +155,24 @@ class IMX219CameraNode(Node):
         if is_container:
             self.get_logger().info('Ambiente containerizado detectado, ajustando pipeline para compatibilidade.')
             
+            # Configurar acesso ao socket Argus para containers
+            socket_path = '/tmp/argus_socket'
+            if not os.path.exists(socket_path):
+                self.get_logger().warn(f'Socket Argus não encontrado em {socket_path}')
+                self.get_logger().info('Verificando se o host montou o socket Argus no container...')
+                
+                # Tente encontrar o socket Argus em outros lugares comuns
+                for alt_path in ['/tmp/.argus_socket', '/var/tmp/argus_socket']:
+                    if os.path.exists(alt_path):
+                        self.get_logger().info(f'Socket Argus encontrado em local alternativo: {alt_path}')
+                        # Tente criar um link simbólico para o local padrão
+                        try:
+                            os.symlink(alt_path, socket_path)
+                            self.get_logger().info(f'Link simbólico criado de {alt_path} para {socket_path}')
+                            break
+                        except Exception as e:
+                            self.get_logger().warn(f'Não foi possível criar link simbólico: {str(e)}')
+        
         # Verificar se o plugin nvarguscamerasrc está disponível
         try:
             self.get_logger().info('Verificando disponibilidade do plugin nvarguscamerasrc...')
@@ -241,60 +259,39 @@ class IMX219CameraNode(Node):
                 a, b = b, a % b
             return a
             
-        fps_num = self.camera_fps
+        fps_num = int(self.camera_fps)
         fps_den = 1
         divisor = gcd(fps_num, fps_den)
         fps_num //= divisor
         fps_den //= divisor
         
-        # Verificar se CUDA está disponível
-        try:
-            cuda_devices = cv2.cuda.getCudaEnabledDeviceCount()
-            if cuda_devices > 0:
-                self.get_logger().info(f'Dispositivos CUDA disponíveis: {cuda_devices}')
-                # Testar se CUDA está realmente funcionando
-                try:
-                    test_mat = cv2.cuda_GpuMat((10, 10), cv2.CV_8UC3)
-                    self.get_logger().info('Teste CUDA bem-sucedido! CUDA está funcionando corretamente.')
-                    cuda_enabled = True
-                except Exception as cuda_test_error:
-                    self.get_logger().warn(f'CUDA detectado, mas teste falhou: {str(cuda_test_error)}')
-                    cuda_enabled = False
-            else:
-                self.get_logger().warn('Nenhum dispositivo CUDA disponível!')
-                cuda_enabled = False
-        except Exception as e:
-            self.get_logger().warn(f'Erro ao verificar suporte CUDA: {str(e)}')
-            cuda_enabled = False
-        
-        # Reduzir o fps para 30 se for captura ao vivo em resolução alta (evita problemas de timeout)
-        if fps_num > 30 and (self.width > 1920 or self.height > 1080):
-            self.get_logger().info(f'Reduzindo FPS para 30 devido à alta resolução para evitar problemas de timeout')
-            fps_num = 30
-            fps_den = 1
-        
-        # Construir pipeline GStreamer otimizado
-        # Usar nvcamerasrc se disponível (melhor performance) ou nvarguscamerasrc como alternativa
-        self.get_logger().info('Construindo pipeline GStreamer otimizado para câmera CSI com CUDA...')
-        
-        # Montar pipeline de acordo com parâmetros
-        use_cuda_element = "true" if cuda_enabled else "false"
-        
-        # Pipeline otimizado com nvinfer para processamento acelerado (se CUDA disponível)
-        pipeline = (
-            f"nvarguscamerasrc sensor-id=0 do-timestamp=true "
-            f"exposuretimerange='{self.get_parameter('exposure_time').value} {self.get_parameter('exposure_time').value}' "
-            f"gainrange='{self.get_parameter('gain').value} {self.get_parameter('gain').value}' "
-            f"wbmode={self.get_parameter('awb_mode').value} "
-            f"tnr-mode=2 ee-mode=2 "
-            f"! video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
-            f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} "
-            f"! nvvidconv flip-method={self.get_parameter('flip_method').value} "
-            f"! video/x-raw, format=(string)BGRx "
-        )
+        # Pipeline para ambiente containerizado - mais simples e direto
+        if is_container:
+            pipeline = (
+                f"nvarguscamerasrc sensor-id=0 "
+                f"! video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
+                f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} "
+                f"! nvvidconv flip-method={self.get_parameter('flip_method').value} "
+                f"! video/x-raw, format=(string)BGRx "
+                f"! videoconvert ! video/x-raw, format=(string)BGR "
+                f"! appsink drop=true max-buffers=2"
+            )
+        else:
+            # Pipeline padrão para ambiente nativo da Jetson
+            pipeline = (
+                f"nvarguscamerasrc sensor-id=0 do-timestamp=true "
+                f"exposuretimerange='{self.get_parameter('exposure_time').value} {self.get_parameter('exposure_time').value}' "
+                f"gainrange='{self.get_parameter('gain').value} {self.get_parameter('gain').value}' "
+                f"wbmode={self.get_parameter('awb_mode').value} "
+                f"tnr-mode=2 ee-mode=2 "
+                f"! video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
+                f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} "
+                f"! nvvidconv flip-method={self.get_parameter('flip_method').value} "
+                f"! video/x-raw, format=(string)BGRx "
+            )
         
         # Adicionar elementos específicos para CUDA se habilitado
-        if cuda_enabled and self.get_parameter('enable_cuda').value:
+        if self.get_parameter('enable_cuda').value:
             # Adicionar processamento CUDA via nvivafilter
             pipeline += (
                 f"! nvvideoconvert ! video/x-raw(memory:NVMM), format=(string)RGBA "
@@ -314,7 +311,7 @@ class IMX219CameraNode(Node):
             self.get_logger().info('Abrindo câmera com pipeline GStreamer...')
             
             # Verificar permissões do CUDA antes de abrir a câmera
-            if cuda_enabled:
+            if self.get_parameter('enable_cuda').value:
                 self.check_cuda_permissions()
             
             # Matar qualquer processo gst-launch existente
@@ -459,6 +456,10 @@ class IMX219CameraNode(Node):
         """Atualiza o frame simulado com um padrão em movimento."""
         if not hasattr(self, 'simulated_frame'):
             return
+            
+        # Inicializar last_fps_time se não existir
+        if not hasattr(self, 'last_fps_time'):
+            self.last_fps_time = time.time()
             
         # Limpar frame
         self.simulated_frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
