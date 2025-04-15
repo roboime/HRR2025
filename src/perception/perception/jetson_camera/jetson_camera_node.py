@@ -440,29 +440,32 @@ class IMX219CameraNode(Node):
         """Verifica o serviço nvargus-daemon."""
         try:
             self.get_logger().info('Verificando status do serviço nvargus-daemon...')
-            status = subprocess.run(['systemctl', 'is-active', 'nvargus-daemon'], 
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            
-            if status.returncode != 0:
-                self.get_logger().warn('Serviço nvargus-daemon não está ativo!')
-                self.get_logger().info('Tentando iniciar o serviço...')
+            try:
+                status = subprocess.run(['systemctl', 'is-active', 'nvargus-daemon'], 
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 
-                try:
-                    subprocess.run(['systemctl', 'start', 'nvargus-daemon'], 
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    time.sleep(2)  # Aguardar serviço iniciar
+                if status.returncode != 0:
+                    self.get_logger().warn('Serviço nvargus-daemon não está ativo!')
+                    self.get_logger().info('Tentando iniciar o serviço...')
                     
-                    # Verificar novamente
-                    status = subprocess.run(['systemctl', 'is-active', 'nvargus-daemon'], 
-                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    if status.returncode == 0:
-                        self.get_logger().info('Serviço nvargus-daemon iniciado com sucesso!')
-                    else:
-                        self.get_logger().warn('Não foi possível iniciar o serviço nvargus-daemon')
-                except Exception as e:
-                    self.get_logger().warn(f'Erro ao iniciar serviço: {str(e)}')
-            else:
-                self.get_logger().info('Serviço nvargus-daemon está ativo e funcionando')
+                    try:
+                        subprocess.run(['systemctl', 'start', 'nvargus-daemon'], 
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        time.sleep(2)  # Aguardar serviço iniciar
+                        
+                        # Verificar novamente
+                        status = subprocess.run(['systemctl', 'is-active', 'nvargus-daemon'], 
+                                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        if status.returncode == 0:
+                            self.get_logger().info('Serviço nvargus-daemon iniciado com sucesso!')
+                        else:
+                            self.get_logger().warn('Não foi possível iniciar o serviço nvargus-daemon')
+                    except Exception as e:
+                        self.get_logger().warn(f'Erro ao iniciar serviço: {str(e)}')
+                else:
+                    self.get_logger().info('Serviço nvargus-daemon está ativo e funcionando')
+            except Exception as e:
+                self.get_logger().warn(f'Erro ao verificar serviço nvargus-daemon: {str(e)}')
         except Exception as e:
             self.get_logger().warn(f'Erro ao verificar serviço nvargus-daemon: {str(e)}')
 
@@ -951,59 +954,60 @@ class IMX219CameraNode(Node):
         self.cap = None  # Não usamos um objeto de captura para a câmera simulada
         self.fake_camera = True
         
-        # Carregar uma imagem de teste ou criar uma imagem em branco
+        # Configurar dimensões
         width = self.get_parameter('width').value
         height = self.get_parameter('height').value
         
-        # Tentar carregar uma imagem de teste de vários locais possíveis
-        test_image_paths = [
-            'src/perception/resources/test_images/field.jpg',
-            '/ros2_ws/src/perception/resources/test_images/field.jpg',
-            '/usr/local/share/perception/test_images/field.jpg',
-            '/opt/ros/humble/share/perception/test_images/field.jpg'
-        ]
+        # Criar uma imagem simulada
+        self.fake_frame = np.zeros((height, width, 3), dtype=np.uint8)
         
-        self.fake_frame = None
-        for path in test_image_paths:
-            if os.path.exists(path):
-                self.get_logger().info(f"Carregando imagem de teste: {path}")
-                try:
-                    self.fake_frame = cv2.imread(path)
-                    if self.fake_frame is not None:
-                        # Redimensionar para a resolução configurada
-                        self.fake_frame = cv2.resize(self.fake_frame, (width, height))
-                        break
-                except Exception as e:
-                    self.get_logger().warn(f"Erro ao carregar imagem {path}: {str(e)}")
+        # Desenhar um campo simulado
+        # Fundo verde
+        self.fake_frame[:, :] = (0, 128, 0)  # BGR para verde
         
-        # Se nenhuma imagem de teste for encontrada, criar uma em branco
-        if self.fake_frame is None:
-            self.get_logger().warn("Nenhuma imagem de teste encontrada, criando uma em branco")
-            self.fake_frame = np.zeros((height, width, 3), dtype=np.uint8)
-            
-            # Desenhar um campo simples para simular visão
-            # Fundo verde
-            self.fake_frame[:, :] = (0, 128, 0)  # BGR para verde
-            
-            # Linhas brancas
-            center_x, center_y = width // 2, height // 2
-            # Linha central
-            cv2.line(self.fake_frame, (center_x, 0), (center_x, height), (255, 255, 255), 2)
-            # Círculo central
-            cv2.circle(self.fake_frame, (center_x, center_y), min(width, height) // 6, (255, 255, 255), 2)
-            # Bordas do campo
-            cv2.rectangle(self.fake_frame, (50, 50), (width - 50, height - 50), (255, 255, 255), 2)
-            
-            # Adicionar uma bola laranja
-            cv2.circle(self.fake_frame, 
-                      (center_x + np.random.randint(-100, 100), 
-                       center_y + np.random.randint(-100, 100)), 
-                      15, (0, 165, 255), -1)
-            
-            self.get_logger().info(f"Imagem simulada criada com dimensões {width}x{height}")
-            
-        # Configurar timestamp para frames simulados
-        self.last_frame_time = self.get_clock().now()
+        # Adicionar linhas e elementos do campo
+        center_x, center_y = width // 2, height // 2
+        
+        # Linha central
+        cv2.line(self.fake_frame, (center_x, 0), (center_x, height), (255, 255, 255), 2)
+        
+        # Círculo central
+        cv2.circle(self.fake_frame, (center_x, center_y), min(width, height) // 6, (255, 255, 255), 2)
+        
+        # Bordas do campo
+        cv2.rectangle(self.fake_frame, (50, 50), (width - 50, height - 50), (255, 255, 255), 2)
+        
+        # Adicionar área do gol
+        goal_width = width // 6
+        goal_depth = height // 8
+        
+        # Gol esquerdo
+        cv2.rectangle(self.fake_frame, (50, center_y - goal_width//2), 
+                     (50 + goal_depth, center_y + goal_width//2), (255, 255, 255), 2)
+        
+        # Gol direito
+        cv2.rectangle(self.fake_frame, (width - 50 - goal_depth, center_y - goal_width//2), 
+                     (width - 50, center_y + goal_width//2), (255, 255, 255), 2)
+        
+        # Adicionar uma bola laranja
+        ball_x = center_x + np.random.randint(-100, 100)
+        ball_y = center_y + np.random.randint(-100, 100)
+        cv2.circle(self.fake_frame, (ball_x, ball_y), 15, (0, 165, 255), -1)
+        
+        # Inicializar parâmetros para animação da bola
+        self.ball_pos = [ball_x, ball_y]
+        self.ball_dir = [np.random.randint(3, 7), np.random.randint(3, 7)]
+        if np.random.random() > 0.5:
+            self.ball_dir[0] *= -1
+        if np.random.random() > 0.5:
+            self.ball_dir[1] *= -1
+        
+        # Adicionar texto indicando simulação
+        cv2.putText(self.fake_frame, "CAMERA SIMULADA", (center_x - 150, center_y), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        
+        self.get_logger().info(f"Modo de simulação configurado com resolução {width}x{height}")
+        self.get_logger().warn("Usando modo de simulação - câmera física não disponível!")
         
     def _configure_processing(self):
         """Configura opções de processamento com base em hardware disponível."""
@@ -1246,6 +1250,142 @@ class IMX219CameraNode(Node):
         if self.get_parameter('enable_display').value:
             cv2.imshow('IMX219 Camera', processed_frame)
             cv2.waitKey(1)
+
+    def check_cuda_permissions(self):
+        """Verifica se o CUDA está disponível e tem permissões adequadas.
+        
+        Returns:
+            bool: True se CUDA estiver disponível e com permissões corretas
+        """
+        try:
+            self.get_logger().info('Verificando disponibilidade e permissões do CUDA...')
+            
+            # Verificar se os módulos CUDA estão carregados
+            has_cuda = False
+            
+            # Método 1: Verificar dispositivos CUDA via arquivo de dispositivo
+            cuda_devices = ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-modeset']
+            cuda_device_found = False
+            
+            for device in cuda_devices:
+                if os.path.exists(device):
+                    cuda_device_found = True
+                    # Verificar permissões
+                    try:
+                        mode = os.stat(device).st_mode
+                        readable = bool(mode & 0o444)
+                        writable = bool(mode & 0o222)
+                        self.get_logger().info(f'Dispositivo CUDA {device} permissões: r={readable}, w={writable}')
+                        if readable and writable:
+                            has_cuda = True
+                    except Exception as e:
+                        self.get_logger().warn(f'Erro ao verificar permissões de {device}: {str(e)}')
+            
+            # Método 2: Verificar se o driver CUDA está carregado
+            try:
+                lsmod_output = subprocess.check_output(['lsmod'], text=True)
+                if 'nvidia' in lsmod_output:
+                    self.get_logger().info('Módulo nvidia detectado no kernel')
+                    has_cuda = True
+            except Exception as e:
+                self.get_logger().debug(f'Erro ao verificar módulos do kernel: {str(e)}')
+            
+            # Método 3: Tentar inicializar o CUDA via OpenCV
+            try:
+                # Verificar se OpenCV foi compilado com suporte a CUDA
+                cuda_build = cv2.getBuildInformation()
+                if 'CUDA:YES' in cuda_build:
+                    self.get_logger().info('OpenCV foi compilado com suporte a CUDA')
+                    
+                    # Verificar se pode criar matrizes CUDA
+                    try:
+                        dummy = np.zeros((10, 10), dtype=np.uint8)
+                        gpu_mat = cv2.cuda_GpuMat()
+                        gpu_mat.upload(dummy)
+                        gpu_mat.download()
+                        self.get_logger().info('CUDA inicializado com sucesso via OpenCV')
+                        has_cuda = True
+                    except Exception as e:
+                        self.get_logger().warn(f'Erro ao inicializar CUDA no OpenCV: {str(e)}')
+                else:
+                    self.get_logger().warn('OpenCV não tem suporte a CUDA')
+            except Exception as e:
+                self.get_logger().debug(f'Erro ao verificar suporte CUDA no OpenCV: {str(e)}')
+            
+            if has_cuda:
+                self.get_logger().info('CUDA está disponível e utilizável')
+                return True
+            else:
+                if cuda_device_found:
+                    self.get_logger().warn('Dispositivos CUDA encontrados, mas sem permissões adequadas')
+                else:
+                    self.get_logger().warn('Nenhum dispositivo CUDA encontrado no sistema')
+                return False
+                
+        except Exception as e:
+            self.get_logger().error(f'Erro ao verificar CUDA: {str(e)}')
+            return False
+
+    def setup_simulation_mode(self):
+        """Configura o modo de simulação quando a câmera real não está disponível."""
+        self.get_logger().info("Configurando modo de simulação para a câmera")
+        self.is_simulated = True
+        self.fake_camera = True
+        
+        # Configurar dimensões
+        width = self.get_parameter('width').value
+        height = self.get_parameter('height').value
+        
+        # Criar uma imagem simulada
+        self.fake_frame = np.zeros((height, width, 3), dtype=np.uint8)
+        
+        # Desenhar um campo simulado
+        # Fundo verde
+        self.fake_frame[:, :] = (0, 128, 0)  # BGR para verde
+        
+        # Adicionar linhas e elementos do campo
+        center_x, center_y = width // 2, height // 2
+        
+        # Linha central
+        cv2.line(self.fake_frame, (center_x, 0), (center_x, height), (255, 255, 255), 2)
+        
+        # Círculo central
+        cv2.circle(self.fake_frame, (center_x, center_y), min(width, height) // 6, (255, 255, 255), 2)
+        
+        # Bordas do campo
+        cv2.rectangle(self.fake_frame, (50, 50), (width - 50, height - 50), (255, 255, 255), 2)
+        
+        # Adicionar área do gol
+        goal_width = width // 6
+        goal_depth = height // 8
+        
+        # Gol esquerdo
+        cv2.rectangle(self.fake_frame, (50, center_y - goal_width//2), 
+                     (50 + goal_depth, center_y + goal_width//2), (255, 255, 255), 2)
+        
+        # Gol direito
+        cv2.rectangle(self.fake_frame, (width - 50 - goal_depth, center_y - goal_width//2), 
+                     (width - 50, center_y + goal_width//2), (255, 255, 255), 2)
+        
+        # Adicionar uma bola laranja
+        ball_x = center_x + np.random.randint(-100, 100)
+        ball_y = center_y + np.random.randint(-100, 100)
+        cv2.circle(self.fake_frame, (ball_x, ball_y), 15, (0, 165, 255), -1)
+        
+        # Inicializar parâmetros para animação da bola
+        self.ball_pos = [ball_x, ball_y]
+        self.ball_dir = [np.random.randint(3, 7), np.random.randint(3, 7)]
+        if np.random.random() > 0.5:
+            self.ball_dir[0] *= -1
+        if np.random.random() > 0.5:
+            self.ball_dir[1] *= -1
+        
+        # Adicionar texto indicando simulação
+        cv2.putText(self.fake_frame, "CAMERA SIMULADA", (center_x - 150, center_y), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        
+        self.get_logger().info(f"Modo de simulação configurado com resolução {width}x{height}")
+        self.get_logger().warn("Usando modo de simulação - câmera física não disponível!")
 
 def main(args=None):
     rclpy.init(args=args)
