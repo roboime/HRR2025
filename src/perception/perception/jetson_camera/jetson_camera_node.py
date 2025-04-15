@@ -66,7 +66,7 @@ class IMX219CameraNode(Node):
                 ('saturation', 1.0),
                 ('enable_hdr', False),
                 ('enable_cuda', True),
-                ('enable_display', False),
+                ('enable_display', True),
                 ('flip_method', 0)
             ]
         )
@@ -81,7 +81,7 @@ class IMX219CameraNode(Node):
         self.load_camera_calibration()
         
         # Criar timer para callback da câmera
-        callback_period = 1.0 / self.framerate
+        callback_period = 1.0 / self.camera_fps
         self.camera_timer = self.create_timer(callback_period, self.camera_callback)
         
         # Inicializar valor atual de FPS
