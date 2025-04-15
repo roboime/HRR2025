@@ -85,13 +85,26 @@ class YOEOHandler:
                 # Verificar no diretório resources relativo ao pacote perception
                 from ament_index_python.packages import get_package_share_directory
                 pkg_dir = get_package_share_directory('perception')
-                alt_path = os.path.join(pkg_dir, 'resources', 'models', 'yoeo_model.h5')
+                alt_paths = [
+                    os.path.join(pkg_dir, 'resources', 'models', 'yoeo_model.h5'),
+                    os.path.join(pkg_dir, 'resources', 'models', 'yoeo_latest.h5'),
+                    os.path.join('/ros2_ws/src/perception/resources/models', 'yoeo_model.h5'),
+                    os.path.join('/usr/local/share/perception/models', 'yoeo_model.h5')
+                ]
                 
-                if os.path.exists(alt_path):
-                    print(f"Usando modelo alternativo em {alt_path}")
-                    self.model_path = alt_path
-                else:
-                    raise FileNotFoundError(f"Modelo YOEO não encontrado em {self.model_path} nem em {alt_path}")
+                model_found = False
+                for alt_path in alt_paths:
+                    if os.path.exists(alt_path):
+                        print(f"Usando modelo alternativo em {alt_path}")
+                        self.model_path = alt_path
+                        model_found = True
+                        break
+                
+                if not model_found:
+                    print("Nenhum modelo YOEO encontrado. Criando modelo dummy para teste.")
+                    # Criar um modelo dummy para permitir testes sem modelo real
+                    self._create_dummy_model()
+                    return
             
             print(f"Carregando modelo YOEO de {self.model_path}...")
             self.model = tf.keras.models.load_model(self.model_path, compile=False)
@@ -108,7 +121,46 @@ class YOEOHandler:
             print("Modelo YOEO carregado com sucesso!")
         except Exception as e:
             print(f"Erro ao carregar o modelo YOEO: {e}")
-            print("Continuando sem o modelo YOEO. Algumas funcionalidades serão limitadas.")
+            print("Usando modelo dummy para permitir funcionamento básico")
+            self._create_dummy_model()
+    
+    def _create_dummy_model(self):
+        """Cria um modelo dummy para permitir o funcionamento básico quando o modelo real não está disponível."""
+        try:
+            from tensorflow.keras.layers import Input, Lambda
+            from tensorflow.keras.models import Model
+            
+            print("Criando modelo dummy para substituir o modelo YOEO...")
+            
+            # Criar entradas e saídas dummy
+            inputs = Input(shape=(*self.input_size, 3))
+            
+            # Lambda para gerar saídas de detecção vazias
+            def dummy_detection(x):
+                # Batch size de 1, sem detecções, 5+4 valores (x,y,w,h,conf + 4 classes)
+                return tf.zeros((1, 0, 9))
+            
+            # Lambda para gerar saídas de segmentação vazias (tudo fundo)
+            def dummy_segmentation(x):
+                # Criar uma máscara de segmentação simples
+                segmentation = tf.zeros((*self.input_size, 3))
+                # Colocar 1 na primeira classe (fundo)
+                segmentation = tf.concat([tf.ones((*self.input_size, 1)), 
+                                         tf.zeros((*self.input_size, 2))], axis=-1)
+                # Adicionar dimensão de batch
+                return tf.expand_dims(segmentation, 0)
+            
+            # Criar saídas dummy
+            detection_output = Lambda(dummy_detection, name="detection_small")(inputs)
+            segmentation_output = Lambda(dummy_segmentation, name="segmentation")(inputs)
+            
+            # Criar modelo
+            self.model = Model(inputs=inputs, outputs=[detection_output, segmentation_output])
+            print("Modelo dummy criado com sucesso!")
+            
+        except Exception as dummy_error:
+            print(f"Erro ao criar modelo dummy: {dummy_error}")
+            print("Funcionando sem modelo - algumas funcionalidades não estarão disponíveis")
             self.model = None
     
     def preprocess_image(self, image):
