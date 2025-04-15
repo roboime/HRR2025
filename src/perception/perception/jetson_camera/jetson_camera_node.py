@@ -20,6 +20,7 @@ import sys
 import glob
 import traceback
 import yaml
+import psutil
 
 class IMX219CameraNode(Node):
     """
@@ -145,1045 +146,280 @@ class IMX219CameraNode(Node):
         self.get_logger().info(f'IMX219 Camera Node iniciado - Modo: {self.camera_mode} ({self.width}x{self.height} @ {requested_fps}fps)')
 
     def init_camera(self):
-        """Inicializa a câmera com configurações otimizadas usando GStreamer e CUDA."""
+        """Inicializa a câmera com configurações otimizadas."""
         # Verificar se os dispositivos da câmera estão disponíveis
         devices_available = self.debug_camera_devices()
         
-        # Se não houver dispositivos disponíveis, tentar modo de simulação
         if not devices_available:
-            self.get_logger().warn('Nenhum dispositivo de câmera encontrado. Iniciando modo de simulação.')
-            self.setup_simulation_mode()
-            return
+            self.get_logger().error('Nenhum dispositivo de câmera encontrado!')
+            raise RuntimeError("Câmera CSI não encontrada. Verifique a conexão física.")
         
-        # Verificar se estamos em ambiente containerizado
+        # Verificar ambiente containerizado
         is_container = os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv')
         if is_container:
-            self.get_logger().info('Ambiente containerizado detectado, ajustando pipeline para compatibilidade.')
+            self.get_logger().info('Ambiente containerizado detectado')
             
-            # Configurar acesso ao socket Argus para containers
-            socket_path = '/tmp/argus_socket'
-            if not os.path.exists(socket_path):
-                self.get_logger().warn(f'Socket Argus não encontrado em {socket_path}')
-                self.get_logger().info('Verificando se o host montou o socket Argus no container...')
-                
-                # Tente encontrar o socket Argus em outros lugares comuns
-                for alt_path in ['/tmp/.argus_socket', '/var/tmp/argus_socket']:
-                    if os.path.exists(alt_path):
-                        self.get_logger().info(f'Socket Argus encontrado em local alternativo: {alt_path}')
-                        # Tente criar um link simbólico para o local padrão
-                        try:
-                            os.symlink(alt_path, socket_path)
-                            self.get_logger().info(f'Link simbólico criado de {alt_path} para {socket_path}')
-                            break
-                        except Exception as e:
-                            self.get_logger().warn(f'Não foi possível criar link simbólico: {str(e)}')
+            # Verificar socket Argus
+            self.check_argus_socket()
+            
+            # Verificar permissões de dispositivos
+            self.check_nvargus_permissions()
+            
+            # Verificar serviço nvargus-daemon
+            self.check_nvargus_daemon()
         
-        # Verificar se o plugin nvarguscamerasrc está disponível
-        try:
-            self.get_logger().info('Verificando disponibilidade do plugin nvarguscamerasrc...')
-            gst_check = subprocess.check_output(['gst-inspect-1.0', 'nvarguscamerasrc'], stderr=subprocess.STDOUT).decode('utf-8')
-            if 'nvarguscamerasrc' not in gst_check:
-                self.get_logger().error('Plugin GStreamer nvarguscamerasrc não encontrado. Este plugin é necessário para o funcionamento da câmera CSI.')
-                self.get_logger().info('Resultado da inspeção do plugin: ' + gst_check[:200] + '...' if len(gst_check) > 200 else gst_check)
-                raise RuntimeError('Plugin GStreamer nvarguscamerasrc não encontrado')
-            else:
-                self.get_logger().info('Plugin nvarguscamerasrc encontrado com sucesso!')
-        except (subprocess.SubprocessError, FileNotFoundError) as e:
-            self.get_logger().error(f'GStreamer não disponível ou não configurado corretamente: {str(e)}')
-            raise RuntimeError('GStreamer não disponível')
-        
-        # Testar acesso básico à câmera CSI usando nvarguscamerasrc
-        self.get_logger().info('Testando acesso básico à câmera CSI...')
-        test_cmd = "gst-launch-1.0 nvarguscamerasrc sensor-id=0 num-buffers=1 ! fakesink -v"
-        
-        try:
-            test_result = subprocess.run(test_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-            if test_result.returncode == 0:
-                self.get_logger().info('Teste básico de acesso à câmera CSI bem-sucedido!')
-            else:
-                stderr = test_result.stderr.decode('utf-8')
-                self.get_logger().warn(f'Teste básico de acesso à câmera CSI falhou: {stderr}')
-                
-                # Analisar erro específico
-                if "no such element or plugin" in stderr:
-                    self.get_logger().error("ERRO CRÍTICO: Plugin nvarguscamerasrc não disponível!")
-                elif "could not link" in stderr:
-                    self.get_logger().error("ERRO: Não foi possível vincular elementos do pipeline!")
-                elif "Resource busy" in stderr:
-                    self.get_logger().error("ERRO: Recurso ocupado! Outro processo pode estar usando a câmera.")
-                    # Tentar matar qualquer processo usando nvarguscamerasrc
-                    self.get_logger().info("Tentando liberar recursos da câmera...")
-                    try:
-                        subprocess.run("pkill -f 'gst-launch.*nvarguscamerasrc'", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                        time.sleep(2)  # Dar tempo para os recursos serem liberados
-                    except Exception as kill_err:
-                        self.get_logger().warn(f'Erro ao tentar liberar recursos: {str(kill_err)}')
-                
-                # Tentar reiniciar o serviço nvargus-daemon
-                self.get_logger().info("Tentando reiniciar o serviço nvargus-daemon...")
-                try:
-                    subprocess.run(['systemctl', 'restart', 'nvargus-daemon'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-                    time.sleep(2)  # Dar tempo para o serviço reiniciar
-                    
-                    # Testar novamente após reiniciar o serviço
-                    test_result = subprocess.run(test_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-                    if test_result.returncode == 0:
-                        self.get_logger().info('Reinício do serviço nvargus-daemon resolveu o problema!')
-                    else:
-                        stderr = test_result.stderr.decode('utf-8')
-                        self.get_logger().warn(f'Teste após reinício do serviço também falhou: {stderr}')
-                except Exception as restart_err:
-                    self.get_logger().error(f'Erro ao reiniciar serviço nvargus-daemon: {str(restart_err)}')
-        except subprocess.TimeoutExpired:
-            self.get_logger().warn('Timeout ao testar acesso à câmera CSI. O processo pode estar travado.')
-            # Tentar matar qualquer processo pendente
-            try:
-                subprocess.run("pkill -f 'gst-launch.*nvarguscamerasrc'", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            except Exception:
-                pass
-        except Exception as e:
-            self.get_logger().error(f'Erro ao testar acesso à câmera CSI: {str(e)}')
-        
-        # Configurar variáveis de ambiente para CUDA e GStreamer
-        self.get_logger().info('Configurando variáveis de ambiente para CUDA e GStreamer...')
-        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+        # Configurar variáveis de ambiente
+        self.get_logger().info('Configurando variáveis de ambiente para GStreamer...')
         os.environ["GST_GL_API"] = "gles2"
         os.environ["GST_GL_PLATFORM"] = "egl"
-        os.environ["NVIDIA_DRIVER_CAPABILITIES"] = "compute,video,utility"
-        os.environ["NVIDIA_VISIBLE_DEVICES"] = "all"
-        # Importante: desativar o GL nos pipelines GStreamer para evitar problemas de EGL
         os.environ["GST_GL_XINITTHREADS"] = "0"
         os.environ["__GL_SYNC_TO_VBLANK"] = "0"
-        # Adicionar variáveis de ambiente para melhor desempenho do nvarguscamerasrc
-        os.environ["GST_ARGUS_SENSOR_MODE"] = str(self.camera_mode)  # Usar o modo de câmera configurado
         
-        # Pipeline GStreamer otimizado para IMX219 com aceleração CUDA
-        # Calcular framerate como fração reduzida para evitar problemas
-        def gcd(a, b):
-            while b:
-                a, b = b, a % b
-            return a
-            
-        fps_num = int(self.camera_fps)
-        fps_den = 1
-        divisor = gcd(fps_num, fps_den)
-        fps_num //= divisor
-        fps_den //= divisor
+        # Construir e inicializar o pipeline
+        if not self._construct_camera_pipeline():
+            self.get_logger().error('Falha ao inicializar câmera!')
+            raise RuntimeError("Falha ao inicializar câmera CSI. Verifique os logs para diagnóstico.")
         
-        # Pipeline para ambiente containerizado - mais simples e direto
-        if is_container:
-            pipeline = (
-                f"nvarguscamerasrc sensor-id=0 "
-                f"! video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
-                f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} "
-                f"! nvvidconv flip-method={self.get_parameter('flip_method').value} "
-                f"! video/x-raw, format=(string)BGRx "
-                f"! videoconvert ! video/x-raw, format=(string)BGR "
-                f"! appsink drop=true max-buffers=2"
-            )
-        else:
-            # Pipeline padrão para ambiente nativo da Jetson
-            pipeline = (
-                f"nvarguscamerasrc sensor-id=0 do-timestamp=true "
-                f"exposuretimerange='{self.get_parameter('exposure_time').value} {self.get_parameter('exposure_time').value}' "
-                f"gainrange='{self.get_parameter('gain').value} {self.get_parameter('gain').value}' "
-                f"wbmode={self.get_parameter('awb_mode').value} "
-                f"tnr-mode=2 ee-mode=2 "
-                f"! video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
-                f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} "
-                f"! nvvidconv flip-method={self.get_parameter('flip_method').value} "
-                f"! video/x-raw, format=(string)BGRx "
-            )
+        # Thread de captura
+        self.is_running = True
+        self.capture_thread = threading.Thread(target=self.capture_loop)
+        self.capture_thread.daemon = True
+        self.capture_thread.start()
         
-        # Adicionar elementos específicos para CUDA se habilitado
-        if self.get_parameter('enable_cuda').value:
-            # Adicionar processamento CUDA via nvivafilter
-            pipeline += (
-                f"! nvvideoconvert ! video/x-raw(memory:NVMM), format=(string)RGBA "
-                f"! nvdsosd ! nvegltransform ! video/x-raw(memory:NVMM), format=(string)RGBA "
-                f"! nvvideoconvert ! video/x-raw, format=(string)BGR "
-            )
-        else:
-            pipeline += f"! videoconvert ! video/x-raw, format=(string)BGR "
-        
-        # Finalizar o pipeline com o elemento de saída
-        pipeline += f"! appsink max-buffers=4 drop=true sync=false name=sink emit-signals=true"
-        
-        self.get_logger().info(f'Pipeline GStreamer final: {pipeline}')
-        
-        # Abrir a câmera com o pipeline GStreamer
+        self.get_logger().info(f'Câmera CSI inicializada com sucesso: {self.width}x{self.height} @ {self.camera_fps}fps')
+
+    def _construct_camera_pipeline(self):
+        """Constrói o pipeline GStreamer para a câmera CSI."""
         try:
-            self.get_logger().info('Abrindo câmera com pipeline GStreamer...')
-            
-            # Verificar permissões do CUDA antes de abrir a câmera
-            if self.get_parameter('enable_cuda').value:
-                self.check_cuda_permissions()
-            
-            # Matar qualquer processo gst-launch existente
+            # Verificar se o plugin nvarguscamerasrc está disponível
             try:
-                self.get_logger().info('Liberando recursos GStreamer existentes...')
-                subprocess.run("pkill -f 'gst-launch.*nvarguscamerasrc'", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                time.sleep(1)  # Dar tempo para os recursos serem liberados
-            except Exception as kill_err:
-                self.get_logger().debug(f'Erro ao tentar liberar recursos: {str(kill_err)}')
-            
-            # Abrir a câmera
-            self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-            
-            # Verificar se a câmera foi aberta com sucesso
-            if not self.cap.isOpened():
-                self.get_logger().error('Falha ao abrir câmera com GStreamer!')
-                
-                # Tente um pipeline mais simples como último recurso
-                self.get_logger().warn('Tentando pipeline mais simples como último recurso...')
-                simple_pipeline = (
-                    f"nvarguscamerasrc sensor-id=0 ! "
-                    f"video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=30/1 ! "
-                    f"nvvidconv flip-method=0 ! video/x-raw, format=BGRx ! "
-                    f"videoconvert ! video/x-raw, format=BGR ! "
-                    f"appsink max-buffers=1 drop=true"
-                )
-                self.get_logger().info(f'Pipeline simplificado: {simple_pipeline}')
-                self.cap = cv2.VideoCapture(simple_pipeline, cv2.CAP_GSTREAMER)
-                
-                if not self.cap.isOpened():
-                    self.get_logger().error('Falha também com pipeline simplificado!')
-                    self.get_logger().error('Possíveis causas: serviço nvargus-daemon não está funcionando, hardware CSI não está conectado corretamente, ou outro processo está usando a câmera.')
-                    
-                    # Diagnosticar especificamente se a câmera CSI está sendo reconhecida
-                    try:
-                        self.get_logger().info('Verificando reconhecimento da câmera IMX219...')
-                        i2c_check = subprocess.run("i2cdetect -y 0 | grep 10", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                        if i2c_check.returncode == 0 and "10" in i2c_check.stdout.decode():
-                            self.get_logger().info("Câmera IMX219 detectada no barramento I2C!")
-                        else:
-                            self.get_logger().error("Câmera IMX219 NÃO detectada no barramento I2C! Verifique a conexão física.")
-                    except Exception as i2c_err:
-                        self.get_logger().warn(f'Erro ao verificar câmera via I2C: {str(i2c_err)}')
-                    
-                    # Ativar modo de simulação
-                    self.get_logger().warn('Ativando modo de simulação devido a falhas na câmera.')
-                    self.setup_simulation_mode()
-                    return
-            
-            # Câmera aberta com sucesso, tentar capturar o primeiro frame
-            self.get_logger().info('Câmera aberta com sucesso! Tentando capturar o primeiro frame...')
-            ret, test_frame = self.cap.read()
-            if ret:
-                self.get_logger().info(f'Primeiro frame capturado com sucesso: {test_frame.shape}')
-                
-                # Salvar o primeiro frame como arquivo para diagnóstico
-                try:
-                    cv2.imwrite('/tmp/first_frame.jpg', test_frame)
-                    self.get_logger().info('Primeiro frame salvo em /tmp/first_frame.jpg')
-                except Exception as save_err:
-                    self.get_logger().warn(f'Não foi possível salvar o primeiro frame: {str(save_err)}')
-                
-                # Verificar FPS reportado
-                fps_value = self.cap.get(cv2.CAP_PROP_FPS)
-                if fps_value <= 0:
-                    self.get_logger().warn('FPS não reportado pela câmera. Usando valor configurado.')
+                self.get_logger().info('Verificando disponibilidade do plugin nvarguscamerasrc...')
+                gst_check = subprocess.check_output(['gst-inspect-1.0', 'nvarguscamerasrc'], stderr=subprocess.STDOUT).decode('utf-8')
+                if 'nvarguscamerasrc' not in gst_check:
+                    self.get_logger().error('Plugin GStreamer nvarguscamerasrc não encontrado.')
+                    self.get_logger().info('Resultado da inspeção: ' + gst_check[:200] + '...' if len(gst_check) > 200 else gst_check)
+                    return False
                 else:
-                    self.get_logger().info(f'FPS reportado pela câmera: {fps_value}')
-            else:
-                self.get_logger().warn('Não foi possível capturar o primeiro frame. A câmera pode estar inicializando...')
-                
-                # Esperar um pouco e tentar novamente
-                self.get_logger().info('Aguardando 2 segundos e tentando novamente...')
-                time.sleep(2)
-                ret, test_frame = self.cap.read()
-                
-                if ret:
-                    self.get_logger().info('Segundo teste de captura bem-sucedido!')
-                else:
-                    self.get_logger().error('Falha persistente na captura. A câmera pode estar com problemas.')
-                    # Mas vamos tentar continuar mesmo assim, o loop de captura vai lidar com isso
-            
-            # Configurar variáveis para cálculo de FPS real
-            self.frame_count = 0
-            self.last_fps_time = time.time()
-            self.real_fps = 0.0
-            
-            # Ajustar propriedades para melhor desempenho
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 4)  # Aumentar buffer para minimizar latência
-            
-            self.get_logger().info('Câmera CSI com GStreamer e CUDA inicializada com sucesso!')
-            
-        except Exception as e:
-            self.get_logger().error(f'Exceção ao inicializar câmera: {str(e)}')
-            self.get_logger().error(f'Stack trace:\n{traceback.format_exc()}')
-            
-            # Diagnosticar o erro mais especificamente
-            self.get_logger().info('Executando diagnóstico detalhado...')
-            
-            # Verificar módulos carregados da NVIDIA
-            try:
-                lsmod = subprocess.check_output("lsmod | grep -E 'nvidia|tegra'", shell=True).decode('utf-8')
-                self.get_logger().info(f'Módulos NVIDIA/Tegra carregados:\n{lsmod}')
-            except Exception:
-                self.get_logger().warn('Não foi possível verificar módulos NVIDIA/Tegra.')
-            
-            # Verificar status dos serviços NVIDIA
-            try:
-                nvidia_services = subprocess.check_output("systemctl list-units --type=service | grep -E 'nvidia|argus'", shell=True).decode('utf-8')
-                self.get_logger().info(f'Serviços NVIDIA:\n{nvidia_services}')
-            except Exception:
-                self.get_logger().warn('Não foi possível listar serviços NVIDIA.')
-            
-            # Ativar modo de simulação como último recurso
-            self.get_logger().warn('Ativando modo de simulação devido a falha na inicialização da câmera.')
-            self.setup_simulation_mode()
-
-    def setup_simulation_mode(self):
-        """Configura o modo de simulação para a câmera quando dispositivos físicos não estão disponíveis."""
-        self.get_logger().info('Iniciando modo de simulação da câmera...')
-        
-        # Criar uma imagem de teste
-        self.simulated_frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-        
-        # Desenhar um padrão de teste na imagem para que seja visível
-        cv2.putText(self.simulated_frame, 'CAMERA SIMULADA', (self.width//2-150, self.height//2), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        
-        # Desenhar um círculo que se move para mostrar que é um vídeo simulado
-        self.circle_position = [self.width//4, self.height//4]
-        self.circle_direction = [5, 5]
-        
-        # Flag de simulação
-        self.is_simulated = True
-        self.cap = None  # Garantir que não há objeto de captura confundindo o código
-        
-        # Inicializar frame_count e last_fps_time para cálculo de FPS
-        self.frame_count = 0
-        self.last_fps_time = time.time()
-        
-        self.get_logger().info('Modo de simulação da câmera inicializado com sucesso')
-        
-        # Configurar um timer para atualizar a imagem simulada (simulando FPS real)
-        if hasattr(self, 'sim_timer'):
-            self.sim_timer.cancel()
-        self.sim_timer = self.create_timer(1.0/self.camera_fps, self.update_simulated_frame)
-
-    def update_simulated_frame(self):
-        """Atualiza o frame simulado com um padrão em movimento."""
-        # A simulação só funciona se a flag is_simulated estiver habilitada
-        if not self.is_simulated or not hasattr(self, 'simulated_frame'):
-            return
-            
-        # Calcular FPS real
-        current_time = time.time()
-        self.frame_count += 1
-        elapsed = current_time - self.last_fps_time
-        
-        # Atualizar FPS a cada segundo
-        if elapsed >= 1.0:
-            self.real_fps = self.frame_count / elapsed
-            self.frame_count = 0
-            self.last_fps_time = current_time
-            
-        # Limpar frame
-        self.simulated_frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-        
-        # Texto de simulação
-        cv2.putText(self.simulated_frame, 'CAMERA SIMULADA', (self.width//2-150, self.height//2), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        
-        # Mostrar FPS simulado
-        cv2.putText(self.simulated_frame, f'FPS: {self.real_fps:.1f}', (10, 60), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
-        # Atualizar posição do círculo
-        self.circle_position[0] += self.circle_direction[0]
-        self.circle_position[1] += self.circle_direction[1]
-        
-        # Verificar colisão com bordas
-        if self.circle_position[0] <= 0 or self.circle_position[0] >= self.width:
-            self.circle_direction[0] *= -1
-        if self.circle_position[1] <= 0 or self.circle_position[1] >= self.height:
-            self.circle_direction[1] *= -1
-            
-        # Desenhar círculo
-        cv2.circle(self.simulated_frame, 
-                  (int(self.circle_position[0]), int(self.circle_position[1])), 
-                  50, (0, 0, 255), -1)
-        
-        # Adicionar timestamp
-        timestamp = time.strftime("%H:%M:%S", time.localtime())
-        cv2.putText(self.simulated_frame, timestamp, (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        
-        # Publicar frame simulado
-        try:
-            timestamp = self.get_clock().now().to_msg()
-            img_msg = self.bridge.cv2_to_imgmsg(self.simulated_frame, "bgr8")
-            img_msg.header.stamp = timestamp
-            img_msg.header.frame_id = "camera_optical_frame"
-            self.image_pub.publish(img_msg)
-            
-            # Publicar info da câmera
-            self.publish_camera_info(img_msg.header)
-            
-            # Atualizar cálculo de FPS real
-            self.frame_count += 1
-            current_time = time.time()
-            elapsed = current_time - self.last_fps_time
-            if elapsed >= 1.0:  # Atualizar a cada segundo
-                self.real_fps = self.frame_count / elapsed
-                self.frame_count = 0
-                self.last_fps_time = current_time
-                self.get_logger().debug(f'FPS simulado: {self.real_fps:.1f}')
-                
-        except CvBridgeError as e:
-            self.get_logger().error(f'Erro no CvBridge: {e}')
-
-    def debug_camera_devices(self):
-        """
-        Debugar dispositivos de câmera disponíveis.
-        Retorna: True se pelo menos um dispositivo de câmera está disponível, False caso contrário
-        """
-        devices_available = False
-        csi_available = False
-        
-        try:
-            # Verificar dispositivos de vídeo
-            self.get_logger().info('Verificando dispositivos de câmera disponíveis:')
-            try:
-                # Verificar diretamente se /dev/video0 existe em vez de usar 'ls'
-                if os.path.exists('/dev/video0'):
-                    self.get_logger().info('Dispositivo /dev/video0 encontrado')
-                    devices_available = True
-                else:
-                    self.get_logger().warn('Dispositivo /dev/video0 não encontrado')
-                    
-                # Também verificar outros dispositivos
-                for dev_id in range(1, 10):  # Verificar dispositivos de 1 a 9 (0 já verificado acima)
-                    dev_path = f"/dev/video{dev_id}"
-                    if os.path.exists(dev_path):
-                        self.get_logger().info(f'Dispositivo {dev_path} encontrado')
-                        devices_available = True
-                
-                # Verificar se dispositivos CSI estão disponíveis (diferentes de V4L2)
-                try:
-                    # Verificar se a câmera CSI está conectada através do i2cdetect
-                    i2c_output = subprocess.check_output(['i2cdetect', '-y', '0'], stderr=subprocess.STDOUT).decode('utf-8')
-                    if '36' in i2c_output or '10' in i2c_output:  # Endereços comuns para câmeras IMX219
-                        self.get_logger().info('Câmera CSI detectada pelo i2cdetect')
-                        devices_available = True
-                        csi_available = True
-                    else:
-                        self.get_logger().warn('Câmera CSI não detectada pelo i2cdetect')
-                except (subprocess.SubprocessError, FileNotFoundError) as e:
-                    self.get_logger().info(f'i2cdetect não disponível para verificar câmera CSI: {str(e)}')
-                
-                # Verificar diretamente com GStreamer se a câmera CSI está disponível
-                try:
-                    self.get_logger().info('Testando câmera CSI com GStreamer (isso pode levar alguns segundos)...')
-                    # Usar num-buffers=1 para evitar que o comando execute indefinidamente
-                    result = subprocess.run(
-                        ['gst-launch-1.0', 'nvarguscamerasrc', 'sensor-id=0', 'num-buffers=1', '!', 'fakesink'], 
-                        stdout=subprocess.PIPE, 
-                        stderr=subprocess.PIPE, 
-                        timeout=10  # Timeout mais longo para dar tempo suficiente
-                    )
-                    # Verificar se o comando foi bem-sucedido
-                    if result.returncode == 0:
-                        self.get_logger().info('Câmera CSI detectada via nvarguscamerasrc')
-                        csi_available = True
-                        devices_available = True
-                    else:
-                        stderr = result.stderr.decode('utf-8')
-                        if "Could not initialize supporting library" in stderr:
-                            self.get_logger().warn('Biblioteca de suporte à câmera CSI não inicializada corretamente')
-                        elif "Resource busy" in stderr:
-                            self.get_logger().warn('Câmera CSI já em uso por outro processo')
-                        else:
-                            self.get_logger().warn(f'Erro ao testar câmera CSI via nvarguscamerasrc: {stderr}')
-                except (subprocess.SubprocessError, FileNotFoundError) as e:
-                    self.get_logger().warn(f'Teste de câmera CSI via GStreamer falhou: {str(e)}')
-                    self.get_logger().info('Isso pode ser normal em ambiente containerizado. Tentando método alternativo...')
-                    
-                    # Tentar método alternativo usando apenas a inspeção do plugin
-                    try:
-                        inspect_output = subprocess.check_output(['gst-inspect-1.0', 'nvarguscamerasrc'], 
-                                                              stderr=subprocess.STDOUT, timeout=3).decode('utf-8')
-                        if "nvarguscamerasrc:" in inspect_output:
-                            self.get_logger().info('Plugin nvarguscamerasrc está disponível (detecção alternativa).')
-                            # Assumir que a câmera CSI está disponível se o plugin existe
-                            csi_available = True
-                            devices_available = True
-                    except Exception as inspect_err:
-                        self.get_logger().warn(f'Inspeção alternativa do plugin falhou: {str(inspect_err)}')
-                
-                # Verificar mais detalhes apenas se um dispositivo for encontrado
-                if devices_available:
-                    for dev_id in range(10):
-                        dev_path = f"/dev/video{dev_id}"
-                        if os.path.exists(dev_path):
-                            try:
-                                # Verificar se o dispositivo é acessível (permissões)
-                                mode = os.stat(dev_path).st_mode
-                                readable = bool(mode & 0o444)  # Verificar permissão de leitura
-                                self.get_logger().info(f'Dispositivo {dev_path} é legível: {readable}')
-                                
-                                # Verificar grupos do dispositivo
-                                group_id = os.stat(dev_path).st_gid
-                                user_groups = os.getgroups()
-                                self.get_logger().info(f'Grupo do dispositivo: {group_id}, Grupos do usuário: {user_groups}')
-                                
-                                # Verificar detalhes da câmera com v4l2-ctl se disponível
-                                try:
-                                    caps = subprocess.check_output(['v4l2-ctl', '--device', dev_path, '--list-formats-ext']).decode('utf-8')
-                                    self.get_logger().info(f'Capacidades da câmera {dev_path}:\n{caps}')
-                                except (subprocess.SubprocessError, FileNotFoundError):
-                                    self.get_logger().info(f'v4l2-ctl não disponível para verificar {dev_path}')
-                                    
-                                # Tentar abrir o dispositivo diretamente com OpenCV para testar acesso
-                                test_cap = cv2.VideoCapture(dev_id)
-                                if test_cap.isOpened():
-                                    self.get_logger().info(f'Teste de abertura do dispositivo {dev_path} com OpenCV: SUCESSO')
-                                    test_cap.release()
-                                else:
-                                    self.get_logger().warn(f'Teste de abertura do dispositivo {dev_path} com OpenCV: FALHA')
-                            except Exception as e:
-                                self.get_logger().warn(f'Erro ao verificar detalhes de {dev_path}: {str(e)}')
-            except Exception as e:
-                self.get_logger().warn(f'Erro ao verificar dispositivos: {str(e)}')
-            
-            # Verificar permissões
-            uid = os.getuid()
-            gid = os.getgid()
-            self.get_logger().info(f'UID: {uid}, GID: {gid}')
-            self.get_logger().info(f'CUDA_VISIBLE_DEVICES: {os.environ.get("CUDA_VISIBLE_DEVICES", "não definido")}')
-            
-            # Verificar se estamos em um ambiente containerizado
-            if os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv'):
-                self.get_logger().info('Executando em ambiente containerizado')
-            
-            # Verificar se o GStreamer NVARGUS está disponível
-            try:
-                gst_output = subprocess.check_output(['gst-inspect-1.0', 'nvarguscamerasrc'], stderr=subprocess.STDOUT).decode('utf-8')
-                if 'nvarguscamerasrc' in gst_output:
-                    self.get_logger().info('Plugin GStreamer nvarguscamerasrc disponível')
-                else:
-                    self.get_logger().warn('Plugin GStreamer nvarguscamerasrc não está disponível')
-            except (subprocess.SubprocessError, FileNotFoundError):
-                self.get_logger().warn('Não foi possível verificar o plugin nvarguscamerasrc. GStreamer pode não estar disponível')
-            
-            # Verificar diretório de dispositivos no Windows (WSL)
-            if os.name == 'nt' or ('WSL' in os.uname().release if hasattr(os, 'uname') else False):
-                self.get_logger().info('Ambiente Windows/WSL detectado. Verificando dispositivos de vídeo disponíveis:')
-                try:
-                    # No Windows, usar DirectShow para listar dispositivos
-                    self.get_logger().info('Ambiente Windows não suporta diretamente /dev/video*. Use webcam USB.')
-                except Exception:
-                    pass
-            
-        except Exception as e:
-            self.get_logger().error(f'Erro ao debugar dispositivos: {str(e)}')
-        
-        return devices_available
-
-    def check_cuda_permissions(self):
-        """Verifica permissões de CUDA e tenta resolver problemas comuns."""
-        try:
-            # Verificar se o usuário tem acesso aos dispositivos NVIDIA
-            nvidia_devices = ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-modeset']
-            devices_found = False
-            
-            for device in nvidia_devices:
-                if os.path.exists(device):
-                    devices_found = True
-                    try:
-                        mode = os.stat(device).st_mode
-                        readable = bool(mode & 0o444)  # Verificar permissão de leitura
-                        writeable = bool(mode & 0o222)  # Verificar permissão de escrita
-                        self.get_logger().info(f'Dispositivo {device} - Leitura: {readable}, Escrita: {writeable}')
-                    except Exception as e:
-                        self.get_logger().warn(f'Erro ao verificar permissões de {device}: {str(e)}')
-            
-            if not devices_found:
-                self.get_logger().warn('Nenhum dispositivo NVIDIA encontrado no sistema')
-                
-                # Verificar se estamos em ambiente WSL (Windows Subsystem for Linux)
-                is_wsl = False
-                try:
-                    with open('/proc/version', 'r') as f:
-                        if 'microsoft' in f.read().lower():
-                            is_wsl = True
-                            self.get_logger().warn('Ambiente WSL detectado. CUDA pode não funcionar corretamente no WSL1.')
-                            self.get_logger().info('Para usar CUDA com câmeras, é recomendado usar WSL2 com GPU passthrough configurado.')
-                except:
-                    pass
-            
-            # Verificar se CUDA está disponível no OpenCV
-            try:
-                cuda_devices = cv2.cuda.getCudaEnabledDeviceCount()
-                self.get_logger().info(f'Dispositivos CUDA disponíveis no OpenCV: {cuda_devices}')
-                
-                if cuda_devices > 0:
-                    # Testar se CUDA está realmente funcionando
-                    try:
-                        # Criar e usar um objeto CUDA para verificar se realmente funciona
-                        test_mat = cv2.cuda_GpuMat((10, 10), cv2.CV_8UC3)
-                        self.get_logger().info('Teste CUDA bem-sucedido! CUDA está funcionando corretamente.')
-                    except Exception as cuda_test_error:
-                        self.get_logger().warn(f'CUDA detectado, mas teste falhou: {str(cuda_test_error)}')
-                        self.get_logger().info('CUDA pode não estar funcionando corretamente apesar de ser detectado')
-                else:
-                    self.get_logger().warn('Nenhum dispositivo CUDA disponível no OpenCV!')
-                    self.get_logger().info('Verificando variáveis de ambiente CUDA...')
-                    
-                    # Verificar se o OpenCV foi compilado com suporte CUDA
-                    try:
-                        has_cuda_build = 'cuda' in cv2.getBuildInformation().lower()
-                        if not has_cuda_build:
-                            self.get_logger().warn('OpenCV não foi compilado com suporte CUDA')
-                        else:
-                            self.get_logger().info('OpenCV foi compilado com suporte CUDA, mas nenhum dispositivo CUDA foi detectado')
-                    except:
-                        pass
-                    
-                    # Verificar se as variáveis de ambiente CUDA estão configuradas
-                    cuda_vars = ['CUDA_VISIBLE_DEVICES', 'LD_LIBRARY_PATH', 'PATH', 'CUDAHOME', 'CUDA_HOME']
-                    for var in cuda_vars:
-                        self.get_logger().info(f'{var}: {os.environ.get(var, "não definido")}')
-                    
-                    # Verificar se os módulos estão disponíveis (para diagnóstico)
-                    try:
-                        import subprocess
-                        ldconfig = subprocess.check_output('ldconfig -p | grep -i cuda', shell=True).decode('utf-8')
-                        self.get_logger().info(f'Bibliotecas CUDA encontradas: {ldconfig[:200]}...' if len(ldconfig) > 200 else ldconfig)
-                    except:
-                        self.get_logger().info('Não foi possível verificar bibliotecas CUDA via ldconfig')
-                    
-                    # Configurar para desabilitar CUDA se não estiver disponível
-                    if self.get_parameter('enable_cuda').value:
-                        self.get_logger().warn('Desabilitando processamento CUDA devido à indisponibilidade')
-                        # Não podemos definir parâmetros diretamente, mas podemos avisar que CUDA será ignorado
-                        # ou podemos criar um parâmetro interno para controlar isso
-                        self._cuda_available = False
-            except Exception as e:
-                self.get_logger().warn(f'Erro ao verificar dispositivos CUDA no OpenCV: {str(e)}')
-                self._cuda_available = False
-            
-            # Verificar se o módulo nvarguscamerasrc está disponível e funcionando
-            try:
-                # Testar se o módulo nvarguscamerasrc pode ser carregado
-                test_cmd = "gst-launch-1.0 nvarguscamerasrc num-buffers=0 ! fakesink"
-                result = subprocess.run(test_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=2)
-                
-                # Se o comando falhar rapidamente, provavelmente há um problema com nvarguscamerasrc
-                if result.returncode != 0:
-                    stderr = result.stderr.decode('utf-8')
-                    if "no element" in stderr and "nvarguscamerasrc" in stderr:
-                        self.get_logger().error('Plugin GStreamer nvarguscamerasrc não está disponível!')
-                        self.get_logger().info('Verificando alternativas para acesso à câmera...')
-                        
-                        # Verificar se v4l2src está disponível como alternativa
-                        try:
-                            v4l2_test = subprocess.run("gst-launch-1.0 v4l2src ! fakesink", 
-                                                    shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=2)
-                            if v4l2_test.returncode == 0:
-                                self.get_logger().info('Plugin v4l2src disponível como alternativa para câmeras USB')
-                                self.get_logger().info('Use uma webcam USB em vez da câmera CSI para funcionamento básico')
-                            else:
-                                self.get_logger().warn('Nem nvarguscamerasrc nem v4l2src estão funcionando corretamente')
-                        except:
-                            self.get_logger().warn('Erro ao testar alternativa v4l2src')
-                    elif "could not link" in stderr:
-                        self.get_logger().error('Problemas de compatibilidade entre elementos GStreamer no pipeline.')
-                    elif "Resource error" in stderr:
-                        self.get_logger().error('Erro de recurso com nvarguscamerasrc - câmera pode estar em uso por outro processo.')
-                        self.get_logger().info('Tentando identificar processos usando a câmera...')
-                        
-                        try:
-                            # Tentar identificar processos que podem estar usando a câmera
-                            camera_procs = subprocess.check_output(['fuser', '-v', '/dev/video0'], stderr=subprocess.STDOUT).decode('utf-8')
-                            self.get_logger().info(f'Processos usando a câmera: {camera_procs}')
-                        except:
-                            self.get_logger().info('Não foi possível identificar processos usando a câmera.')
-                        
-                        # Tentar reiniciar o serviço nvargus-daemon
-                        try:
-                            self.get_logger().info('Tentando reiniciar o serviço nvargus-daemon...')
-                            subprocess.run(['systemctl', 'restart', 'nvargus-daemon'], 
-                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-                            time.sleep(2)  # Aguardar serviço reiniciar
-                            self.get_logger().info('Serviço nvargus-daemon reiniciado, tentando novamente...')
-                            
-                            # Testar novamente
-                            result = subprocess.run(test_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=2)
-                            if result.returncode == 0:
-                                self.get_logger().info('Reinício do serviço nvargus-daemon resolveu o problema!')
-                            else:
-                                stderr = result.stderr.decode('utf-8') if result.stderr else "Unknown error"
-                                self.get_logger().warn(f"Erro ao reiniciar via systemctl: {stderr}")
-                        except Exception as e:
-                            self.get_logger().warn(f'Erro ao tentar reiniciar serviço nvargus-daemon: {str(e)}')
-                    else:
-                        self.get_logger().error(f'Erro ao testar nvarguscamerasrc: {stderr}')
-                    
-            except subprocess.TimeoutExpired:
-                # Se o comando não retornar dentro do timeout, provavelmente está funcionando mas pendurando
-                self.get_logger().info('Teste de nvarguscamerasrc executado sem erros imediatos.')
-            except Exception as e:
-                self.get_logger().warn(f'Erro ao testar nvarguscamerasrc: {str(e)}')
-            
-            # Adicionar variável de classe para rastrear disponibilidade de CUDA
-            if not hasattr(self, '_cuda_available'):
-                self._cuda_available = cuda_devices > 0
-            
-            return self._cuda_available
-            
-        except Exception as e:
-            self.get_logger().error(f'Erro ao verificar permissões CUDA: {str(e)}')
-            self._cuda_available = False
-            return False
-
-    def capture_loop(self):
-        """Loop principal de captura com processamento CUDA."""
-        # Verificar se estamos no modo simulado
-        if hasattr(self, 'is_simulated') and self.is_simulated:
-            # No modo simulado, a atualização é feita pelo timer
-            return
-        
-        # Verificar se CUDA está habilitado
-        cuda_enabled = self.get_parameter('enable_cuda').value
-        
-        if cuda_enabled:
-            # Inicializar contexto CUDA
-            try:
-                self.get_logger().info('Inicializando contexto CUDA...')
-                self.cuda_stream = cv2.cuda_Stream()
-                self.cuda_upload = cv2.cuda_GpuMat()
-                self.cuda_color = cv2.cuda_GpuMat()
-                self.cuda_download = cv2.cuda_GpuMat()
-                self.get_logger().info('Inicialização de contexto CUDA bem-sucedida')
-            except Exception as e:
-                self.get_logger().warn(f'Erro ao inicializar contexto CUDA: {str(e)}')
-                self.get_logger().warn('Continuando sem aceleração CUDA.')
-                cuda_enabled = False
-        
-        # Variáveis para controle de FPS e diagnóstico
-        self.frame_interval = 1.0 / self.camera_fps  # Intervalo entre frames desejado
-        self.last_capture_time = time.time()
-        self.fps_timer_active = True
-        
-        # Configurar limite de tentativas para recuperação
-        retry_count = 0
-        max_retries = 5
-        last_frame_time = time.time()
-        frame_capture_error_count = 0
-        
-        # Contador total de frames para diagnóstico
-        total_frames = 0
-        capture_start_time = time.time()
-        last_diagnostic_time = time.time()
-        
-        self.get_logger().info('Loop de captura iniciado com GStreamer e CUDA')
-        
-        while self.is_running and rclpy.ok():
-            try:
-                # Controlar intervalo entre capturas para manter FPS consistente
-                frame_start_time = time.time()
-                elapsed = frame_start_time - self.last_capture_time
-                if elapsed < self.frame_interval:
-                    sleep_time = self.frame_interval - elapsed
-                    time.sleep(sleep_time)
-                
-                # Diagnosticar a cada 30 frames
-                if (total_frames % 30) == 0:
-                    self.get_logger().debug(f'Tentando capturar frame #{total_frames}...')
-                
-                # Capturar frame através do GStreamer
-                ret, frame = self.cap.read()
-                
-                # Diagnosticar a cada 10 segundos
-                current_time = time.time()
-                if current_time - last_diagnostic_time > 10.0:
-                    elapsed_total = current_time - capture_start_time
-                    avg_fps = total_frames / elapsed_total if elapsed_total > 0 else 0
-                    self.get_logger().info(f'Diagnóstico: {total_frames} frames em {elapsed_total:.1f}s (média {avg_fps:.1f} FPS)')
-                    
-                    # Verificar se estamos muito abaixo do FPS esperado (menos de 50%)
-                    if avg_fps < (self.camera_fps * 0.5) and total_frames > 30:
-                        self.get_logger().warn(f'FPS está muito abaixo do esperado: {avg_fps:.1f} vs {self.camera_fps} esperado')
-                    
-                    last_diagnostic_time = current_time
-                
-                # Atualizar timestamp de captura
-                self.last_capture_time = time.time()
-                
-                # Verificar se a captura foi bem-sucedida
-                if not ret:
-                    self.get_logger().warn(f'Falha ao capturar frame #{total_frames}')
-                    frame_capture_error_count += 1
-                    time_since_last_frame = time.time() - last_frame_time
-                    
-                    # Alertar após múltiplas falhas
-                    if frame_capture_error_count >= 3:
-                        self.get_logger().warn(f'Múltiplas falhas consecutivas: {frame_capture_error_count}')
-                    
-                    # Verificar se passou muito tempo sem frames (5 segundos)
-                    if time_since_last_frame > 5.0:
-                        retry_count += 1
-                        self.get_logger().warn(f'Sem frames por {time_since_last_frame:.1f}s. Tentativa {retry_count}/{max_retries}')
-                        
-                        # Tentar recuperar após várias tentativas
-                        if retry_count >= max_retries:
-                            self.get_logger().error('Excedido limite de tentativas. Entrando em modo de simulação.')
-                            self.setup_simulation_mode()
-                            return
-                    
-                    # Aguardar um pouco antes de tentar novamente
-                    time.sleep(0.1)
-                    continue
-                
-                # Captura bem-sucedida, resetar contadores
-                total_frames += 1
-                retry_count = 0
-                frame_capture_error_count = 0
-                last_frame_time = time.time()
-                
-                # Processamento CUDA para aprimoramento de imagem (se habilitado)
-                if cuda_enabled:
-                    try:
-                        # Upload da imagem para a GPU
-                        self.cuda_upload.upload(frame)
-                        
-                        # Aplicar filtros de aprimoramento conforme configuração
-                        if self.get_parameter('apply_noise_reduction').value:
-                            # Redução de ruído
-                            cv2.cuda.fastNlMeansDenoisingColored(
-                                self.cuda_upload, None, 
-                                h_luminance=3, photo_render=1,
-                                stream=self.cuda_stream
-                            )
-                        
-                        # Aprimoramento de brilho/contraste
-                        if self.get_parameter('apply_brightness_adjustment').value:
-                            # Ajuste de gama
-                            factor = float(self.get_parameter('brightness_factor').value)
-                            cv2.cuda.gammaCorrection(
-                                self.cuda_upload,
-                                self.cuda_color,
-                                factor,
-                                stream=self.cuda_stream
-                            )
-                        else:
-                            # Copiar sem alteração
-                            self.cuda_upload.copyTo(self.cuda_color, self.cuda_stream)
-                        
-                        # Aprimoramento de bordas
-                        if self.get_parameter('apply_edge_enhancement').value:
-                            # Filtro Sobel para detecção de bordas
-                            cv2.cuda.createSobelFilter(
-                                cv2.CV_8UC3, cv2.CV_16S, 1, 0
-                            ).apply(
-                                self.cuda_color,
-                                self.cuda_download,
-                                self.cuda_stream
-                            )
-                            # Download do resultado da GPU para CPU
-                            frame = self.cuda_download.download()
-                        else:
-                            # Download direto
-                            frame = self.cuda_color.download()
-                            
-                    except Exception as cuda_err:
-                        self.get_logger().error(f'Erro no processamento CUDA: {str(cuda_err)}')
-                        # Continuar usando o frame original sem processamento CUDA
-                
-                # Publicar imagem processada
-                try:
-                    timestamp = self.get_clock().now().to_msg()
-                    img_msg = self.bridge.cv2_to_imgmsg(frame, "bgr8")
-                    img_msg.header.stamp = timestamp
-                    img_msg.header.frame_id = "camera_optical_frame"
-                    self.image_pub.publish(img_msg)
-                    
-                    # Publicar informações da câmera
-                    self.publish_camera_info(img_msg.header)
-                except CvBridgeError as e:
-                    self.get_logger().error(f'Erro no CvBridge: {e}')
-                
-            except Exception as e:
-                self.get_logger().error(f'Erro na captura: {str(e)}')
-                time.sleep(0.1)  # Evitar loops muito rápidos em caso de erro
-
-    def publish_camera_info(self, header):
-        """Publica informações da câmera para calibração e transformações."""
-        # Criar mensagem de info da câmera
-        cam_info = CameraInfo()
-        cam_info.header = header
-        cam_info.distortion_model = 'plumb_bob'
-        
-        # Configurar tamanho da imagem
-        width = self.get_parameter('image_width').value
-        height = self.get_parameter('image_height').value
-        
-        if self.resize_output:
-            width = self.output_width
-            height = self.output_height
-            
-        cam_info.width = width
-        cam_info.height = height
-        
-        # Verificar se temos informações de calibração
-        if hasattr(self, 'camera_matrix') and self.camera_matrix is not None:
-            # Usar calibração existente
-            cam_info.k = self.camera_matrix.flatten().tolist()
-            if hasattr(self, 'dist_coeffs') and self.dist_coeffs is not None:
-                cam_info.d = self.dist_coeffs.flatten().tolist()
-            if hasattr(self, 'projection_matrix') and self.projection_matrix is not None:
-                cam_info.p = self.projection_matrix.flatten().tolist()
-            if hasattr(self, 'rectification_matrix') and self.rectification_matrix is not None:
-                cam_info.r = self.rectification_matrix.flatten().tolist()
-        else:
-            # Usar valores padrão para a câmera IMX219 se não tivermos calibração
-            # Usar valores aproximados para parâmetros da câmera
-            # Estes podem ser substituídos por valores de calibração reais
-            focal_length = 3.04  # mm
-            sensor_width = 4.8   # mm
-            sensor_height = 3.6  # mm
-            
-            # Converter para pixels
-            fx = focal_length * width / sensor_width
-            fy = focal_length * height / sensor_height
-            cx = width / 2.0
-            cy = height / 2.0
-            
-            # Matriz de câmera K (intrínsecos)
-            K = [fx, 0.0, cx, 
-                 0.0, fy, cy, 
-                 0.0, 0.0, 1.0]
-            cam_info.k = K
-            
-            # Matriz de projeção P (identidade para câmera sem distorção)
-            P = [fx, 0.0, cx, 0.0,
-                 0.0, fy, cy, 0.0,
-                 0.0, 0.0, 1.0, 0.0]
-            cam_info.p = P
-            
-            # Matriz de retificação R (identidade para câmera sem retificação)
-            R = [1.0, 0.0, 0.0,
-                 0.0, 1.0, 0.0,
-                 0.0, 0.0, 1.0]
-            cam_info.r = R
-            
-            # Coeficientes de distorção (zero para câmera sem distorção)
-            cam_info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
-        
-        # Publicar a mensagem
-        self.camera_info_pub.publish(cam_info)
-        
-    def load_camera_calibration(self):
-        """Carrega dados de calibração da câmera de um arquivo."""
-        try:
-            # Verificar se há um arquivo de calibração disponível
-            calibration_file = self.get_parameter('calibration_file').value
-            
-            # Se não há calibração especificada, tentar encontrar um padrão
-            if calibration_file == "":
-                # Verificar pastas padrão
-                possible_paths = [
-                    os.path.join(os.path.expanduser('~'), '.ros', 'camera_info', 'camera.yaml'),
-                    '/opt/ros/humble/share/camera_calibration/data/camera.yaml',
-                    os.path.join(os.getcwd(), 'camera_info', 'camera.yaml')
-                ]
-                
-                for path in possible_paths:
-                    if os.path.exists(path):
-                        calibration_file = path
-                        self.get_logger().info(f"Encontrado arquivo de calibração em: {path}")
-                        break
-            
-            if calibration_file != "" and os.path.exists(calibration_file):
-                # Carregar dados YAML
-                with open(calibration_file, 'r') as f:
-                    data = yaml.safe_load(f)
-                
-                # Extrair matrizes
-                self.camera_matrix = np.array(data.get('camera_matrix', {}).get('data', [])).reshape(3, 3)
-                self.dist_coeffs = np.array(data.get('distortion_coefficients', {}).get('data', []))
-                
-                if 'rectification_matrix' in data:
-                    self.rectification_matrix = np.array(data['rectification_matrix']['data']).reshape(3, 3)
-                    
-                if 'projection_matrix' in data:
-                    self.projection_matrix = np.array(data['projection_matrix']['data']).reshape(3, 4)
-                
-                self.get_logger().info("Calibração da câmera carregada com sucesso")
-                return True
-            else:
-                self.get_logger().warn(f"Arquivo de calibração não encontrado: {calibration_file}")
+                    self.get_logger().info('Plugin nvarguscamerasrc encontrado com sucesso!')
+            except (subprocess.SubprocessError, FileNotFoundError) as e:
+                self.get_logger().error(f'GStreamer não disponível: {str(e)}')
                 return False
+            
+            # Calcular framerate como fração reduzida para evitar problemas
+            def gcd(a, b):
+                while b:
+                    a, b = b, a % b
+                return a
+                
+            fps_num = int(self.camera_fps)
+            fps_den = 1
+            divisor = gcd(fps_num, fps_den)
+            fps_num //= divisor
+            fps_den //= divisor
+            
+            # Verificar ambiente containerizado
+            is_container = os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv')
+            
+            # Pipeline para ambiente containerizado - mais simples e direto
+            if is_container:
+                pipeline = (
+                    f"nvarguscamerasrc sensor-id=0 "
+                    f"! video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
+                    f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} "
+                    f"! nvvidconv flip-method={self.get_parameter('flip_method').value} "
+                    f"! video/x-raw, format=(string)BGRx "
+                    f"! videoconvert ! video/x-raw, format=(string)BGR "
+                    f"! appsink drop=true max-buffers=2"
+                )
+            else:
+                # Pipeline padrão para ambiente nativo da Jetson
+                pipeline = (
+                    f"nvarguscamerasrc sensor-id=0 do-timestamp=true "
+                    f"exposuretimerange='{self.get_parameter('exposure_time').value} {self.get_parameter('exposure_time').value}' "
+                    f"gainrange='{self.get_parameter('gain').value} {self.get_parameter('gain').value}' "
+                    f"wbmode={self.get_parameter('awb_mode').value} "
+                    f"tnr-mode=2 ee-mode=2 "
+                    f"! video/x-raw(memory:NVMM), width=(int){self.width}, height=(int){self.height}, "
+                    f"format=(string)NV12, framerate=(fraction){fps_num}/{fps_den} "
+                    f"! nvvidconv flip-method={self.get_parameter('flip_method').value} "
+                    f"! video/x-raw, format=(string)BGRx "
+                )
+            
+            # Adicionar elementos específicos para CUDA se habilitado
+            if self.get_parameter('enable_cuda').value:
+                # Verificar permissões do CUDA antes de abrir a câmera
+                if not self.check_cuda_permissions():
+                    self.get_logger().warn('CUDA não disponível. Usando pipeline sem aceleração CUDA.')
+                    pipeline += f"! videoconvert ! video/x-raw, format=(string)BGR "
+                else:
+                    # Adicionar processamento CUDA via nvivafilter
+                    pipeline += (
+                        f"! nvvideoconvert ! video/x-raw(memory:NVMM), format=(string)RGBA "
+                        f"! nvdsosd ! nvegltransform ! video/x-raw(memory:NVMM), format=(string)RGBA "
+                        f"! nvvideoconvert ! video/x-raw, format=(string)BGR "
+                    )
+            else:
+                pipeline += f"! videoconvert ! video/x-raw, format=(string)BGR "
+            
+            # Finalizar o pipeline com o elemento de saída
+            pipeline += f"! appsink max-buffers=4 drop=true sync=false name=sink emit-signals=true"
+            
+            self.get_logger().info(f'Pipeline GStreamer: {pipeline}')
+            
+            # Abrir a câmera com o pipeline GStreamer
+            try:
+                # Liberar recursos existentes
+                self.get_logger().info('Liberando recursos GStreamer existentes...')
+                try:
+                    subprocess.run("pkill -f 'gst-launch.*nvarguscamerasrc'", shell=True, 
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    time.sleep(1)
+                except Exception as kill_err:
+                    self.get_logger().debug(f'Erro ao liberar recursos: {str(kill_err)}')
+                
+                # Abrir a câmera
+                self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+                
+                # Verificar se a câmera foi aberta com sucesso
+                if not self.cap.isOpened():
+                    self.get_logger().error('Falha ao abrir câmera com GStreamer!')
+                    
+                    # Tentar um pipeline mais simples como último recurso
+                    self.get_logger().warn('Tentando pipeline mais simples...')
+                    simple_pipeline = (
+                        f"nvarguscamerasrc sensor-id=0 ! "
+                        f"video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=30/1 ! "
+                        f"nvvidconv flip-method=0 ! video/x-raw, format=BGRx ! "
+                        f"videoconvert ! video/x-raw, format=BGR ! "
+                        f"appsink max-buffers=1 drop=true"
+                    )
+                    self.get_logger().info(f'Pipeline simplificado: {simple_pipeline}')
+                    self.cap = cv2.VideoCapture(simple_pipeline, cv2.CAP_GSTREAMER)
+                    
+                    if not self.cap.isOpened():
+                        self.get_logger().error('Falha com pipeline simplificado.')
+                        self.get_logger().info('Ativando modo de simulação.')
+                        self.setup_simulation_mode()
+                        return True  # Retornar True mesmo com simulação
+                
+                # Câmera aberta com sucesso, capturar o primeiro frame
+                ret, test_frame = self.cap.read()
+                if ret:
+                    self.get_logger().info(f'Primeiro frame capturado: {test_frame.shape}')
+                else:
+                    self.get_logger().warn('Não foi possível capturar o primeiro frame.')
+                    
+                # Configurar variáveis para cálculo de FPS real
+                self.frame_count = 0
+                self.last_fps_time = time.time()
+                self.real_fps = 0.0
+                
+                return True
+                
+            except Exception as e:
+                self.get_logger().error(f'Exceção ao inicializar câmera: {str(e)}')
+                self.get_logger().info('Ativando modo de simulação.')
+                self.setup_simulation_mode()
+                return True  # Retornar True mesmo com simulação
                 
         except Exception as e:
-            self.get_logger().error(f"Erro ao carregar calibração da câmera: {str(e)}")
+            self.get_logger().error(f'Erro ao construir pipeline: {str(e)}')
             return False
+            
+    def check_argus_socket(self):
+        """Verifica o socket Argus em ambiente containerizado."""
+        socket_path = '/tmp/argus_socket'
+        if not os.path.exists(socket_path):
+            self.get_logger().warn(f'Socket Argus não encontrado em {socket_path}')
+            self.get_logger().info('Verificando socket Argus em locais alternativos...')
+            
+            # Tentar encontrar o socket Argus em outros lugares comuns
+            for alt_path in ['/tmp/.argus_socket', '/var/tmp/argus_socket']:
+                if os.path.exists(alt_path):
+                    self.get_logger().info(f'Socket Argus encontrado em: {alt_path}')
+                    # Tente criar um link simbólico para o local padrão
+                    try:
+                        os.symlink(alt_path, socket_path)
+                        self.get_logger().info(f'Link simbólico criado para {socket_path}')
+                        break
+                    except Exception as e:
+                        self.get_logger().warn(f'Não foi possível criar link simbólico: {str(e)}')
+                        
+    def check_nvargus_permissions(self):
+        """Verifica permissões de dispositivos NVIDIA."""
+        devices = ['/dev/nvhost-ctrl', '/dev/nvhost-ctrl-gpu', '/dev/nvhost-vic']
+        for device in devices:
+            if os.path.exists(device):
+                try:
+                    mode = os.stat(device).st_mode
+                    readable = bool(mode & 0o444)
+                    self.get_logger().info(f'Dispositivo {device} é legível: {readable}')
+                except Exception as e:
+                    self.get_logger().warn(f'Erro ao verificar {device}: {str(e)}')
+                    
+    def check_nvargus_daemon(self):
+        """Verifica o serviço nvargus-daemon."""
+        try:
+            self.get_logger().info('Verificando status do serviço nvargus-daemon...')
+            status = subprocess.run(['systemctl', 'is-active', 'nvargus-daemon'], 
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            if status.returncode != 0:
+                self.get_logger().warn('Serviço nvargus-daemon não está ativo!')
+                self.get_logger().info('Tentando iniciar o serviço...')
+                
+                try:
+                    subprocess.run(['systemctl', 'start', 'nvargus-daemon'], 
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    time.sleep(2)  # Aguardar serviço iniciar
+                    
+                    # Verificar novamente
+                    status = subprocess.run(['systemctl', 'is-active', 'nvargus-daemon'], 
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    if status.returncode == 0:
+                        self.get_logger().info('Serviço nvargus-daemon iniciado com sucesso!')
+                    else:
+                        self.get_logger().warn('Não foi possível iniciar o serviço nvargus-daemon')
+                except Exception as e:
+                    self.get_logger().warn(f'Erro ao iniciar serviço: {str(e)}')
+            else:
+                self.get_logger().info('Serviço nvargus-daemon está ativo e funcionando')
+        except Exception as e:
+            self.get_logger().warn(f'Erro ao verificar serviço nvargus-daemon: {str(e)}')
 
     def monitor_resources(self):
         """Monitora recursos do sistema."""
         try:
-            # Temperatura - tratamento para ambiente containerizado
-            try:
-                temp = float(subprocess.check_output(['cat', '/sys/class/thermal/thermal_zone0/temp']).decode()) / 1000.0
-                self.get_logger().info(f'Temperatura: {temp:.1f}°C')
+            # Limitar atualizações a cada 5 segundos
+            now = time.time()
+            if hasattr(self, 'last_resource_print') and now - self.last_resource_print < 5.0:
+                return True
                 
-                # Alertar se temperatura muito alta
-                if temp > 80.0:
-                    self.get_logger().warn('Temperatura muito alta! Considere reduzir FPS ou resolução')
-            except (subprocess.SubprocessError, FileNotFoundError, ValueError):
-                self.get_logger().debug('Não foi possível ler a temperatura')
+            # Verificar uso de CPU e memória
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            mem = psutil.virtual_memory()
+            mem_used_mb = mem.used / (1024 * 1024)
+            mem_total_mb = mem.total / (1024 * 1024)
             
-            # Estatísticas do GPU via tegrastats (quando disponível)
-            try:
-                tegrastats = subprocess.check_output(['tegrastats', '--interval', '1', '--count', '1']).decode()
-                self.get_logger().info(f'Tegrastats: {tegrastats}')
-            except (subprocess.SubprocessError, FileNotFoundError):
-                # Tentar nvidia-smi como alternativa
-                try:
-                    gpu_stats = subprocess.check_output(['nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total', '--format=csv']).decode()
-                    self.get_logger().info(f'GPU Stats: {gpu_stats}')
-                except (subprocess.SubprocessError, FileNotFoundError):
-                    self.get_logger().debug('Não foi possível obter estatísticas da GPU')
+            # Definir status baseado no modo de operação
+            status = "Simulação" if self.is_simulated else "Ativa"
             
-            # Verificar estatísticas da câmera
-            if hasattr(self, 'cap') and self.cap.isOpened():
-                try:
-                    # Usar o FPS real calculado internamente em vez de tentar obter da câmera
-                    if hasattr(self, 'real_fps') and self.real_fps > 0:
-                        self.get_logger().info(f'Câmera: FPS real={self.real_fps:.1f}')
-                    else:
-                        # Se real_fps não estiver disponível, usar o valor configurado
-                        self.get_logger().info(f'Câmera: FPS configurado={self.camera_fps}')
-                        
-                        # Se real_fps estiver definido mas for 0, pode haver um problema
-                        if hasattr(self, 'real_fps') and self.real_fps == 0:
-                            # Em contêiner, isso é esperado - usar nossa abordagem de temporizador
-                            if not hasattr(self, 'fps_warning_shown'):
-                                self.get_logger().info('Em ambiente containerizado, usando temporizador interno para FPS em vez do FPS da câmera')
-                                self.fps_warning_shown = True
-                                
-                            # Mesmo assim, fazer uma verificação rápida da câmera para garantir que está tudo bem
-                            ret, _ = self.cap.read()
-                            if not ret:
-                                self.get_logger().error('Não foi possível obter imagem da câmera - "Unable to get camera FPS"')
-                                self.get_logger().info('Tentando reiniciar a câmera...')
-                                
-                                # Verificar se o pipeline precisa ser reiniciado
-                                self.get_logger().info('Tentando reiniciar a captura...')
-                                self.get_camera_info_gstreamer()
-                                
-                                # Reiniciar os contadores de FPS
-                                self.frame_count = 0
-                                self.last_fps_time = time.time()
-                except Exception as e:
-                    self.get_logger().warn(f'Erro ao obter estatísticas da câmera: {e}')
-                
+            # Registrar informações de recursos
+            self.get_logger().info(
+                f"Status da câmera: {status} | "
+                f"CPU: {cpu_percent:.1f}% | "
+                f"RAM: {mem_used_mb:.0f}/{mem_total_mb:.0f}MB | "
+                f"FPS: {self.real_fps:.1f}/{self.camera_fps}"
+            )
+            
+            # Atualizar timestamp
+            self.last_resource_print = now
+            return True
+            
         except Exception as e:
-            self.get_logger().error(f'Erro ao monitorar recursos: {e}')
+            # Usar warning ao invés de error para não interromper a operação
+            self.get_logger().warning(f'Erro ao monitorar recursos: {str(e)}')
+            return False
 
     def get_camera_info_gstreamer(self):
         """Obtém informações da câmera Jetson através do GStreamer."""
@@ -1570,8 +806,11 @@ class IMX219CameraNode(Node):
             minimal_pipeline = (
                 f"nvarguscamerasrc ! "
                 f"video/x-raw(memory:NVMM) ! "
-                f"nvvidconv ! video/x-raw, format=BGRx ! "
-                f"videoconvert ! appsink"
+                f"nvvidconv ! "
+                f"video/x-raw, format=BGRx ! "
+                f"videoconvert ! "
+                f"video/x-raw, format=BGR ! "
+                f"appsink"
             )
             
             self.get_logger().info(f"Pipeline mínimo: {minimal_pipeline}")
@@ -1594,101 +833,6 @@ class IMX219CameraNode(Node):
                 
                 # Não permitir fallback para pipeline simples ou simulação
                 raise RuntimeError("Falha ao inicializar câmera CSI em ambiente containerizado - verificar logs para diagnóstico")
-    
-    def check_argus_socket(self):
-        """Verifica disponibilidade e permissões do socket Argus."""
-        socket_paths = ['/tmp/argus_socket', '/tmp/.argus_socket', '/var/tmp/argus_socket']
-        socket_found = False
-        
-        for socket_path in socket_paths:
-            if os.path.exists(socket_path):
-                socket_found = True
-                self.get_logger().info(f"Socket Argus encontrado em: {socket_path}")
-                
-                # Verificar permissões
-                try:
-                    stat_info = os.stat(socket_path)
-                    mode = stat_info.st_mode
-                    self.get_logger().info(f"Permissões do socket Argus: {mode:o}")
-                    
-                    # Tentar criar um link simbólico se não for o caminho padrão
-                    if socket_path != '/tmp/argus_socket':
-                        try:
-                            if not os.path.exists('/tmp/argus_socket'):
-                                os.symlink(socket_path, '/tmp/argus_socket')
-                                self.get_logger().info(f"Link simbólico criado de {socket_path} para /tmp/argus_socket")
-                        except Exception as e:
-                            self.get_logger().warn(f"Não foi possível criar link simbólico: {str(e)}")
-                except Exception as e:
-                    self.get_logger().warn(f"Erro ao verificar permissões do socket: {str(e)}")
-        
-        if not socket_found:
-            self.get_logger().error("Socket Argus não encontrado em nenhum local padrão!")
-            self.get_logger().info("Tentando criar o diretório /tmp/argus_socket...")
-            try:
-                os.makedirs('/tmp/argus_socket', exist_ok=True)
-                os.chmod('/tmp/argus_socket', 0o777)  # Permissões totais
-                self.get_logger().info("Diretório do socket Argus criado com sucesso")
-            except Exception as e:
-                self.get_logger().error(f"Erro ao criar diretório do socket: {str(e)}")
-    
-    def check_nvargus_permissions(self):
-        """Verifica permissões para acesso ao dispositivo nvargus."""
-        nvargus_path = '/dev/nvhost-ctrl'
-        if os.path.exists(nvargus_path):
-            # Verificar se o arquivo é legível
-            readable = os.access(nvargus_path, os.R_OK)
-            # Obter informações de permissão
-            stat_info = os.stat(nvargus_path)
-            mode = stat_info.st_mode
-            owner = stat_info.st_uid
-            group = stat_info.st_gid
-            
-            # Obter informações do usuário atual
-            current_uid = os.getuid()
-            current_gid = os.getgid()
-            user_groups = os.getgroups()
-            
-            self.get_logger().info(f"Permissões do dispositivo nvargus {nvargus_path}:")
-            self.get_logger().info(f"  Permissões: {mode:o}")
-            self.get_logger().info(f"  UID proprietário: {owner}, GID grupo: {group}")
-            self.get_logger().info(f"  UID atual: {current_uid}, GID atual: {current_gid}")
-            self.get_logger().info(f"  Grupos do usuário: {user_groups}")
-            self.get_logger().info(f"  Legível pelo usuário atual: {readable}")
-            
-            if not readable:
-                self.get_logger().error(f"ERRO: Sem permissão para acessar {nvargus_path}")
-                self.get_logger().error("Tente executar com sudo ou adicionar o usuário ao grupo apropriado")
-        else:
-            self.get_logger().error(f"ERRO: Dispositivo {nvargus_path} não encontrado - Jetson não detectada ou mal configurada")
-    
-    def check_nvargus_daemon(self):
-        """Verifica se o serviço nvargus-daemon está em execução."""
-        try:
-            output = subprocess.check_output("systemctl is-active nvargus-daemon", shell=True).decode('utf-8').strip()
-            self.get_logger().info(f"Status do serviço nvargus-daemon: {output}")
-            
-            if output != "active":
-                self.get_logger().error("ERRO: Serviço nvargus-daemon não está ativo")
-                # Tentar iniciar o serviço
-                self.get_logger().info("Tentando iniciar o serviço nvargus-daemon...")
-                try:
-                    subprocess.run("systemctl start nvargus-daemon", shell=True, check=True)
-                    self.get_logger().info("Serviço nvargus-daemon iniciado com sucesso")
-                except subprocess.SubprocessError:
-                    self.get_logger().error("Falha ao iniciar o serviço nvargus-daemon")
-        except subprocess.SubprocessError:
-            self.get_logger().warn("Não foi possível verificar o status do serviço nvargus-daemon")
-            # Verificar se o processo está em execução
-            try:
-                ps_output = subprocess.check_output("ps aux | grep nvargus-daemon | grep -v grep", shell=True).decode('utf-8')
-                if ps_output:
-                    self.get_logger().info("Processo nvargus-daemon está em execução:")
-                    self.get_logger().info(ps_output)
-                else:
-                    self.get_logger().warn("Processo nvargus-daemon não encontrado em execução")
-            except subprocess.SubprocessError:
-                self.get_logger().warn("Não foi possível verificar processo nvargus-daemon")
     
     def _configure_v4l2_pipeline(self, device_path):
         """Configura pipeline usando v4l2src para câmeras USB ou outros dispositivos V4L2."""
