@@ -55,7 +55,19 @@ class IMX219CameraNode(Node):
                 ('output_height', 720),
                 ('calibration_file', ''),
                 ('image_width', 3280),
-                ('image_height', 2464)
+                ('image_height', 2464),
+                # Parâmetros adicionais do arquivo de lançamento
+                ('camera_mode', 6),
+                ('camera_fps', 120.0),
+                ('exposure_time', 13333),
+                ('gain', 1.0),
+                ('awb_mode', 1),
+                ('brightness', 0),
+                ('saturation', 1.0),
+                ('enable_hdr', False),
+                ('enable_cuda', True),
+                ('enable_display', False),
+                ('flip_method', 0)
             ]
         )
         
