@@ -66,10 +66,18 @@ class IMX219CameraNode(Node):
                 ('saturation', 1.0),
                 ('enable_hdr', False),
                 ('enable_cuda', True),
-                ('enable_display', True),
+                ('enable_display', False),
                 ('flip_method', 0)
             ]
         )
+        
+        # Inicializar variáveis que serão usadas mais tarde para evitar erros
+        self.frame_count = 0
+        self.last_fps_time = time.time()
+        self.real_fps = 0.0
+        self.is_simulated = False
+        self.video_device_node = None
+        self.fake_camera = False
         
         # Configurar a câmera com base nos parâmetros
         self._configure_camera()
@@ -83,9 +91,6 @@ class IMX219CameraNode(Node):
         # Criar timer para callback da câmera
         callback_period = 1.0 / self.camera_fps
         self.camera_timer = self.create_timer(callback_period, self.camera_callback)
-        
-        # Inicializar valor atual de FPS
-        self.current_fps = 0.0
         
         # Configurar monitoramento de recursos
         self.last_resource_print = time.time()
@@ -446,20 +451,35 @@ class IMX219CameraNode(Node):
         
         # Flag de simulação
         self.is_simulated = True
+        self.cap = None  # Garantir que não há objeto de captura confundindo o código
+        
+        # Inicializar frame_count e last_fps_time para cálculo de FPS
+        self.frame_count = 0
+        self.last_fps_time = time.time()
         
         self.get_logger().info('Modo de simulação da câmera inicializado com sucesso')
         
         # Configurar um timer para atualizar a imagem simulada (simulando FPS real)
+        if hasattr(self, 'sim_timer'):
+            self.sim_timer.cancel()
         self.sim_timer = self.create_timer(1.0/self.camera_fps, self.update_simulated_frame)
 
     def update_simulated_frame(self):
         """Atualiza o frame simulado com um padrão em movimento."""
-        if not hasattr(self, 'simulated_frame'):
+        # A simulação só funciona se a flag is_simulated estiver habilitada
+        if not self.is_simulated or not hasattr(self, 'simulated_frame'):
             return
             
-        # Inicializar last_fps_time se não existir
-        if not hasattr(self, 'last_fps_time'):
-            self.last_fps_time = time.time()
+        # Calcular FPS real
+        current_time = time.time()
+        self.frame_count += 1
+        elapsed = current_time - self.last_fps_time
+        
+        # Atualizar FPS a cada segundo
+        if elapsed >= 1.0:
+            self.real_fps = self.frame_count / elapsed
+            self.frame_count = 0
+            self.last_fps_time = current_time
             
         # Limpar frame
         self.simulated_frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
@@ -467,6 +487,10 @@ class IMX219CameraNode(Node):
         # Texto de simulação
         cv2.putText(self.simulated_frame, 'CAMERA SIMULADA', (self.width//2-150, self.height//2), 
                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        
+        # Mostrar FPS simulado
+        cv2.putText(self.simulated_frame, f'FPS: {self.real_fps:.1f}', (10, 60), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
         # Atualizar posição do círculo
         self.circle_position[0] += self.circle_direction[0]
@@ -1492,7 +1516,7 @@ class IMX219CameraNode(Node):
             return False
             
     def _configure_jetson_csi_pipeline(self):
-        """Configura pipeline específico para câmera CSI na Jetson."""
+        """Configura pipeline específico para câmera CSI na Jetson em ambiente containerizado."""
         width = self.width
         height = self.height
         framerate = self.camera_fps
@@ -1501,20 +1525,19 @@ class IMX219CameraNode(Node):
         awb_mode = self.get_parameter('awb_mode').value
         flip_method = self.get_parameter('flip_method').value
         
-        # Pipeline detalhado para câmera IMX219 na Jetson com todos os parâmetros
+        # Pipeline otimizado especificamente para ambiente containerizado
         pipeline_str = (
-            f"nvarguscamerasrc sensor-id=0 do-timestamp=true "
-            f"exposuretimerange='{exposure_time} {exposure_time}' "
-            f"gainrange='{gain} {gain}' wbmode={awb_mode} tnr-mode=2 ee-mode=2 "
+            f"nvarguscamerasrc sensor-id=0 "
             f"! video/x-raw(memory:NVMM), width=(int){width}, height=(int){height}, "
-            f"format=(string)NV12, framerate=(fraction){framerate}/1 "
+            f"format=(string)NV12, framerate=(fraction){int(framerate)}/1 "
             f"! nvvidconv flip-method={flip_method} "
-            f"! video/x-raw, format=(string)BGRx ! videoconvert "
+            f"! video/x-raw, format=(string)BGRx "
+            f"! videoconvert "
             f"! video/x-raw, format=(string)BGR "
-            f"! appsink max-buffers=4 drop=true sync=false name=sink emit-signals=true"
+            f"! appsink drop=true max-buffers=2"
         )
         
-        self.get_logger().info(f"Pipeline CSI detalhado: {pipeline_str}")
+        self.get_logger().info(f"Pipeline CSI para container: {pipeline_str}")
         
         # Verificar permissões do dispositivo nvargus antes de tentar abrir
         self.check_nvargus_permissions()
@@ -1522,39 +1545,92 @@ class IMX219CameraNode(Node):
         # Testar se o serviço nvargus-daemon está em execução
         self.check_nvargus_daemon()
         
+        # Verificar socket Argus
+        self.check_argus_socket()
+        
         # Abrir captura com pipeline GStreamer
         self.cap = cv2.VideoCapture(pipeline_str, cv2.CAP_GSTREAMER)
         
         if not self.cap.isOpened():
-            self.get_logger().error("FALHA CRÍTICA: Não foi possível abrir a câmera CSI com pipeline principal")
+            self.get_logger().error("FALHA CRÍTICA: Não foi possível abrir a câmera CSI com pipeline para container")
             self.get_logger().error("Motivos possíveis:")
             self.get_logger().error("1. Hardware da câmera não conectado ou com problema")
             self.get_logger().error("2. Serviço nvargus-daemon não está em execução")
             self.get_logger().error("3. Permissões insuficientes para acessar o dispositivo")
             self.get_logger().error("4. Outro processo já está utilizando a câmera")
-            self.get_logger().error("5. Configuração incorreta do pipeline GStreamer")
+            self.get_logger().error("5. Socket Argus não está disponível ou acessível")
+            self.get_logger().error("6. Container não foi iniciado com as flags corretas para acesso ao hardware")
             
             # Tentar obter mais informações de diagnóstico
             self.get_logger().info("Executando diagnóstico detalhado...")
             self.get_logger().info(f"Status de captura: {self.cap.isOpened()}")
-            self.get_logger().info(f"Código de erro do pipeline: {cv2.CAP_PROP_GSTREAMER}")
             
-            # Checar hardware com comando i2cdetect
-            try:
-                i2c_output = subprocess.check_output("i2cdetect -y -r 0 | grep 10", shell=True, stderr=subprocess.STDOUT).decode('utf-8')
-                self.get_logger().info(f"Detecção I2C da câmera: {i2c_output}")
-            except subprocess.SubprocessError:
-                self.get_logger().warn("Não foi possível verificar câmera com i2cdetect")
+            # Testar pipeline simplificado como último recurso
+            self.get_logger().warn("Testando pipeline extremamente simples como última tentativa...")
+            minimal_pipeline = (
+                f"nvarguscamerasrc ! "
+                f"video/x-raw(memory:NVMM) ! "
+                f"nvvidconv ! video/x-raw, format=BGRx ! "
+                f"videoconvert ! appsink"
+            )
             
-            # Tentar obter logs do sistema relacionados à câmera
-            try:
-                dmesg_output = subprocess.check_output("dmesg | grep -i camera | tail -10", shell=True, stderr=subprocess.STDOUT).decode('utf-8')
-                self.get_logger().info(f"Logs do sistema (dmesg): {dmesg_output}")
-            except subprocess.SubprocessError:
-                pass
+            self.get_logger().info(f"Pipeline mínimo: {minimal_pipeline}")
+            test_cap = cv2.VideoCapture(minimal_pipeline, cv2.CAP_GSTREAMER)
+            
+            if test_cap.isOpened():
+                self.get_logger().info("Pipeline mínimo funcionou! Usando-o como alternativa.")
+                self.cap = test_cap
+            else:
+                test_cap.release()
+                self.get_logger().error("Todas as tentativas de pipeline falharam.")
                 
-            # Não permitir fallback para pipeline simples ou simulação
-            raise RuntimeError("Falha ao inicializar câmera CSI - verificar logs para diagnóstico")
+                # Verificar se há algum processo usando a câmera
+                try:
+                    process_check = subprocess.check_output("ps aux | grep -E 'gst-launch|nvargus' | grep -v grep", shell=True).decode('utf-8')
+                    if process_check.strip():
+                        self.get_logger().error(f"Processos potencialmente usando a câmera:\n{process_check}")
+                except Exception:
+                    pass
+                
+                # Não permitir fallback para pipeline simples ou simulação
+                raise RuntimeError("Falha ao inicializar câmera CSI em ambiente containerizado - verificar logs para diagnóstico")
+    
+    def check_argus_socket(self):
+        """Verifica disponibilidade e permissões do socket Argus."""
+        socket_paths = ['/tmp/argus_socket', '/tmp/.argus_socket', '/var/tmp/argus_socket']
+        socket_found = False
+        
+        for socket_path in socket_paths:
+            if os.path.exists(socket_path):
+                socket_found = True
+                self.get_logger().info(f"Socket Argus encontrado em: {socket_path}")
+                
+                # Verificar permissões
+                try:
+                    stat_info = os.stat(socket_path)
+                    mode = stat_info.st_mode
+                    self.get_logger().info(f"Permissões do socket Argus: {mode:o}")
+                    
+                    # Tentar criar um link simbólico se não for o caminho padrão
+                    if socket_path != '/tmp/argus_socket':
+                        try:
+                            if not os.path.exists('/tmp/argus_socket'):
+                                os.symlink(socket_path, '/tmp/argus_socket')
+                                self.get_logger().info(f"Link simbólico criado de {socket_path} para /tmp/argus_socket")
+                        except Exception as e:
+                            self.get_logger().warn(f"Não foi possível criar link simbólico: {str(e)}")
+                except Exception as e:
+                    self.get_logger().warn(f"Erro ao verificar permissões do socket: {str(e)}")
+        
+        if not socket_found:
+            self.get_logger().error("Socket Argus não encontrado em nenhum local padrão!")
+            self.get_logger().info("Tentando criar o diretório /tmp/argus_socket...")
+            try:
+                os.makedirs('/tmp/argus_socket', exist_ok=True)
+                os.chmod('/tmp/argus_socket', 0o777)  # Permissões totais
+                self.get_logger().info("Diretório do socket Argus criado com sucesso")
+            except Exception as e:
+                self.get_logger().error(f"Erro ao criar diretório do socket: {str(e)}")
     
     def check_nvargus_permissions(self):
         """Verifica permissões para acesso ao dispositivo nvargus."""
@@ -1734,6 +1810,10 @@ class IMX219CameraNode(Node):
         
     def camera_callback(self):
         """Callback para capturar e processar frames da câmera."""
+        # Se não há câmera configurada e não estamos em modo de simulação, sair silenciosamente
+        if not hasattr(self, 'cap') and not self.is_simulated:
+            return
+        
         # Iniciar medição de tempo para cálculo de FPS
         start_time = time.time()
         
