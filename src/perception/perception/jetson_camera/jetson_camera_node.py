@@ -1492,43 +1492,126 @@ class IMX219CameraNode(Node):
             
     def _configure_jetson_csi_pipeline(self):
         """Configura pipeline específico para câmera CSI na Jetson."""
-        width = self.get_parameter('width').value
-        height = self.get_parameter('height').value
-        framerate = self.get_parameter('framerate').value
+        width = self.width
+        height = self.height
+        framerate = self.camera_fps
+        exposure_time = self.get_parameter('exposure_time').value
+        gain = self.get_parameter('gain').value
+        awb_mode = self.get_parameter('awb_mode').value
+        flip_method = self.get_parameter('flip_method').value
         
-        # Pipeline especifico para câmera IMX219 (Raspberry Pi Camera v2) na Jetson
+        # Pipeline detalhado para câmera IMX219 na Jetson com todos os parâmetros
         pipeline_str = (
-            f"nvarguscamerasrc sensor-id={self.get_parameter('sensor_id').value} "
-            f"! video/x-raw(memory:NVMM), width={width}, height={height}, "
-            f"format=NV12, framerate={framerate}/1 ! nvvidconv flip-method={self.get_parameter('flip_method').value} "
-            f"! video/x-raw, width={width}, height={height}, format=BGRx ! videoconvert "
-            f"! video/x-raw, format=BGR ! appsink"
+            f"nvarguscamerasrc sensor-id=0 do-timestamp=true "
+            f"exposuretimerange='{exposure_time} {exposure_time}' "
+            f"gainrange='{gain} {gain}' wbmode={awb_mode} tnr-mode=2 ee-mode=2 "
+            f"! video/x-raw(memory:NVMM), width=(int){width}, height=(int){height}, "
+            f"format=(string)NV12, framerate=(fraction){framerate}/1 "
+            f"! nvvidconv flip-method={flip_method} "
+            f"! video/x-raw, format=(string)BGRx ! videoconvert "
+            f"! video/x-raw, format=(string)BGR "
+            f"! appsink max-buffers=4 drop=true sync=false name=sink emit-signals=true"
         )
         
-        self.get_logger().info(f"Pipeline CSI: {pipeline_str}")
+        self.get_logger().info(f"Pipeline CSI detalhado: {pipeline_str}")
+        
+        # Verificar permissões do dispositivo nvargus antes de tentar abrir
+        self.check_nvargus_permissions()
+        
+        # Testar se o serviço nvargus-daemon está em execução
+        self.check_nvargus_daemon()
+        
+        # Abrir captura com pipeline GStreamer
         self.cap = cv2.VideoCapture(pipeline_str, cv2.CAP_GSTREAMER)
         
         if not self.cap.isOpened():
-            self.get_logger().error("Falha ao abrir pipeline nvarguscamerasrc. Verificando alternativas...")
-            # Tente pipeline alternativo com nvarguscamerasrc
-            alt_pipeline = (
-                f"nvarguscamerasrc sensor-id={self.get_parameter('sensor_id').value} "
-                f"! video/x-raw(memory:NVMM), width={width}, height={height}, "
-                f"format=NV12, framerate={framerate}/1 ! nvvidconv "
-                f"! video/x-raw, format=BGRx ! videoconvert ! appsink"
-            )
-            self.get_logger().info(f"Tentando pipeline alternativo: {alt_pipeline}")
-            self.cap = cv2.VideoCapture(alt_pipeline, cv2.CAP_GSTREAMER)
+            self.get_logger().error("FALHA CRÍTICA: Não foi possível abrir a câmera CSI com pipeline principal")
+            self.get_logger().error("Motivos possíveis:")
+            self.get_logger().error("1. Hardware da câmera não conectado ou com problema")
+            self.get_logger().error("2. Serviço nvargus-daemon não está em execução")
+            self.get_logger().error("3. Permissões insuficientes para acessar o dispositivo")
+            self.get_logger().error("4. Outro processo já está utilizando a câmera")
+            self.get_logger().error("5. Configuração incorreta do pipeline GStreamer")
             
-            if not self.cap.isOpened():
-                # Se ainda falhar, tente com v4l2src como último recurso
-                video_devices = glob.glob('/dev/video*')
-                if video_devices:
-                    self.get_logger().warn("Tentando câmera V4L2 como alternativa...")
-                    self._configure_v4l2_pipeline(video_devices[0])
+            # Tentar obter mais informações de diagnóstico
+            self.get_logger().info("Executando diagnóstico detalhado...")
+            self.get_logger().info(f"Status de captura: {self.cap.isOpened()}")
+            self.get_logger().info(f"Código de erro do pipeline: {cv2.CAP_PROP_GSTREAMER}")
+            
+            # Checar hardware com comando i2cdetect
+            try:
+                i2c_output = subprocess.check_output("i2cdetect -y -r 0 | grep 10", shell=True, stderr=subprocess.STDOUT).decode('utf-8')
+                self.get_logger().info(f"Detecção I2C da câmera: {i2c_output}")
+            except subprocess.SubprocessError:
+                self.get_logger().warn("Não foi possível verificar câmera com i2cdetect")
+            
+            # Tentar obter logs do sistema relacionados à câmera
+            try:
+                dmesg_output = subprocess.check_output("dmesg | grep -i camera | tail -10", shell=True, stderr=subprocess.STDOUT).decode('utf-8')
+                self.get_logger().info(f"Logs do sistema (dmesg): {dmesg_output}")
+            except subprocess.SubprocessError:
+                pass
+                
+            # Não permitir fallback para pipeline simples ou simulação
+            raise RuntimeError("Falha ao inicializar câmera CSI - verificar logs para diagnóstico")
+    
+    def check_nvargus_permissions(self):
+        """Verifica permissões para acesso ao dispositivo nvargus."""
+        nvargus_path = '/dev/nvhost-ctrl'
+        if os.path.exists(nvargus_path):
+            # Verificar se o arquivo é legível
+            readable = os.access(nvargus_path, os.R_OK)
+            # Obter informações de permissão
+            stat_info = os.stat(nvargus_path)
+            mode = stat_info.st_mode
+            owner = stat_info.st_uid
+            group = stat_info.st_gid
+            
+            # Obter informações do usuário atual
+            current_uid = os.getuid()
+            current_gid = os.getgid()
+            user_groups = os.getgroups()
+            
+            self.get_logger().info(f"Permissões do dispositivo nvargus {nvargus_path}:")
+            self.get_logger().info(f"  Permissões: {mode:o}")
+            self.get_logger().info(f"  UID proprietário: {owner}, GID grupo: {group}")
+            self.get_logger().info(f"  UID atual: {current_uid}, GID atual: {current_gid}")
+            self.get_logger().info(f"  Grupos do usuário: {user_groups}")
+            self.get_logger().info(f"  Legível pelo usuário atual: {readable}")
+            
+            if not readable:
+                self.get_logger().error(f"ERRO: Sem permissão para acessar {nvargus_path}")
+                self.get_logger().error("Tente executar com sudo ou adicionar o usuário ao grupo apropriado")
+        else:
+            self.get_logger().error(f"ERRO: Dispositivo {nvargus_path} não encontrado - Jetson não detectada ou mal configurada")
+    
+    def check_nvargus_daemon(self):
+        """Verifica se o serviço nvargus-daemon está em execução."""
+        try:
+            output = subprocess.check_output("systemctl is-active nvargus-daemon", shell=True).decode('utf-8').strip()
+            self.get_logger().info(f"Status do serviço nvargus-daemon: {output}")
+            
+            if output != "active":
+                self.get_logger().error("ERRO: Serviço nvargus-daemon não está ativo")
+                # Tentar iniciar o serviço
+                self.get_logger().info("Tentando iniciar o serviço nvargus-daemon...")
+                try:
+                    subprocess.run("systemctl start nvargus-daemon", shell=True, check=True)
+                    self.get_logger().info("Serviço nvargus-daemon iniciado com sucesso")
+                except subprocess.SubprocessError:
+                    self.get_logger().error("Falha ao iniciar o serviço nvargus-daemon")
+        except subprocess.SubprocessError:
+            self.get_logger().warn("Não foi possível verificar o status do serviço nvargus-daemon")
+            # Verificar se o processo está em execução
+            try:
+                ps_output = subprocess.check_output("ps aux | grep nvargus-daemon | grep -v grep", shell=True).decode('utf-8')
+                if ps_output:
+                    self.get_logger().info("Processo nvargus-daemon está em execução:")
+                    self.get_logger().info(ps_output)
                 else:
-                    self.get_logger().error("Todas as tentativas de câmera falharam. Usando simulação.")
-                    self._configure_fake_camera_pipeline()
+                    self.get_logger().warn("Processo nvargus-daemon não encontrado em execução")
+            except subprocess.SubprocessError:
+                self.get_logger().warn("Não foi possível verificar processo nvargus-daemon")
     
     def _configure_v4l2_pipeline(self, device_path):
         """Configura pipeline usando v4l2src para câmeras USB ou outros dispositivos V4L2."""
