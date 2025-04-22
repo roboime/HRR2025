@@ -327,7 +327,8 @@ class IMX219CameraNode(Node):
     def check_nvargus_daemon(self):
         """Tenta verificar o serviço nvargus-daemon (melhor esforço, especialmente em container)."""
         self.get_logger().info('Verificando status do serviço nvargus-daemon (melhor esforço)...')
-        daemon_confirmed = False
+        daemon_confirmed_systemctl = False
+        daemon_confirmed_pgrep = False
         try:
             # Tenta via systemctl (geralmente só funciona no host)
             status = subprocess.run(['systemctl', 'is-active', 'nvargus-daemon'],
@@ -337,7 +338,7 @@ class IMX219CameraNode(Node):
             stdout_text = status.stdout.decode('utf-8', errors='replace') if status.stdout else ""
             if status.returncode == 0 and 'active' in stdout_text:
                 self.get_logger().info('Serviço nvargus-daemon está ativo (via systemctl - provavelmente no host).')
-                daemon_confirmed = True
+                daemon_confirmed_systemctl = True
             else:
                 self.get_logger().debug('systemctl is-active nvargus-daemon falhou ou retornou inativo.')
         except (FileNotFoundError, subprocess.TimeoutExpired) as e:
@@ -345,34 +346,48 @@ class IMX219CameraNode(Node):
         except Exception as e:
             self.get_logger().warn(f'Erro ao executar systemctl: {e}')
 
-        # Se systemctl falhou ou não confirmou, tenta pgrep (mais útil em container)
-        if not daemon_confirmed:
-            try:
-                # Procurar por processos com 'nvargus-daemon' no nome
-                pgrep_check = subprocess.run(['pgrep', '-af', 'nvargus-daemon'],
-                                            check=True,
-                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                            timeout=2)
-                # Decodificar stdout manualmente
-                stdout_text = pgrep_check.stdout.decode('utf-8', errors='replace') if pgrep_check.stdout else ""
+        # Tenta pgrep (mais útil em container, mas pode falhar em detectá-lo rodando no host)
+        try:
+            # Procurar por processos com 'nvargus-daemon' no nome
+            # Removido check=True para não lançar erro se não encontrar
+            pgrep_check = subprocess.run(['pgrep', '-af', 'nvargus-daemon'],
+                                        # check=True, # Removido
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        timeout=2)
+            # Decodificar stdout manualmente
+            stdout_text = pgrep_check.stdout.decode('utf-8', errors='replace') if pgrep_check.stdout else ""
+            # Verifica se pgrep teve sucesso (código 0) E encontrou algo no stdout
+            if pgrep_check.returncode == 0 and stdout_text.strip():
                 self.get_logger().info(f"Processo(s) nvargus-daemon encontrado(s) via pgrep:\\n{stdout_text.strip()}")
-                daemon_confirmed = True
-            except FileNotFoundError:
-                self.get_logger().warn("Comando 'pgrep' não encontrado.")
-            except subprocess.TimeoutExpired:
-                self.get_logger().warn("Timeout ao executar pgrep.")
-            except subprocess.CalledProcessError:
-                self.get_logger().error("Nenhum processo nvargus-daemon encontrado via pgrep.")
-                self.get_logger().error("O daemon PRECISA estar rodando (geralmente no host) para a câmera CSI funcionar.")
-            except Exception as e:
-                self.get_logger().error(f"Erro inesperado ao executar pgrep: {e}")
+                daemon_confirmed_pgrep = True
+            else:
+                 # AVISO em vez de ERRO, pois pgrep pode falhar em ver o host de dentro do container
+                 self.get_logger().warn("Nenhum processo nvargus-daemon encontrado via pgrep (pode ser normal em container).")
 
-        if not daemon_confirmed:
-            self.get_logger().error("Não foi possível confirmar se o nvargus-daemon está rodando.")
-            return False
-        else:
-            self.get_logger().info("Confirmação (via systemctl ou pgrep) de que o nvargus-daemon está rodando.")
+        except FileNotFoundError:
+            self.get_logger().warn("Comando 'pgrep' não encontrado.")
+        except subprocess.TimeoutExpired:
+            self.get_logger().warn("Timeout ao executar pgrep.")
+        # CalledProcessError não deve ocorrer mais com check=True removido
+        # except subprocess.CalledProcessError:
+        #     pass
+        except Exception as e:
+            self.get_logger().error(f"Erro inesperado ao executar pgrep: {e}")
+
+        # Considerar confirmado se QUALQUER método funcionou OU se o socket existe (indicativo)
+        socket_exists = os.path.exists('/tmp/argus_socket') or os.path.exists('/var/nvidia/nvcam/camera-daemon-socket')
+        if daemon_confirmed_systemctl or daemon_confirmed_pgrep:
+            self.get_logger().info("Confirmação (via systemctl ou pgrep) de que o nvargus-daemon parece estar rodando.")
             return True
+        elif socket_exists:
+            # Se nenhum processo foi confirmado, mas o socket existe, assume que pode funcionar
+            self.get_logger().warn("Não foi possível confirmar o processo nvargus-daemon via systemctl/pgrep, mas o socket existe. Assumindo que está OK e tentando continuar...")
+            return True # Permite continuar baseado na existência do socket
+        else:
+            # Somente falha se NENHUMA evidência (processo ou socket) for encontrada
+            self.get_logger().error("Não foi possível confirmar se o nvargus-daemon está rodando (via systemctl/pgrep) E o socket Argus NÃO foi encontrado.")
+            self.get_logger().error("O daemon PRECISA estar rodando no host e o socket acessível para a câmera CSI funcionar.")
+            return False # Falha real
 
     def load_camera_calibration(self):
         """Carrega o arquivo de calibração da câmera, se especificado."""
