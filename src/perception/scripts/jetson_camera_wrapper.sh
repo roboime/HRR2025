@@ -44,35 +44,6 @@ if [ ! -d "/tmp/.X11-unix" ]; then
     echo "AVISO: Pasta /tmp/.X11-unix não encontrada - pode haver problemas com interface gráfica"
 fi
 
-# Verificar status dos dispositivos necessários
-echo "Verificando dispositivos necessários..."
-echo "Dispositivos de vídeo:"
-ls -la /dev/video* 2>/dev/null || echo "Nenhum dispositivo de vídeo encontrado!"
-
-echo "Dispositivos Nvidia:"
-ls -la /dev/nvhost* 2>/dev/null || echo "Nenhum dispositivo Nvidia encontrado!"
-
-# Verificar se o nvargus-daemon está rodando no host (observação: pode não ser visível do container)
-echo "Nota: O serviço nvargus-daemon deve estar rodando no host, não no container"
-
-# Limpar recursos existentes
-echo "Liberando recursos da câmera em uso..."
-pkill -f "nvarguscamerasrc" 2>/dev/null || true
-pkill -f "gst-launch-1.0.*nvarguscamerasrc" 2>/dev/null || true
-sleep 1
-
-# Verificar bibliotecas GStreamer disponíveis
-echo "Plugins GStreamer Nvidia disponíveis:"
-gst-inspect-1.0 | grep nv | head -5
-echo "..."
-
-# Testar acesso básico à câmera CSI antes de iniciar o nó ROS
-echo "Testando acesso básico à câmera CSI com GStreamer..."
-gst-launch-1.0 nvarguscamerasrc num-buffers=1 ! fakesink -v &
-TESTPID=$!
-sleep 2
-kill $TESTPID 2>/dev/null || true
-
 # Adicionar o diretório de bibliotecas Python ao PYTHONPATH
 export PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH"
 
