@@ -11,15 +11,8 @@ import threading
 import time
 import subprocess
 import os
-import signal
-import math
-import atexit
-import tempfile
-import sys
-import glob
 import traceback
 import yaml
-import psutil
 
 class IMX219CameraNode(Node):
     """
@@ -29,31 +22,30 @@ class IMX219CameraNode(Node):
     def __init__(self):
         super().__init__('jetson_camera_node')
         
-        # Reduzir logging para o mínimo essencial
-        self.get_logger().set_level(rclpy.logging.LoggingSeverity.INFO)
+        # Parâmetros
+        self.declare_parameter('device_id', 0)
+        self.declare_parameter('display', False)
+        self.declare_parameter('framerate', 30.0)
+        self.declare_parameter('enable_cuda', True)
+        self.declare_parameter('camera_mode', 6)
+        self.declare_parameter('calibration_file', '')
+        self.declare_parameter('bypass_opencv', False)
         
-        # Declarar parâmetros essenciais da câmera
-        self.declare_parameters(
-            namespace='',
-            parameters=[
-                ('device_id', 0),
-                ('display', False),
-                ('framerate', 30.0),
-                ('enable_cuda', True),
-                ('calibration_file', ''),
-                ('flip_method', 0),
-            ]
-        )
-
+        self.device_id = self.get_parameter('device_id').value
+        self.display_debug = self.get_parameter('display').value
+        self.framerate = self.get_parameter('framerate').value
+        self.enable_cuda = self.get_parameter('enable_cuda').value
+        self.camera_mode = self.get_parameter('camera_mode').value
+        
         # Variáveis de estado
-        self.cap = None
+        self.camera = None
         self.is_running = False
         self.capture_thread = None
         self.bridge = CvBridge()
         self.camera_info_msg = None
         self.camera_info_pub = None
         self.frame_count = 0
-        self.last_fps_update = self.get_clock().now()
+        self.last_fps_update = time.time()
         self.current_fps = 0.0
         
         # Configuração e inicialização
@@ -63,139 +55,179 @@ class IMX219CameraNode(Node):
             self.width = 1280
             self.height = 720
             self.camera_fps = 30.0
-            self.max_fps = 120.0
             
             self.get_logger().info("INICIANDO NÓ DA CÂMERA CSI JETSON (MÍNIMO)")
             
             # Publishers
-            self.image_pub = self.create_publisher(Image, 'camera/image_raw', 10)
+            self.image_pub = self.create_publisher(Image, 'image_raw', 10)
             
             # Inicializar câmera GStreamer
-            if not self.init_gstreamer_camera():
-                self.get_logger().fatal("FALHA CRÍTICA AO INICIALIZAR CÂMERA GSTREAMER!")
+            if not self.configure_camera():
+                self.get_logger().fatal("FALHA AO INICIALIZAR CÂMERA GSTREAMER")
+                self.test_camera_pipeline()
+                self.log_gstreamer_failure_hints()
                 raise RuntimeError("Não foi possível inicializar a câmera GStreamer.")
-            else:
-                self.get_logger().info(f"Câmera inicializada: {self.width}x{self.height}")
-                
-                # Carregar calibração se especificada
-                self.load_camera_calibration()
-                
-                # Criar publisher de camera_info se calibração foi carregada
-                if self.camera_info_msg:
-                    self.camera_info_pub = self.create_publisher(CameraInfo, 'camera/camera_info', 10)
-                
-                # Iniciar thread de captura
-                self.is_running = True
-                self.capture_thread = threading.Thread(target=self.capture_loop)
-                self.capture_thread.daemon = True
-                self.capture_thread.start()
-                
+            
+            self.get_logger().info(f"Câmera inicializada: {self.width}x{self.height}")
+            
+            # Carregar calibração se especificada
+            self.load_camera_calibration()
+            
+            # Criar publisher de camera_info se calibração foi carregada
+            if self.camera_info_msg:
+                self.camera_info_pub = self.create_publisher(CameraInfo, 'camera_info', 10)
+            
+            # Iniciar thread de captura
+            self.is_running = True
+            self.capture_thread = threading.Thread(target=self.capture_loop)
+            self.capture_thread.daemon = True
+            self.capture_thread.start()
+            
+            self.get_logger().info(f"Nó de câmera inicializado com ID {self.device_id}")
+            self.get_logger().info(f"Taxa de frames configurada para: {self.framerate}")
+            self.get_logger().info(f"Modo de câmera: {self.camera_mode}")
+            self.get_logger().info(f"CUDA habilitado: {self.enable_cuda}")
+            self.get_logger().info(f"Debug display: {self.display_debug}")
+            
         except Exception as e:
             self.get_logger().fatal(f"FALHA NA INICIALIZAÇÃO: {str(e)}")
             traceback.print_exc()
             raise
 
-    def init_gstreamer_camera(self):
-        """Inicializa a câmera GStreamer com o pipeline CSI."""
-        self.get_logger().info("Verificando ambiente e pré-requisitos...")
-
-        # Construir pipeline GStreamer (SIMPLIFICADO AO MÁXIMO)
-        pipeline_str = self._build_gstreamer_pipeline()
-        if not pipeline_str:
-            self.get_logger().error("Falha ao construir string do pipeline GStreamer.")
-            return False
-
-        self.get_logger().info(f"Pipeline: {pipeline_str}")
-
-        # Tentar abrir a câmera
+    def configure_camera(self):
+        """Configura a câmera utilizando GStreamer e OpenCV."""
         try:
-            self.cap = cv2.VideoCapture(pipeline_str, cv2.CAP_GSTREAMER)
-            if not self.cap.isOpened():
-                self.get_logger().error("FALHA: cv2.VideoCapture não conseguiu abrir o pipeline")
-                self.get_logger().error("1. Câmera CSI mal conectada")
-                self.get_logger().error("2. nvargus-daemon não está rodando no HOST")
-                self.get_logger().error("3. Container sem acesso aos dispositivos NVIDIA")
-                self.get_logger().error("4. Outro processo usando a câmera (pkill -f nvargus)")
-                
-                # Testar pipeline básico para diagnóstico
-                basic_success = self.test_camera_pipeline(timeout=3)
-                if basic_success:
-                    self.get_logger().info("Teste básico PASSOU mas cv2.VideoCapture falhou")
-                    self.get_logger().info("Isso sugere um problema na sintaxe do pipeline para OpenCV")
-                
+            # Construir pipeline GStreamer
+            pipeline = self._build_gstreamer_pipeline()
+            self.get_logger().info(f"Pipeline GStreamer: {pipeline}")
+            
+            # Tentar abrir a câmera
+            self.camera = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+            
+            if not self.camera.isOpened():
+                self.get_logger().error("Falha ao abrir a câmera com OpenCV/GStreamer")
                 return False
-
-            # Verificar se conseguimos ler um frame
-            self.get_logger().info("Tentando ler o primeiro frame...")
-            ret, frame = self.cap.read()
-            if not ret or frame is None:
-                self.get_logger().error("Falha ao ler o primeiro frame!")
-                self.cap.release()
-                self.cap = None
-                self.test_camera_pipeline(timeout=3)
-                return False
-            else:
-                self.get_logger().info(f"Primeiro frame lido: {frame.shape}")
-                del frame
-
+                
+            self.get_logger().info("Câmera inicializada com sucesso")
             return True
-
+            
         except Exception as e:
-            self.get_logger().error(f"Exceção: {str(e)}")
-            traceback.print_exc()
-            if self.cap:
-                self.cap.release()
-                self.cap = None
+            self.get_logger().error(f"Erro ao configurar câmera: {str(e)}")
             return False
 
     def _build_gstreamer_pipeline(self):
-        """Constrói um pipeline GStreamer CSI simplificado."""
-        try:
-            # PIPELINE ESSENCIAL - ULTRA MÍNIMO
-            # Comparado com o teste bem-sucedido, com apenas o essencial
-            device_id = self.get_parameter('device_id').value
-            flip_method = self.get_parameter('flip_method').value
-            
-            # Em vez de um pipeline complexo, vamos usar o mais mínimo possível
-            # Adicionamos parâmetros importantes para o appsink que podem estar faltando
-            pipeline = (
-                f"nvarguscamerasrc sensor-id={device_id} "
-                f"! video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
-                f"format=NV12, framerate=30/1 "
-                f"! nvvidconv flip-method={flip_method} "
+        """Constrói o pipeline GStreamer para a câmera IMX219."""
+        # Parâmetros básicos
+        sensor_id = self.device_id
+        framerate = int(self.framerate)
+        
+        # Pipeline básico para a câmera IMX219 (Raspberry Pi v2)
+        pipeline = (
+            f"nvarguscamerasrc sensor-id={sensor_id} "
+            f"! video/x-raw(memory:NVMM), format=NV12, width={self.width}, height={self.height}, framerate={framerate}/1 "
+        )
+        
+        # Adicionar elementos de processamento CUDA se habilitado
+        if self.enable_cuda:
+            pipeline += (
+                f"! nvvidconv "
                 f"! video/x-raw, format=BGRx "
                 f"! videoconvert "
-                f"! appsink name=sink max-buffers=1 drop=true sync=false emit-signals=true"
+                f"! video/x-raw, format=BGR "
+                f"! appsink drop=1"
+            )
+        else:
+            # Fallback para processamento CPU
+            pipeline += (
+                f"! nvvidconv "
+                f"! video/x-raw, format=BGRx "
+                f"! videoconvert "
+                f"! video/x-raw, format=BGR "
+                f"! appsink drop=1"
             )
             
-            return pipeline
+        return pipeline
+
+    def test_camera_pipeline(self, timeout=3):
+        """Testa se a câmera está acessível usando gst-launch-1.0 diretamente."""
+        try:
+            self.get_logger().info("Executando teste básico de pipeline GStreamer...")
+
+            # Teste com um pipeline simples para verificar se a câmera está acessível
+            basic_cmd = f"gst-launch-1.0 nvarguscamerasrc num-buffers=1 ! fakesink -v"
+            self.get_logger().info(f"Comando de teste: {basic_cmd}")
             
-        except Exception as e:
-            self.get_logger().error(f"Erro ao construir pipeline: {str(e)}")
-            traceback.print_exc()
-            return None
-
-    def check_argus_socket(self):
-        """Verifica o socket Argus."""
-        socket_path = '/tmp/argus_socket'
-        return os.path.exists(socket_path)
-
-    def check_nvargus_daemon(self):
-        """Verifica o daemon nvargus."""
-        try:
-            result = subprocess.run("pgrep -f nvargus-daemon", shell=True, 
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            return result.returncode == 0
-        except:
+            process = subprocess.run(
+                basic_cmd, 
+                shell=True,
+                timeout=timeout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            stdout = process.stdout.decode()
+            stderr = process.stderr.decode()
+            
+            # Verificar se o pipeline executou com sucesso
+            if process.returncode == 0:
+                self.get_logger().info("Teste básico PASSOU: A câmera está acessível via GStreamer")
+                
+                # Teste 2: pipeline completo (mais próximo do que vamos usar)
+                self.get_logger().info("Testando pipeline completo...")
+                full_test_cmd = (
+                    f"gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! "
+                    f"video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
+                    f"format=NV12, framerate={int(self.camera_fps)}/1 ! "
+                    f"nvvidconv ! fakesink num-buffers=1 -v"
+                )
+                
+                full_process = subprocess.run(
+                    full_test_cmd, 
+                    shell=True,
+                    timeout=timeout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                
+                if full_process.returncode == 0:
+                    self.get_logger().info("Teste completo PASSOU: Pipeline está funcionando")
+                    return True
+                else:
+                    self.get_logger().error("Teste básico PASSOU, mas teste completo FALHOU")
+                    self.get_logger().info("Isso sugere problema nas configurações do pipeline")
+                    return False
+            else:
+                self.get_logger().error("Teste básico FALHOU: A câmera pode não estar acessível")
+                
+                # Fornecer informações de diagnóstico
+                self.get_logger().error(f"Código de retorno: {process.returncode}")
+                if stdout:
+                    self.get_logger().error(f"stdout: {stdout[:200]}...")
+                if stderr:
+                    self.get_logger().error(f"stderr: {stderr[:200]}...")
+                    
+                # Verificar CV2 info
+                self.get_logger().info(f"OpenCV version: {cv2.__version__}")
+                
+                # Teste de OpenCV direto
+                self.get_logger().info("Tentando abrir câmera com OpenCV diretamente...")
+                try:
+                    cap = cv2.VideoCapture(0)
+                    if cap.isOpened():
+                        self.get_logger().info("OpenCV conseguiu abrir câmera 0 diretamente")
+                        cap.release()
+                    else:
+                        self.get_logger().error("OpenCV falhou ao abrir câmera 0 diretamente")
+                except Exception as e:
+                    self.get_logger().error(f"Erro OpenCV: {str(e)}")
+                
+                return False
+                
+        except subprocess.TimeoutExpired:
+            self.get_logger().error(f"Timeout ao testar o pipeline (após {timeout}s)")
             return False
-
-    def check_gstreamer_plugin(self, plugin_name):
-        """Verifica plugin GStreamer."""
-        try:
-            result = subprocess.run(['gst-inspect-1.0', plugin_name],
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            return result.returncode == 0
-        except:
+        except Exception as e:
+            self.get_logger().error(f"Erro ao testar o pipeline: {str(e)}")
             return False
 
     def log_gstreamer_failure_hints(self):
@@ -213,76 +245,120 @@ class IMX219CameraNode(Node):
     def capture_loop(self):
         """Loop principal para capturar frames."""
         while rclpy.ok() and self.is_running:
-            if self.cap and self.cap.isOpened():
-                ret, frame = self.cap.read()
-                if ret and frame is not None:
+            if self.camera and self.camera.isOpened():
+                try:
                     # Processar e publicar frame
-                    self.process_and_publish_frame(frame)
+                    self.process_and_publish_frame()
                     
                     # Calcular FPS (apenas logs ocasionais)
                     self.frame_count += 1
-                    now = self.get_clock().now()
-                    elapsed = (now.nanoseconds - self.last_fps_update.nanoseconds) / 1e9
+                    now = time.time()
+                    elapsed = now - self.last_fps_update
                     if elapsed >= 3.0:  # Reduzir frequência do log de FPS
                         self.current_fps = self.frame_count / elapsed
                         self.get_logger().info(f"FPS: {self.current_fps:.1f}")
                         self.frame_count = 0
                         self.last_fps_update = now
-                else:
-                    # Apenas tentar novamente sem spam de logs
-                    time.sleep(0.1)
+                except Exception as e:
+                    self.get_logger().error(f"Erro no loop de captura: {str(e)}")
             else:
-                self.get_logger().error("VideoCapture não está aberto.")
-                self.is_running = False
+                self.get_logger().error("Câmera não está aberta ou foi fechada.")
                 break
+            
+            # Pequena pausa para não sobrecarregar CPU
+            time.sleep(0.001)
 
-            # Limpeza rápida
-            if self.cap:
-                self.cap.release()
-                self.cap = None
+        # Limpeza
+        if self.camera:
+            self.camera.release()
+            self.camera = None
 
-    def process_and_publish_frame(self, frame):
-        """Processa e publica um frame sem processamento adicional."""
+    def process_and_publish_frame(self):
+        """Captura, processa e publica um frame da câmera."""
+        if not self.camera or not self.camera.isOpened():
+            self.get_logger().error("Câmera não está aberta para captura")
+            return
+
         try:
-            # Publicar diretamente sem processamento
-            img_msg = self.bridge.cv2_to_imgmsg(frame, "bgr8")
+            # Capturar frame da câmera
+            ret, frame = self.camera.read()
+            
+            if not ret or frame is None:
+                self.get_logger().warn("Não foi possível capturar frame da câmera")
+                return
+                
+            # Processar imagem com CUDA (se disponível)
+            # Na versão simplificada, apenas usamos o frame original
+            processed_frame = frame
+            
+            # Adicionar informações de debug na imagem se solicitado
+            if self.display_debug:
+                self._add_debug_info(processed_frame)
+            
+            # Converter para mensagem ROS
+            img_msg = self.bridge.cv2_to_imgmsg(processed_frame, encoding="bgr8")
             img_msg.header.stamp = self.get_clock().now().to_msg()
-            img_msg.header.frame_id = "camera_optical_frame"
+            img_msg.header.frame_id = "camera_frame"
+            
+            # Publicar mensagens
             self.image_pub.publish(img_msg)
             
-            # Publicar CameraInfo se disponível
+            # Publicar camera_info se disponível
             if self.camera_info_pub and self.camera_info_msg:
                 self.camera_info_msg.header = img_msg.header
                 self.camera_info_pub.publish(self.camera_info_msg)
             
-            # Mostrar imagem se display estiver habilitado (sem texto adicional)
-            if self.get_parameter('display').value:
-                cv2.imshow('Camera CSI', frame)
-                key = cv2.waitKey(1)
-                if key == ord('q'):
-                    # Fechar display sem mensagens
-                    cv2.destroyAllWindows()
-                    
+            # Exibir imagem se solicitado
+            if self.display_debug:
+                cv2.imshow("Câmera IMX219", processed_frame)
+                cv2.waitKey(1)
+                
         except Exception as e:
-            self.get_logger().error(f"Erro: {str(e)}")
+            self.get_logger().error(f"Erro ao processar frame: {str(e)}")
+            traceback.print_exc()
 
-    def test_camera_pipeline(self, timeout=3):
-        """Testa um pipeline básico da câmera para diagnóstico."""
-        try:
-            # Pipeline de teste ULTRA MÍNIMO
-            # Isso é o mínimo absoluto para verificar se a câmera responde
-            test_cmd = "gst-launch-1.0 nvarguscamerasrc num-buffers=1 ! fakesink -v"
-            process = subprocess.run(test_cmd, shell=True, timeout=timeout,
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            success = process.returncode == 0
-            if success:
-                self.get_logger().info("Teste GStreamer básico: SUCESSO")
-            else:
-                self.get_logger().error("Teste GStreamer básico: FALHA")
-            return success
-        except Exception as e:
-            self.get_logger().error(f"Erro no teste: {str(e)}")
-            return False
+    def _add_debug_info(self, image):
+        """Adiciona informações de debug à imagem."""
+        if image is None:
+            return
+
+        # Adicionar informações básicas
+        height, width = image.shape[:2]
+        text_color = (0, 255, 0)  # Verde
+        
+        # Linha 1: FPS
+        cv2.putText(
+            image, 
+            f"FPS: {self.current_fps:.1f}", 
+            (10, 30), 
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            1.0, 
+            text_color, 
+            2
+        )
+        
+        # Linha 2: Resolução
+        cv2.putText(
+            image, 
+            f"Resolução: {width}x{height}", 
+            (10, 70), 
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            1.0, 
+            text_color, 
+            2
+        )
+        
+        # Linha 3: Status CUDA
+        cuda_status = "Ativado" if self.enable_cuda else "Desativado"
+        cv2.putText(
+            image, 
+            f"CUDA: {cuda_status}", 
+            (10, 110), 
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            1.0, 
+            text_color, 
+            2
+        )
 
     def load_camera_calibration(self):
         """Carrega o arquivo de calibração da câmera."""
@@ -303,6 +379,7 @@ class IMX219CameraNode(Node):
                 self.camera_info_msg.d = [float(x) for x in calib_data['distortion_coefficients']['data']]
                 self.camera_info_msg.distortion_model = 'plumb_bob'
         except Exception as e:
+            self.get_logger().error(f"Erro ao carregar calibração: {str(e)}")
             self.camera_info_msg = None
 
     def destroy_node(self):
@@ -312,10 +389,10 @@ class IMX219CameraNode(Node):
         if self.capture_thread and self.capture_thread.is_alive():
             self.capture_thread.join(timeout=1.0)
         
-        if self.cap:
-            self.cap.release()
+        if self.camera:
+            self.camera.release()
         
-        if self.get_parameter('display').value:
+        if self.display_debug:
             cv2.destroyAllWindows()
         
         super().destroy_node()
