@@ -359,8 +359,10 @@ class IMX219CameraNode(Node):
             # Tenta via systemctl (geralmente só funciona no host)
             status = subprocess.run(['systemctl', 'is-active', 'nvargus-daemon'],
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  text=True, timeout=2)
-            if status.returncode == 0 and 'active' in status.stdout:
+                                  timeout=2)
+            # Decodificar stdout manualmente
+            stdout_text = status.stdout.decode('utf-8', errors='replace') if status.stdout else ""
+            if status.returncode == 0 and 'active' in stdout_text:
                 self.get_logger().info('Serviço nvargus-daemon está ativo (via systemctl - provavelmente no host).')
                 daemon_confirmed = True
             else:
@@ -377,8 +379,10 @@ class IMX219CameraNode(Node):
                   pgrep_check = subprocess.run(['pgrep', '-af', 'nvargus-daemon'],
                                               check=True,
                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                              text=True, timeout=2)
-                  self.get_logger().info(f"Processo(s) nvargus-daemon encontrado(s) via pgrep:\\n{pgrep_check.stdout.strip()}")
+                                              timeout=2)
+                  # Decodificar stdout manualmente
+                  stdout_text = pgrep_check.stdout.decode('utf-8', errors='replace') if pgrep_check.stdout else ""
+                  self.get_logger().info(f"Processo(s) nvargus-daemon encontrado(s) via pgrep:\\n{stdout_text.strip()}")
                   daemon_confirmed = True
              except FileNotFoundError:
                   self.get_logger().warn("Comando 'pgrep' não encontrado.")
