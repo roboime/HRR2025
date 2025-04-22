@@ -167,18 +167,20 @@ class IMX219CameraNode(Node):
         # Método 2: Usar o v4l-utils se disponível
         try:
             import subprocess
-            result = subprocess.run(['v4l2-ctl', '--list-devices'], 
-                                   stdout=subprocess.PIPE, 
-                                   stderr=subprocess.PIPE,
-                                   text=True)
-            if result.returncode == 0 and result.stdout:
-                self.get_logger().info(f'Dispositivos detectados via v4l2-ctl:\n{result.stdout}')
+            result = subprocess.run(['v4l2-ctl', '--list-devices'],
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE)
+            stdout_decoded = result.stdout.decode() if result.stdout else ''
+            stderr_decoded = result.stderr.decode() if result.stderr else ''
+
+            if result.returncode == 0 and stdout_decoded:
+                self.get_logger().info(f'Dispositivos detectados via v4l2-ctl:\\n{stdout_decoded}')
                 # Analisar a saída para detectar câmeras CSI
-                if 'imx219' in result.stdout.lower() or 'csi' in result.stdout.lower():
+                if 'imx219' in stdout_decoded.lower() or 'csi' in stdout_decoded.lower():
                     self.get_logger().info('Câmera CSI IMX219 detectada!')
                     devices_found.append('imx219')
             else:
-                self.get_logger().debug(f'v4l2-ctl falhou ou não encontrou dispositivos: {result.stderr}')
+                self.get_logger().debug(f'v4l2-ctl falhou ou não encontrou dispositivos: {stderr_decoded}')
         except Exception as e:
             self.get_logger().debug(f'Erro ao executar v4l2-ctl: {str(e)}')
         
@@ -206,11 +208,11 @@ class IMX219CameraNode(Node):
                                           stderr=subprocess.PIPE).returncode == 0
                 
                 if gst_exists:
-                    result = subprocess.run(['gst-inspect-1.0', 'nvarguscamerasrc'], 
-                                           stdout=subprocess.PIPE, 
-                                           stderr=subprocess.PIPE,
-                                           text=True)
-                    if 'nvarguscamerasrc' in result.stdout:
+                    result = subprocess.run(['gst-inspect-1.0', 'nvarguscamerasrc'],
+                                           stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE)
+                    stdout_decoded = result.stdout.decode() if result.stdout else ''
+                    if 'nvarguscamerasrc' in stdout_decoded:
                         self.get_logger().info('Plugin GStreamer nvarguscamerasrc disponível')
                         devices_found.append('nvarguscamerasrc')
         except Exception as e:
