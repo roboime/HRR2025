@@ -50,16 +50,31 @@ class IMX219CameraNode(Node):
         
         # Configuração e inicialização
         try:
-            # MODO DE CÂMERA FIXO PARA MÁXIMO FPS
-            # Modo 5: 1280x720 @ 120fps
+            # Configurar resoluções com base no modo da câmera
+            # Modo 6: 1280x720 @ 120fps
             self.width = 1280
             self.height = 720
             self.camera_fps = 30.0
+            self.min_exposure = 13000
+            self.max_exposure = 683709000
             
             self.get_logger().info("INICIANDO NÓ DA CÂMERA CSI JETSON (MÍNIMO)")
             
             # Publishers
             self.image_pub = self.create_publisher(Image, 'image_raw', 10)
+            
+            # Verificar se estamos em ambiente containerizado
+            is_container = os.path.exists('/.dockerenv')
+            if is_container:
+                self.get_logger().info("Detectado ambiente containerizado (Docker)")
+            
+            # Verificar e configurar socket Argus para comunicação com a câmera
+            if not self.check_socket_permissions():
+                self.get_logger().warn("Falha ao configurar socket Argus; tentando prosseguir mesmo assim")
+            
+            # Verificar daemon nvargus (que deve estar rodando no host)
+            if not self.check_nvargus_daemon():
+                self.get_logger().warn("Daemon nvargus não encontrado; tentando prosseguir mesmo assim")
             
             # Inicializar câmera GStreamer
             if not self.configure_camera():
@@ -83,6 +98,7 @@ class IMX219CameraNode(Node):
             self.capture_thread.daemon = True
             self.capture_thread.start()
             
+            # Log informações sobre a configuração
             self.get_logger().info(f"Nó de câmera inicializado com ID {self.device_id}")
             self.get_logger().info(f"Taxa de frames configurada para: {self.framerate}")
             self.get_logger().info(f"Modo de câmera: {self.camera_mode}")
@@ -97,22 +113,86 @@ class IMX219CameraNode(Node):
     def configure_camera(self):
         """Configura a câmera utilizando GStreamer e OpenCV."""
         try:
+            # Verificar disponibilidade do plugin GStreamer
+            try:
+                self.get_logger().info("Verificando plugins GStreamer necessários...")
+                
+                # Verificar nvarguscamerasrc
+                gst_check = subprocess.run(
+                    ['gst-inspect-1.0', 'nvarguscamerasrc'], 
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                
+                if gst_check.returncode != 0:
+                    self.get_logger().error("Plugin 'nvarguscamerasrc' não encontrado! Este plugin é essencial.")
+                    return False
+                
+                # Verificar nvvidconv
+                nv_check = subprocess.run(
+                    ['gst-inspect-1.0', 'nvvidconv'], 
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                
+                if nv_check.returncode != 0:
+                    self.get_logger().error("Plugin 'nvvidconv' não encontrado! Este plugin é essencial.")
+                    return False
+                
+                self.get_logger().info("Plugins GStreamer necessários estão disponíveis.")
+                
+            except Exception as e:
+                self.get_logger().error(f"Erro ao verificar plugins GStreamer: {str(e)}")
+                return False
+            
+            # Teste básico do pipeline antes de tentar configurar
+            test_result = self.test_camera_pipeline(timeout=5)
+            if not test_result:
+                self.get_logger().warn("Teste de pipeline falhou! Tentando configuração mesmo assim...")
+            
             # Construir pipeline GStreamer
             pipeline = self._build_gstreamer_pipeline()
-            self.get_logger().info(f"Pipeline GStreamer: {pipeline}")
+            self.get_logger().info(f"Iniciando câmera com pipeline: {pipeline}")
             
             # Tentar abrir a câmera
             self.camera = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
             
             if not self.camera.isOpened():
                 self.get_logger().error("Falha ao abrir a câmera com OpenCV/GStreamer")
+                
+                # Tentar pipeline alternativo ultra-simplificado
+                self.get_logger().info("Tentando pipeline alternativo...")
+                alt_pipeline = (
+                    f"nvarguscamerasrc sensor-id={self.device_id} ! "
+                    f"nvvidconv ! video/x-raw, format=BGRx ! "
+                    f"videoconvert ! video/x-raw, format=BGR ! "
+                    f"appsink max-buffers=1 drop=true sync=false"
+                )
+                
+                self.get_logger().info(f"Pipeline alternativo: {alt_pipeline}")
+                self.camera = cv2.VideoCapture(alt_pipeline, cv2.CAP_GSTREAMER)
+                
+                if not self.camera.isOpened():
+                    self.get_logger().error("Falha também com pipeline alternativo!")
+                    return False
+                else:
+                    self.get_logger().info("Pipeline alternativo funcionou! Usando esta configuração.")
+                    return True
+                
+            # Verificar se a câmera realmente funciona lendo um frame
+            ret, test_frame = self.camera.read()
+            if not ret or test_frame is None:
+                self.get_logger().error("Câmera aberta, mas não conseguiu ler frame!")
+                self.camera.release()
+                self.camera = None
                 return False
                 
-            self.get_logger().info("Câmera inicializada com sucesso")
+            self.get_logger().info(f"Câmera inicializada com sucesso! Shape do frame: {test_frame.shape}")
             return True
             
         except Exception as e:
             self.get_logger().error(f"Erro ao configurar câmera: {str(e)}")
+            traceback.print_exc()
             return False
 
     def _build_gstreamer_pipeline(self):
@@ -122,30 +202,34 @@ class IMX219CameraNode(Node):
         framerate = int(self.framerate)
         
         # Pipeline básico para a câmera IMX219 (Raspberry Pi v2)
+        # Versão simplificada e otimizada para ambiente containerizado
         pipeline = (
             f"nvarguscamerasrc sensor-id={sensor_id} "
-            f"! video/x-raw(memory:NVMM), format=NV12, width={self.width}, height={self.height}, framerate={framerate}/1 "
+            f"! video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
+            f"format=NV12, framerate={framerate}/1 "
         )
         
-        # Adicionar elementos de processamento CUDA se habilitado
+        # Adicionar elementos de processamento
         if self.enable_cuda:
+            # Versão com conversão CUDA simplificada e robusta para ambientes containerizados
             pipeline += (
-                f"! nvvidconv "
-                f"! video/x-raw, format=BGRx "
-                f"! videoconvert "
-                f"! video/x-raw, format=BGR "
-                f"! appsink drop=1"
+                f"! nvvidconv ! "
+                f"video/x-raw, format=BGRx ! "
+                f"videoconvert ! "
+                f"video/x-raw, format=BGR ! "
+                f"appsink max-buffers=1 drop=true sync=false"
             )
         else:
-            # Fallback para processamento CPU
+            # Fallback simples sem CUDA
             pipeline += (
-                f"! nvvidconv "
-                f"! video/x-raw, format=BGRx "
-                f"! videoconvert "
-                f"! video/x-raw, format=BGR "
-                f"! appsink drop=1"
+                f"! nvvidconv ! "
+                f"video/x-raw, format=BGRx ! "
+                f"videoconvert ! "
+                f"video/x-raw, format=BGR ! "
+                f"appsink max-buffers=1 drop=true sync=false"
             )
-            
+        
+        self.get_logger().info(f"Pipeline GStreamer: {pipeline}")
         return pipeline
 
     def test_camera_pipeline(self, timeout=3):
@@ -154,7 +238,7 @@ class IMX219CameraNode(Node):
             self.get_logger().info("Executando teste básico de pipeline GStreamer...")
 
             # Teste com um pipeline simples para verificar se a câmera está acessível
-            basic_cmd = f"gst-launch-1.0 nvarguscamerasrc num-buffers=1 ! fakesink -v"
+            basic_cmd = f"gst-launch-1.0 nvarguscamerasrc num-buffers=10 ! fakesink -v"
             self.get_logger().info(f"Comando de teste: {basic_cmd}")
             
             process = subprocess.run(
@@ -172,29 +256,75 @@ class IMX219CameraNode(Node):
             if process.returncode == 0:
                 self.get_logger().info("Teste básico PASSOU: A câmera está acessível via GStreamer")
                 
-                # Teste 2: pipeline completo (mais próximo do que vamos usar)
-                self.get_logger().info("Testando pipeline completo...")
-                full_test_cmd = (
-                    f"gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! "
-                    f"video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
-                    f"format=NV12, framerate={int(self.camera_fps)}/1 ! "
-                    f"nvvidconv ! fakesink num-buffers=1 -v"
+                # Teste 2: pipeline exatamente igual ao que estamos usando
+                self.get_logger().info("Testando pipeline de integração...")
+                integration_test_cmd = (
+                    f"gst-launch-1.0 nvarguscamerasrc sensor-id={self.device_id} "
+                    f"! video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
+                    f"format=NV12, framerate={int(self.framerate)}/1 "
+                    f"! nvvidconv "
+                    f"! video/x-raw, format=BGRx "
+                    f"! fakesink num-buffers=5 -v"
                 )
                 
-                full_process = subprocess.run(
-                    full_test_cmd, 
+                self.get_logger().info(f"Comando de integração: {integration_test_cmd}")
+                
+                integration_process = subprocess.run(
+                    integration_test_cmd, 
                     shell=True,
                     timeout=timeout,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
                 )
                 
-                if full_process.returncode == 0:
-                    self.get_logger().info("Teste completo PASSOU: Pipeline está funcionando")
+                int_stdout = integration_process.stdout.decode()
+                int_stderr = integration_process.stderr.decode()
+                
+                if integration_process.returncode == 0:
+                    self.get_logger().info("Teste de integração PASSOU: Pipeline está funcionando")
                     return True
                 else:
-                    self.get_logger().error("Teste básico PASSOU, mas teste completo FALHOU")
+                    self.get_logger().error("Teste básico PASSOU, mas teste de integração FALHOU")
                     self.get_logger().info("Isso sugere problema nas configurações do pipeline")
+                    self.get_logger().error(f"Stdout: {int_stdout[:200]}")
+                    self.get_logger().error(f"Stderr: {int_stderr[:200]}")
+                    
+                    # Teste 3: Pipeline ultra-simplificado com nvvidconv
+                    self.get_logger().info("Tentando pipeline ultra-simplificado...")
+                    simple_test_cmd = (
+                        f"gst-launch-1.0 nvarguscamerasrc ! "
+                        f"nvvidconv ! fakesink -v"
+                    )
+                    
+                    simple_process = subprocess.run(
+                        simple_test_cmd, 
+                        shell=True,
+                        timeout=timeout,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
+                    
+                    if simple_process.returncode == 0:
+                        self.get_logger().info("PIPELINE ULTRA-SIMPLIFICADO FUNCIONOU!")
+                        self.get_logger().info("Isso sugere que o problema está nos parâmetros/formatos")
+                    else:
+                        self.get_logger().error("Mesmo o pipeline ultra-simplificado falhou.")
+                        self.get_logger().error("Isso sugere que o nvvidconv está com problemas no sistema")
+                    
+                    # Ver status do daemon nvargus
+                    try:
+                        nvargus_check = subprocess.run(
+                            "ps aux | grep nvargus-daemon | grep -v grep", 
+                            shell=True, 
+                            stdout=subprocess.PIPE
+                        )
+                        if nvargus_check.returncode == 0:
+                            self.get_logger().info(f"nvargus-daemon está rodando: {nvargus_check.stdout.decode()}")
+                        else:
+                            self.get_logger().error("ERRO CRÍTICO: nvargus-daemon não está rodando no host!")
+                    except Exception:
+                        pass
+                        
                     return False
             else:
                 self.get_logger().error("Teste básico FALHOU: A câmera pode não estar acessível")
@@ -209,17 +339,17 @@ class IMX219CameraNode(Node):
                 # Verificar CV2 info
                 self.get_logger().info(f"OpenCV version: {cv2.__version__}")
                 
-                # Teste de OpenCV direto
-                self.get_logger().info("Tentando abrir câmera com OpenCV diretamente...")
+                # Verificar dispositivos de vídeo disponíveis
                 try:
-                    cap = cv2.VideoCapture(0)
-                    if cap.isOpened():
-                        self.get_logger().info("OpenCV conseguiu abrir câmera 0 diretamente")
-                        cap.release()
-                    else:
-                        self.get_logger().error("OpenCV falhou ao abrir câmera 0 diretamente")
-                except Exception as e:
-                    self.get_logger().error(f"Erro OpenCV: {str(e)}")
+                    video_devices = subprocess.run(
+                        "ls -la /dev/video*", 
+                        shell=True, 
+                        stdout=subprocess.PIPE
+                    )
+                    if video_devices.returncode == 0:
+                        self.get_logger().info(f"Dispositivos de vídeo disponíveis:\n{video_devices.stdout.decode()}")
+                except Exception:
+                    pass
                 
                 return False
                 
@@ -396,6 +526,53 @@ class IMX219CameraNode(Node):
             cv2.destroyAllWindows()
         
         super().destroy_node()
+
+    def check_nvargus_daemon(self):
+        """Verifica se o daemon nvargus está rodando no sistema host."""
+        try:
+            self.get_logger().info("Verificando status do daemon nvargus...")
+            
+            # Verificar se o daemon está rodando
+            daemon_check = subprocess.run(
+                "ps aux | grep nvargus-daemon | grep -v grep", 
+                shell=True, 
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            if daemon_check.returncode == 0:
+                daemon_info = daemon_check.stdout.decode()
+                self.get_logger().info(f"Daemon nvargus está rodando: {daemon_info.strip()}")
+                return True
+            else:
+                self.get_logger().error("ERRO CRÍTICO: Daemon nvargus não encontrado no sistema!")
+                self.get_logger().error("O daemon nvargus-daemon precisa estar rodando no host para acessar a câmera CSI")
+                self.get_logger().error("Isso geralmente ocorre no sistema host, não no container")
+                return False
+                
+        except Exception as e:
+            self.get_logger().error(f"Erro ao verificar daemon nvargus: {str(e)}")
+            return False
+            
+    def check_socket_permissions(self):
+        """Verifica permissões do socket Argus."""
+        try:
+            socket_path = "/tmp/argus_socket"
+            
+            # Verificar se o diretório do socket existe
+            if not os.path.exists(socket_path):
+                self.get_logger().info(f"Criando diretório do socket: {socket_path}")
+                os.makedirs(socket_path, exist_ok=True)
+                
+            # Verificar permissões
+            subprocess.run(f"chmod 777 {socket_path}", shell=True)
+            
+            self.get_logger().info(f"Diretório do socket configurado: {socket_path}")
+            return True
+            
+        except Exception as e:
+            self.get_logger().error(f"Erro ao configurar socket Argus: {str(e)}")
+            return False
 
 def main(args=None):
     rclpy.init(args=args)
