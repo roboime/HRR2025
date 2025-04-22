@@ -358,7 +358,8 @@ class IMX219CameraNode(Node):
         try:
             # Tenta via systemctl (geralmente só funciona no host)
             status = subprocess.run(['systemctl', 'is-active', 'nvargus-daemon'],
-                                  capture_output=True, text=True, timeout=2)
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  text=True, timeout=2)
             if status.returncode == 0 and 'active' in status.stdout:
                 self.get_logger().info('Serviço nvargus-daemon está ativo (via systemctl - provavelmente no host).')
                 daemon_confirmed = True
@@ -367,14 +368,17 @@ class IMX219CameraNode(Node):
         except (FileNotFoundError, subprocess.TimeoutExpired) as e:
             self.get_logger().debug(f'systemctl não disponível ou demorou: {e}. Tentando pgrep.')
         except Exception as e:
-             self.get_logger().warn(f'Erro ao executar systemctl: {e}')
+            self.get_logger().warn(f'Erro ao executar systemctl: {e}')
 
         # Se systemctl falhou ou não confirmou, tenta pgrep (mais útil em container)
         if not daemon_confirmed:
              try:
                   # Procurar por processos com 'nvargus-daemon' no nome
-                  pgrep_check = subprocess.run(['pgrep', '-af', 'nvargus-daemon'], check=True, capture_output=True, text=True, timeout=2)
-                  self.get_logger().info(f"Processo(s) nvargus-daemon encontrado(s) via pgrep:\n{pgrep_check.stdout.strip()}")
+                  pgrep_check = subprocess.run(['pgrep', '-af', 'nvargus-daemon'],
+                                              check=True,
+                                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                              text=True, timeout=2)
+                  self.get_logger().info(f"Processo(s) nvargus-daemon encontrado(s) via pgrep:\\n{pgrep_check.stdout.strip()}")
                   daemon_confirmed = True
              except FileNotFoundError:
                   self.get_logger().warn("Comando 'pgrep' não encontrado.")
@@ -664,6 +668,7 @@ class IMX219CameraNode(Node):
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 preexec_fn=os.setsid if sys.platform != "win32" else None # Permite matar o grupo de processos
             )
+            # communicate() já lida com stdout/stderr=PIPE
             stdout, stderr = process.communicate(timeout=timeout)
             stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
             stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
@@ -684,6 +689,8 @@ class IMX219CameraNode(Node):
                       os.killpg(os.getpgid(process.pid), signal.SIGKILL)
                  else: # Fallback para Windows ou se getpgid falhar
                       process.kill()
+                 # Esperar um pouco após matar
+                 process.wait(timeout=1)
             except Exception as kill_error:
                 self.get_logger().error(f"Erro ao matar processo {process.pid}: {kill_error}")
             return False, "", "Timeout expirado"
