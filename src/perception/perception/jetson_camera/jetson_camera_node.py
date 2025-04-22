@@ -339,18 +339,6 @@ class IMX219CameraNode(Node):
                 # Verificar CV2 info
                 self.get_logger().info(f"OpenCV version: {cv2.__version__}")
                 
-                # Verificar dispositivos de vídeo disponíveis
-                try:
-                    video_devices = subprocess.run(
-                        "ls -la /dev/video*", 
-                        shell=True, 
-                        stdout=subprocess.PIPE
-                    )
-                    if video_devices.returncode == 0:
-                        self.get_logger().info(f"Dispositivos de vídeo disponíveis:\n{video_devices.stdout.decode()}")
-                except Exception:
-                    pass
-                
                 return False
                 
         except subprocess.TimeoutExpired:
