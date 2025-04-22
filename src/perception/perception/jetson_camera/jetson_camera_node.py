@@ -1181,6 +1181,7 @@ class IMX219CameraNode(Node):
                 processed_frame = cv2.bilateralFilter(processed_frame, 5, 75, 75)
             
             if self.get_parameter('enable_edge_enhancement').value:
+           
                 # Aplicar sharpen
                 kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], np.float32)
                 processed_frame = cv2.filter2D(processed_frame, -1, kernel)
