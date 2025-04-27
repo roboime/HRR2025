@@ -24,7 +24,7 @@ else
     # Cria um novo container com nome específico
     echo "Criando novo container..."
     docker run -it \
-      --name hsl-container \
+      --name hsl-docker \
       --runtime nvidia \
       --privileged \
       --gpus all \
