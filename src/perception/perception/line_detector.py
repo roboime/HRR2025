@@ -119,12 +119,13 @@ class LineDetector(Node):
         except Exception as e:
             self.get_logger().error(f'Erro no processamento da imagem: {str(e)}')
     
-    def detect_lines(self, image):
+    def detect_lines(self, image, field_mask=None):
         """
         Detecta as linhas do campo na imagem.
         
         Args:
             image: Imagem OpenCV no formato BGR
+            field_mask: Máscara opcional do campo (padrão: None)
             
         Returns:
             tuple: (imagem_linhas, imagem_debug)
@@ -140,8 +141,16 @@ class LineDetector(Node):
         # Aplicar threshold para destacar as linhas brancas
         _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
         
-        # Se estiver usando a máscara do campo, aplicá-la
-        if self.use_field_mask and self.field_mask is not None:
+        # Se estiver usando a máscara do campo fornecida, aplicá-la
+        if field_mask is not None:
+            # Redimensionar a máscara se necessário
+            if binary.shape != field_mask.shape:
+                field_mask = cv2.resize(field_mask, (binary.shape[1], binary.shape[0]))
+            
+            # Aplicar a máscara
+            binary = cv2.bitwise_and(binary, field_mask)
+        # Se estiver usando a máscara do campo (a fornecida pelo nó), aplicá-la
+        elif self.use_field_mask and self.field_mask is not None:
             # Redimensionar a máscara se necessário
             if binary.shape != self.field_mask.shape:
                 self.field_mask = cv2.resize(self.field_mask, (binary.shape[1], binary.shape[0]))

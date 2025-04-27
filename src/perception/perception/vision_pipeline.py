@@ -535,9 +535,9 @@ class VisionPipeline(Node):
                     
                     # Processar com detectores tradicionais
                     if use_traditional:
-                        self.get_logger().info('Iniciando processamento com detectores tradicionais')
+                        self.get_logger().debug('Iniciando processamento com detectores tradicionais')
                         traditional_results = self._process_with_traditional(cv_image, debug_image)
-                        self.get_logger().info('Detectores tradicionais processados com sucesso')
+                        self.get_logger().debug('Detectores tradicionais processados com sucesso')
                     
                     # Combinar resultados baseado na configuração de preferência para cada objeto
                     results = self._select_best_results(yoeo_results, traditional_results)
@@ -577,7 +577,7 @@ class VisionPipeline(Node):
                     import traceback
                     self.get_logger().error(traceback.format_exc())
             else:
-                self.get_logger().warn('Nenhuma imagem disponível para processamento')
+                self.get_logger().debug('Nenhuma imagem disponível para processamento')
             
             # Controlar a taxa de processamento
             elapsed = time.time() - start_time
@@ -717,18 +717,12 @@ class VisionPipeline(Node):
         # Detectar campo
         if self.enable_field_detection and self.field_detector:
             try:
-                self.get_logger().info('Executando detector de campo tradicional')
-                
                 # Detectar o campo
                 field_mask, field_boundary, field_debug = self.field_detector.detect_field(image)
                 
                 # Adicionar resultados
                 results['field_mask'] = field_mask
                 results['field_boundary'] = field_boundary
-                
-                # Desenhar na imagem de debug
-                cv2.putText(debug_image, "Campo Detectado", (10, 90),
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 
                 # Encontrar e desenhar contornos do campo diretamente na imagem
                 contours, _ = cv2.findContours(field_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -756,17 +750,12 @@ class VisionPipeline(Node):
                 # Sobrepor com transparência
                 cv2.addWeighted(color_mask, 0.3, overlay, 0.7, 0, debug_image)
                 
-                self.get_logger().info('Campo detectado com sucesso')
             except Exception as e:
                 self.get_logger().error(f'Erro no detector de campo: {str(e)}')
-                cv2.putText(debug_image, f"Erro campo: {str(e)}", (10, 120),
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-        
+                
         # Detectar bola
         if self.enable_ball_detection and self.ball_detector:
             try:
-                self.get_logger().info('Executando detector de bola tradicional')
-                
                 ball_detected, ball_position, ball_radius, ball_debug = self.ball_detector.detect_ball(image)
                 if ball_detected:
                     # Criar mensagem Pose2D com a posição da bola
@@ -775,8 +764,6 @@ class VisionPipeline(Node):
                     ball_pose.y = float(ball_position[1])
                     ball_pose.theta = float(ball_radius)  # Usar theta para o raio
                     results['ball'] = ball_pose
-                    
-                    self.get_logger().info(f'Bola detectada em ({ball_position[0]}, {ball_position[1]}) com raio {ball_radius}')
                 
                 # Sobrepor o debug da bola na imagem de debug geral
                 if ball_debug is not None:
@@ -785,23 +772,21 @@ class VisionPipeline(Node):
                     debug_image[mask] = ball_debug[mask]
             except Exception as e:
                 self.get_logger().error(f'Erro no detector de bola: {str(e)}')
-                cv2.putText(debug_image, f"Erro bola: {str(e)}", (10, 150),
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-        
+                
         # Detectar linhas
         if self.enable_line_detection and self.line_detector:
             try:
-                self.get_logger().info('Executando detector de linhas tradicional')
-                
-                # Passar a máscara do campo como parâmetro opcional
+                # Agora passamos a máscara do campo para melhorar a detecção
                 field_mask_param = field_mask if 'field_mask' in results else None
                 
-                # Detectar linhas
-                lines_detected, lines_image, lines_debug = self.line_detector.detect_lines(image, field_mask_param)
+                # Detectar linhas agora com a máscara do campo
+                lines_image, lines_debug = self.line_detector.detect_lines(image, field_mask_param)
+                
+                # Adicionar flag para indicar que linhas foram encontradas
+                lines_detected = lines_image is not None and np.sum(lines_image) > 0
                 
                 if lines_detected:
                     results['lines'] = lines_image
-                    self.get_logger().info('Linhas detectadas com sucesso')
                 
                 # Sobrepor o debug das linhas na imagem de debug geral
                 if lines_debug is not None:
@@ -810,19 +795,12 @@ class VisionPipeline(Node):
                     debug_image[mask] = lines_debug[mask]
             except Exception as e:
                 self.get_logger().error(f'Erro no detector de linhas: {str(e)}')
-                cv2.putText(debug_image, f"Erro linhas: {str(e)}", (10, 180),
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-        
+                
         # Detectar gols
         if self.enable_goal_detection and self.goal_detector:
             try:
-                self.get_logger().info('Executando detector de gols tradicional')
-                
-                # Passar a máscara do campo como parâmetro opcional
-                field_mask_param = field_mask if 'field_mask' in results else None
-                
-                # Detectar gols
-                goals_detected, goal_posts, goals_debug = self.goal_detector.detect_goals(image, field_mask_param)
+                # Não vamos passar a máscara do campo para evitar o mesmo erro
+                goals_detected, goal_posts, goals_debug = self.goal_detector.detect_goals(image)
                 
                 if goals_detected:
                     # Criar PoseArray com as posições dos postes do gol
@@ -836,7 +814,6 @@ class VisionPipeline(Node):
                         pose_array.poses.append(pose)
                     
                     results['goals'] = pose_array
-                    self.get_logger().info(f'Gols detectados: {len(goal_posts)} postes')
                 
                 # Sobrepor o debug dos gols na imagem de debug geral
                 if goals_debug is not None:
@@ -845,19 +822,12 @@ class VisionPipeline(Node):
                     debug_image[mask] = goals_debug[mask]
             except Exception as e:
                 self.get_logger().error(f'Erro no detector de gols: {str(e)}')
-                cv2.putText(debug_image, f"Erro gols: {str(e)}", (10, 210),
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-        
+                
         # Detectar obstáculos
         if self.enable_obstacle_detection and self.obstacle_detector:
             try:
-                self.get_logger().info('Executando detector de obstáculos tradicional')
-                
-                # Passar a máscara do campo como parâmetro opcional
-                field_mask_param = field_mask if 'field_mask' in results else None
-                
-                # Detectar obstáculos
-                obstacles_detected, obstacles, obstacles_debug = self.obstacle_detector.detect_obstacles(image, field_mask_param)
+                # Não vamos passar a máscara do campo para evitar o mesmo erro
+                obstacles_detected, obstacles, obstacles_debug = self.obstacle_detector.detect_obstacles(image)
                 
                 if obstacles_detected:
                     # Criar PoseArray com as posições dos obstáculos
@@ -871,7 +841,6 @@ class VisionPipeline(Node):
                         pose_array.poses.append(pose)
                     
                     results['robots'] = pose_array
-                    self.get_logger().info(f'Obstáculos detectados: {len(obstacles)}')
                 
                 # Sobrepor o debug dos obstáculos na imagem de debug geral
                 if obstacles_debug is not None:
@@ -880,9 +849,7 @@ class VisionPipeline(Node):
                     debug_image[mask] = obstacles_debug[mask]
             except Exception as e:
                 self.get_logger().error(f'Erro no detector de obstáculos: {str(e)}')
-                cv2.putText(debug_image, f"Erro obstáculos: {str(e)}", (10, 240),
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-        
+                
         # Marcador de uso dos detectores tradicionais
         cv2.putText(debug_image, "Detector Tradicional", (debug_image.shape[1] - 250, 90),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
