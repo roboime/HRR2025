@@ -26,7 +26,9 @@ class IMX219CameraNode(Node):
 
     def __init__(self):
         super().__init__('jetson_camera_node')
-        self.get_logger().info(f"OpenCV Build Info:\n{cv2.getBuildInformation()}")
+        # Remover a impressão das informações de build do OpenCV
+        # self.get_logger().info(f"OpenCV Build Info:\n{cv2.getBuildInformation()}")
+        self.get_logger().info(f"Usando OpenCV versão: {cv2.__version__}")
         
         # Declarar parâmetros essenciais da câmera
         self.declare_parameters(
