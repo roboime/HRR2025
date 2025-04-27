@@ -43,6 +43,6 @@ else
       -v /usr/local/cuda:/usr/local/cuda \
       --device /dev/video0 \
       $JETSON_DEVICES \
-      hsl:latest \
+      hsl:opencv \
       /bin/bash
 fi

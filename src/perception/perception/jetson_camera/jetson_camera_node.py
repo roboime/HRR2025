@@ -217,34 +217,32 @@ class IMX219CameraNode(Node):
 
 
     def _build_gstreamer_pipeline(self):
-        """Constrói a string do pipeline GStreamer CSI com base nos parâmetros.
-        AGORA REPLICANDO O TESTE MANUAL FUNCIONAL (320x240 @ 15fps).
-        """
+        """Constrói a string do pipeline GStreamer CSI com base nos parâmetros."""
         try:
-            # Parâmetros do teste manual que funcionou
+            # Parâmetros baseados no pipeline funcional
             test_width = 320
             test_height = 240
             test_fps_num = 15
             test_fps_den = 1
-            sensor_id = self.get_parameter('device_id').value # Manter o sensor_id
+            sensor_id = self.get_parameter('device_id').value
 
-            # Pipeline baseado no teste manual
+            # Pipeline mais simples e similar ao que funciona no terminal
             pipeline = (
                 f"nvarguscamerasrc sensor-id={sensor_id} do-timestamp=true "
                 f"! video/x-raw(memory:NVMM), width={test_width}, height={test_height}, "
                 f"format=NV12, framerate={test_fps_num}/{test_fps_den} "
-                f"! nvvidconv " # Sem flip_method
+                f"! nvvidconv "
                 f"! video/x-raw, format=BGRx "
                 f"! videoconvert "
-                f"! video/x-raw, format=BGR " # Formato final para OpenCV
-                f"! appsink max-buffers=1 drop=true sync=false name=sink emit-signals=true" # Usar appsink, sync=false como no teste, max-buffers=1 pode ajudar
+                f"! video/x-raw, format=BGR "
+                f"! appsink"  # Simplificado, sem opções adicionais
             )
 
-            self.get_logger().info(f"Pipeline GStreamer Construído (Teste Manual): {pipeline}")
+            self.get_logger().info(f"Pipeline GStreamer Construído: {pipeline}")
             return pipeline
 
         except Exception as e:
-            self.get_logger().error(f"Erro interno ao construir pipeline GStreamer (Teste Manual): {str(e)}")
+            self.get_logger().error(f"Erro ao construir pipeline GStreamer: {str(e)}")
             traceback.print_exc()
             return None
 

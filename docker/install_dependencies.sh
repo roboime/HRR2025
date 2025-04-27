@@ -85,10 +85,129 @@ install_if_needed "NumPy" "numpy" "1.16.0" "python3 -m pip install --no-deps num
 install_if_needed "SciPy" "scipy" "1.4.0" "python3 -m pip install --no-deps scipy==1.5.4"
 install_if_needed "Matplotlib" "matplotlib" "3.2.0" "python3 -m pip install --no-deps matplotlib==3.3.4"
 install_if_needed "h5py" "h5py" "2.10.0" "python3 -m pip install --no-deps h5py==2.10.0"
-install_if_needed "OpenCV" "cv2" "4.0.0" "python3 -m pip install --no-deps opencv-python==4.5.3.56"
 install_if_needed "Pillow" "PIL" "7.0.0" "python3 -m pip install --no-deps pillow==8.3.2"
 install_if_needed "PyYAML" "yaml" "5.1" "python3 -m pip install --no-deps pyyaml==5.4.1"
 install_if_needed "Protobuf" "google.protobuf" "3.10.0" "python3 -m pip install --no-deps protobuf==3.17.3"
+
+# --- Seção de Instalação do OpenCV ---
+echo -e "${AZUL}Instalando OpenCV com GStreamer no Jetson Nano (JetPack 4.6)...${SEM_COR}"
+echo -e "${AMARELO}Este processo pode demorar mais de uma hora!${SEM_COR}"
+
+# Criar script temporário de instalação do OpenCV
+cat > /tmp/install_opencv_jetson.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "=== Instalação do OpenCV com GStreamer no Jetson Nano (JetPack 4.6) ==="
+
+# 1. Instalar dependências via apt
+echo "[1/5] Instalando pacotes de dependência..."
+sudo apt-get update 
+sudo apt-get install -y build-essential cmake git unzip pkg-config gfortran
+sudo apt-get install -y libjpeg-dev libpng-dev libtiff-dev zlib1g-dev
+sudo apt-get install -y libgtk-3-dev libcanberra-gtk*  # GTK para HighGUI (ignorar avisos de '*' no pacote)
+sudo apt-get install -y libv4l-dev v4l-utils 
+sudo apt-get install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-good1.0-dev gstreamer1.0-tools
+sudo apt-get install -y libavcodec-dev libavformat-dev libswscale-dev libavresample-dev
+sudo apt-get install -y libx264-dev libxvidcore-dev libvorbis-dev libfaac-dev libmp3lame-dev libtheora-dev
+sudo apt-get install -y libopencore-amrnb-dev libopencore-amrwb-dev
+sudo apt-get install -y libtbb-dev libeigen3-dev libatlas-base-dev libopenblas-dev liblapack-dev liblapacke-dev
+sudo apt-get install -y libhdf5-dev libprotobuf-dev protobuf-compiler libgoogle-glog-dev libgflags-dev
+sudo apt-get install -y python3-dev python3-numpy python3-pip
+
+# (Opcional) Remover OpenCV pré-existente para evitar conflitos
+# sudo apt-get purge -y python3-opencv libopencv* 
+
+# 2. Configurar swap de 4GB (se já não existir)
+echo "[2/5] Verificando swap..."
+SWAPFILE="/swapfile"
+if [ ! -f $SWAPFILE ]; then
+  echo "Criando swapfile de 4GB em $SWAPFILE..."
+  sudo fallocate -l 4G $SWAPFILE 
+  sudo chmod 600 $SWAPFILE 
+  sudo mkswap $SWAPFILE 
+  sudo swapon $SWAPFILE 
+fi
+echo "Swap atual:"
+free -h
+
+# 3. Baixar código-fonte do OpenCV e opencv_contrib
+echo "[3/5] Baixando OpenCV 4.6.0 e opencv_contrib..."
+cd ~
+wget -O opencv.zip https://github.com/opencv/opencv/archive/4.6.0.zip 
+wget -O opencv_contrib.zip https://github.com/opencv/opencv_contrib/archive/4.6.0.zip 
+unzip -q opencv.zip && unzip -q opencv_contrib.zip
+mv opencv-4.6.0 opencv && mv opencv_contrib-4.6.0 opencv_contrib
+rm opencv.zip opencv_contrib.zip
+
+# 4. Configurar e compilar o OpenCV
+echo "[4/5] Configurando build do OpenCV via CMake..."
+cd ~/opencv
+mkdir build && cd build
+cmake -D CMAKE_BUILD_TYPE=Release \
+      -D CMAKE_INSTALL_PREFIX=/usr \
+      -D OPENCV_EXTRA_MODULES_PATH=~/opencv_contrib/modules \
+      -D WITH_GSTREAMER=ON -D WITH_FFMPEG=ON \
+      -D WITH_V4L=ON -D WITH_LIBV4L=ON \
+      -D WITH_CUDA=ON -D WITH_CUDNN=ON -D WITH_CUBLAS=ON \
+      -D CUDA_ARCH_BIN="5.3" -D CUDA_ARCH_PTX="" \
+      -D ENABLE_FAST_MATH=ON -D CUDA_FAST_MATH=ON -D ENABLE_NEON=ON \
+      -D WITH_QT=OFF -D WITH_OPENGL=ON -D WITH_OPENMP=ON \
+      -D WITH_TBB=ON -D BUILD_TBB=ON \
+      -D BUILD_TESTS=OFF -D BUILD_EXAMPLES=OFF \
+      -D BUILD_opencv_python2=OFF -D BUILD_opencv_python3=ON \
+      -D PYTHON3_PACKAGES_PATH=/usr/lib/python3/dist-packages \
+      -D OPENCV_ENABLE_NONFREE=ON \
+      -D OPENCV_GENERATE_PKGCONFIG=ON .. 
+
+echo "[4/5] Compilando OpenCV... isso pode demorar ~1 hora ou mais."
+make -j4
+
+echo "[5/5] Instalando OpenCV no sistema..."
+sudo make install
+sudo ldconfig
+
+echo ">>> OpenCV 4.6.0 instalado com sucesso. Verificando suporte ao GStreamer..."
+python3 -c "import cv2; info=cv2.getBuildInformation(); print(info[info.find('GStreamer'):info.find('GStreamer')+30])"
+echo "Concluído!"
+EOF
+
+# Tornar o script executável
+chmod +x /tmp/install_opencv_jetson.sh
+
+# Executar o script
+echo -e "${VERDE}Executando script de instalação do OpenCV...${SEM_COR}"
+/tmp/install_opencv_jetson.sh || {
+    echo -e "${VERMELHO}Falha durante a instalação do OpenCV!${SEM_COR}"
+    exit 1
+}
+
+# Configuração para garantir que o OpenCV instalado seja usado pelo colcon
+echo -e "${VERDE}Configurando OpenCV para ser usado pelo colcon...${SEM_COR}"
+# Criar/atualizar arquivo de configuração pkg-config
+cat > /usr/local/lib/pkgconfig/opencv4.pc << EOF
+# Package Information for pkg-config
+
+prefix=/usr
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include/opencv4
+
+Name: OpenCV
+Description: Open Source Computer Vision Library
+Version: 4.6.0
+Libs: -L\${libdir} -lopencv_dnn -lopencv_gapi -lopencv_highgui -lopencv_ml -lopencv_objdetect -lopencv_photo -lopencv_stitching -lopencv_video -lopencv_calib3d -lopencv_features2d -lopencv_flann -lopencv_videoio -lopencv_imgcodecs -lopencv_imgproc -lopencv_core
+Libs.private: -ldl -lm -lpthread -lrt
+Cflags: -I\${includedir}
+EOF
+
+# Garantir que o pkg-config encontre o OpenCV instalado
+export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
+echo "export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:\$PKG_CONFIG_PATH" >> ~/.bashrc
+echo "export LD_LIBRARY_PATH=/usr/lib:\$LD_LIBRARY_PATH" >> ~/.bashrc
+
+echo -e "${VERDE}Instalação do OpenCV concluída. Configurado para ser usado como principal durante compilação colcon.${SEM_COR}"
+# --- Fim da Seção de Instalação do OpenCV ---
 
 # Modificação para o TensorFlow
 echo -e "${AMARELO}Instalando TensorFlow compatível com Jetson...${SEM_COR}"
@@ -122,7 +241,7 @@ if ! python3 -c "import tensorflow" 2>/dev/null; then
         libcudnn8
         
     #Instalação de plugins gstreamer
-    sudo apt-get update && sudo apt-get install -y \
+    apt-get update && apt-get install -y \
     gstreamer1.0-tools \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
@@ -132,7 +251,12 @@ if ! python3 -c "import tensorflow" 2>/dev/null; then
     gstreamer1.0-x \
     libgstreamer1.0-dev \
 
-
+    apt-get update && apt-get install -y \
+        libgstreamer1.0-0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+        gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+        libgstreamer-plugins-base1.0-dev libjpeg-dev libpng-dev libtiff-dev \
+        libavcodec-dev libavformat-dev libswscale-dev libgtk2.0-dev \
+        libcanberra-gtk-module libv4l-dev libxvidcore-dev libx264-dev
     
     # Configurar variáveis de ambiente para CUDA
     export CUDA_HOME=/usr/local/cuda-10.2
@@ -196,4 +320,5 @@ verify_package "Matplotlib" "matplotlib"
 verify_package "Pillow" "PIL"
 verify_package "PyYAML" "yaml"
 
-echo -e "${VERDE}Instalação concluída!${SEM_COR}" 
+echo -e "${VERDE}Instalação concluída!${SEM_COR}"
+echo -e "${AMARELO}ATENÇÃO: Como o OpenCV foi compilado do código-fonte, pode ser necessário reconstruir seu workspace ROS (colcon build) para que pacotes como cv_bridge utilizem a nova versão.${SEM_COR}" 
