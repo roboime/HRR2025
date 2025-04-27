@@ -408,6 +408,21 @@ class VisionPipeline(Node):
         # Apenas armazena a imagem mais recente para processamento na thread separada
         self.latest_image = msg
         self.latest_image_time = self.get_clock().now()
+        
+        # NOVO: Publicar a imagem diretamente no tópico de debug para teste
+        try:
+            cv_image = self.cv_bridge.imgmsg_to_cv2(msg, 'bgr8')
+            debug_image = cv_image.copy()
+            # Adicionar texto para identificar
+            cv2.putText(debug_image, "Imagem direta da camera", (10, 30),
+                      cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            # Publicar no tópico debug
+            debug_msg = self.cv_bridge.cv2_to_imgmsg(debug_image, 'bgr8')
+            debug_msg.header = msg.header
+            self.debug_image_pub.publish(debug_msg)
+            self.get_logger().info("Publicado diretamente no tópico de debug")
+        except Exception as e:
+            self.get_logger().error(f"Erro ao publicar diretamente: {str(e)}")
     
     def start_processing_thread(self):
         """Inicia a thread de processamento de imagens."""
