@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Verifica se já existe um container com o nome hsl-container
-CONTAINER_EXISTS=$(docker ps -a --filter "name=hsl-container" --format "{{.Names}}")
+CONTAINER_EXISTS=$(docker ps -a --filter "name=hsl-docker" --format "{{.Names}}")
 
 # Configuração para dispositivos Jetson
 JETSON_DEVICES=""
@@ -10,15 +10,15 @@ if [ -d "/dev/nvhost-ctrl" ] || [ -d "/dev/nvhost-gpu" ] || [ -d "/dev/nvmap" ];
     JETSON_DEVICES="--device /dev/nvhost-ctrl --device /dev/nvhost-ctrl-gpu --device /dev/nvhost-prof-gpu --device /dev/nvmap --device /dev/nvhost-gpu --device /dev/nvhost-as-gpu --device /dev/nvhost-vic"
 fi
 
-if [ "$CONTAINER_EXISTS" = "hsl-container" ]; then
+if [ "$CONTAINER_EXISTS" = "hsl-docker" ]; then
     # Se o container já existe mas não está rodando, inicia novamente
-    if [ "$(docker ps -q -f name=hsl-container)" = "" ]; then
+    if [ "$(docker ps -q -f name=hsl-docker)" = "" ]; then
         echo "Reiniciando container existente..."
-        docker start -i hsl-container
+        docker start -i hsl-docker
     else
         # Se já está rodando, apenas entra no container
         echo "Conectando ao container em execução..."
-        docker exec -it hsl-container bash
+        docker exec -it hsl-docker bash
     fi
 else
     # Cria um novo container com nome específico
