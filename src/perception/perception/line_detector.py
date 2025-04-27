@@ -179,14 +179,6 @@ class LineDetector(Node):
                 x1, y1, x2, y2 = line[0]
                 cv2.line(lines_image, (x1, y1), (x2, y2), 255, 2)
                 cv2.line(debug_image, (x1, y1), (x2, y2), (0, 0, 255), 2)
-            
-            # Adicionar informações na imagem de debug
-            cv2.putText(debug_image, f'Linhas: {len(lines)}', (10, 30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-        else:
-            # Adicionar informações na imagem de debug
-            cv2.putText(debug_image, 'Linhas não encontradas', (10, 30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         
         return lines_image, debug_image
 
