@@ -66,9 +66,11 @@ class FieldDetectorAdapter:
             parent_node: Nó pai para acesso aos parâmetros
         """
         self.node = parent_node
-        self.color_lower = np.array([35, 40, 40])  # HSV para verde (campo)
-        self.color_upper = np.array([85, 255, 255])
-        self.min_field_area_ratio = 0.1
+        # Valores de HSV mais amplos para detectar verde
+        self.color_lower = np.array([30, 20, 20])  # Valores mais baixos para pegar mais tons de verde
+        self.color_upper = np.array([90, 255, 255])  # Valores mais altos para incluir mais variações
+        # Reduzir o limiar de área mínima para facilitar a detecção
+        self.min_field_area_ratio = 0.05
         
     def detect_field(self, image):
         """
@@ -378,7 +380,8 @@ class VisionPipeline(Node):
     def _init_publishers(self):
         """Inicializa os publishers para os resultados."""
         # Publisher de debug
-        self.debug_image_pub = self.create_publisher(Image, 'vision_debug', 10)
+        self.debug_image_pub = self.create_publisher(Image, '/vision_debug', 10)
+        self.get_logger().info('Publisher de debug criado no tópico: /vision_debug')
         
         # Publishers para detectores tradicionais
         self.ball_position_pub = self.create_publisher(Pose2D, 'ball_position', 10)
@@ -428,6 +431,7 @@ class VisionPipeline(Node):
                 try:
                     # Converter ROS Image para OpenCV
                     cv_image = self.cv_bridge.imgmsg_to_cv2(self.latest_image, 'bgr8')
+                    self.get_logger().debug(f'Imagem convertida: {cv_image.shape}')
                     
                     # Criar imagem de debug
                     debug_image = cv_image.copy()
@@ -443,9 +447,12 @@ class VisionPipeline(Node):
                     # Processar com os detectores disponíveis
                     if use_yoeo:
                         yoeo_results = self._process_with_yoeo(cv_image, debug_image)
+                        self.get_logger().debug('YOEO processado')
                     
                     if use_traditional:
+                        self.get_logger().info('Processando com detectores tradicionais...')
                         traditional_results = self._process_with_traditional(cv_image, debug_image)
+                        self.get_logger().info('Detectores tradicionais processados')
                     
                     # Combinar resultados baseado na configuração de preferência para cada objeto
                     results = self._select_best_results(yoeo_results, traditional_results)
@@ -457,7 +464,7 @@ class VisionPipeline(Node):
                     if traditional_results:
                         detectors_used.append("Tradicional")
                     
-                    cv2.putText(debug_image, "Detectores: " + " + ".join(detectors_used), (10, 60),
+                    cv2.putText(debug_image, "Detectores: " + " + ".join(detectors_used), (10, 120),
                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                     
                     # Publicar resultados
@@ -467,12 +474,21 @@ class VisionPipeline(Node):
                     if self.debug_image:
                         # Adicionar informações de timestamp e FPS
                         fps = 1.0 / (time.time() - start_time) if (time.time() - start_time) > 0 else 0
-                        cv2.putText(debug_image, f"FPS: {fps:.1f}", (10, 30),
+                        cv2.putText(debug_image, f"FPS: {fps:.1f}", (cv_image.shape[1] - 150, 120),
                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                         
-                        debug_msg = self.cv_bridge.cv2_to_imgmsg(debug_image, 'bgr8')
-                        debug_msg.header = self.latest_image.header
-                        self.debug_image_pub.publish(debug_msg)
+                        try:
+                            # Garantir que a imagem de debug tem o formato correto
+                            if debug_image.dtype != np.uint8:
+                                self.get_logger().warn('Convertendo tipo da imagem para uint8')
+                                debug_image = debug_image.astype(np.uint8)
+                            
+                            debug_msg = self.cv_bridge.cv2_to_imgmsg(debug_image, 'bgr8')
+                            debug_msg.header = self.latest_image.header
+                            self.debug_image_pub.publish(debug_msg)
+                            self.get_logger().info(f'Imagem de debug publicada em /vision_debug: {debug_image.shape}')
+                        except Exception as e:
+                            self.get_logger().error(f'Erro ao publicar imagem de debug: {str(e)}')
                 
                 except Exception as e:
                     self.get_logger().error(f'Erro no processamento da imagem: {str(e)}')
@@ -593,7 +609,7 @@ class VisionPipeline(Node):
         success = True
         
         # Desenhar um marcador no debug para mostrar que o YOEO foi usado
-        cv2.putText(debug_image, "YOEO", (image.shape[1] - 100, 30),
+        cv2.putText(debug_image, "YOEO", (debug_image.shape[1] - 100, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
         
         return {'success': success}
@@ -612,20 +628,36 @@ class VisionPipeline(Node):
         # Resultados iniciais
         results = {'success': True}
         
+        # Adicionar informações iniciais na imagem de debug
+        cv2.putText(debug_image, "Pipeline Tradicional Ativo", (10, 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        
         # Detectar campo
         if self.enable_field_detection and self.field_detector:
             try:
+                self.get_logger().info('Executando detector de campo tradicional')
                 field_mask, field_boundary, field_debug = self.field_detector.detect_field(image)
                 results['field_mask'] = field_mask
                 results['field_boundary'] = field_boundary
                 
-                # Sobrepor o debug do campo na imagem de debug geral
-                if field_debug is not None:
-                    # Apenas copiar elementos não-zero da imagem de debug do campo
-                    mask = cv2.cvtColor(field_debug, cv2.COLOR_BGR2GRAY) > 0
-                    debug_image[mask] = field_debug[mask]
+                # Garantir que a imagem de debug do campo seja visível
+                cv2.putText(debug_image, "Campo: Processado", (10, 60),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                
+                # Desenhar o contorno do campo na imagem de debug original
+                contours, _ = cv2.findContours(field_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if contours:
+                    cv2.drawContours(debug_image, contours, -1, (0, 255, 0), 2)
+                else:
+                    cv2.putText(debug_image, "Nenhum contorno de campo encontrado", (10, 90),
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             except Exception as e:
                 self.get_logger().error(f'Erro no detector de campo: {str(e)}')
+                cv2.putText(debug_image, f"Erro campo: {str(e)}", (10, 90),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        else:
+            cv2.putText(debug_image, "Detector de campo desativado", (10, 60),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         
         # Detectar bola
         if self.enable_ball_detection and self.ball_detector:
@@ -694,8 +726,13 @@ class VisionPipeline(Node):
                 self.get_logger().error(f'Erro no detector de obstáculos: {str(e)}')
         
         # Desenhar um marcador no debug para mostrar que os detectores tradicionais foram usados
-        cv2.putText(debug_image, "Tradicional", (image.shape[1] - 150, 60),
+        cv2.putText(debug_image, "Tradicional", (debug_image.shape[1] - 150, 60),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        # Adicionar timestamp
+        current_time = time.strftime("%H:%M:%S", time.localtime())
+        cv2.putText(debug_image, f"Tempo: {current_time}", (debug_image.shape[1] - 150, 30),
+                  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         
         return results
 
