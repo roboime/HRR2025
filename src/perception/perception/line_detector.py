@@ -23,6 +23,8 @@ class LineDetector(Node):
         self.declare_parameter('line_color_lower', [200, 200, 200])  # BGR para branco (linhas)
         self.declare_parameter('line_color_upper', [255, 255, 255])
         self.declare_parameter('debug_image', True)
+        self.declare_parameter('clean_visualization', True)  # Novo parâmetro para visualização limpa
+        self.declare_parameter('line_color', [0, 255, 0])   # Cor das linhas (verde por padrão)
         self.declare_parameter('canny_threshold1', 25)  # Reduzido para detectar mais bordas
         self.declare_parameter('canny_threshold2', 75)  # Reduzido para detectar mais bordas
         self.declare_parameter('hough_threshold', 15)  # Reduzido para detectar mais linhas
@@ -43,6 +45,8 @@ class LineDetector(Node):
         self.line_color_lower = np.array(self.get_parameter('line_color_lower').value)
         self.line_color_upper = np.array(self.get_parameter('line_color_upper').value)
         self.debug_image = self.get_parameter('debug_image').value
+        self.clean_visualization = self.get_parameter('clean_visualization').value
+        self.line_color = tuple(self.get_parameter('line_color').value)  # BGR
         self.canny_threshold1 = self.get_parameter('canny_threshold1').value
         self.canny_threshold2 = self.get_parameter('canny_threshold2').value
         self.hough_threshold = self.get_parameter('hough_threshold').value
@@ -156,6 +160,7 @@ class LineDetector(Node):
         """
         # Criar cópia da imagem para debug
         debug_image = image.copy()
+        clean_debug_image = image.copy()
         
         # Aplicar suavização para reduzir ruído
         image_smooth = cv2.GaussianBlur(image, (5, 5), 0)
@@ -308,8 +313,20 @@ class LineDetector(Node):
             # Desenhar as linhas filtradas
             for line in filtered_lines:
                 x1, y1, x2, y2 = line[0]
+                
+                # Não calculamos mais o ângulo pois todas as linhas terão a mesma cor
+                
                 cv2.line(lines_image, (x1, y1), (x2, y2), 255, 2)
                 cv2.line(debug_image, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                # Desenhar linhas com a cor definida no parâmetro
+                cv2.line(clean_debug_image, (x1, y1), (x2, y2), self.line_color, 2)
+                
+                # Adicionar círculos nas extremidades das linhas para melhor visualização
+                if self.clean_visualization:
+                    # Círculo no início da linha
+                    cv2.circle(clean_debug_image, (x1, y1), 3, self.line_color, -1)
+                    # Círculo no fim da linha
+                    cv2.circle(clean_debug_image, (x2, y2), 3, self.line_color, -1)
         
         # Adicionar informações sobre os parâmetros na imagem de debug
         info_text = f"Linhas: {0 if lines is None else len(lines)} | ML:{self.min_line_length} MG:{self.max_line_gap} H:{self.hough_threshold}"
@@ -321,7 +338,17 @@ class LineDetector(Node):
         cv2.putText(debug_image, hsv_text, (10, debug_image.shape[0]-40), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
         
-        return lines_image, debug_image
+        # Usar a imagem limpa como imagem de debug se estiver no modo de visualização limpa
+        if self.clean_visualization:
+            # Adicionar informações mínimas sobre linhas detectadas na visualização limpa
+            if lines is not None:
+                lines_info = f"Linhas: {len(filtered_lines)}"
+                cv2.putText(clean_debug_image, lines_info, (10, clean_debug_image.shape[0]-10), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                cv2.putText(clean_debug_image, lines_info, (10, clean_debug_image.shape[0]-10), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+            
+        return lines_image, clean_debug_image if self.clean_visualization else debug_image
 
 def main(args=None):
     rclpy.init(args=args)
