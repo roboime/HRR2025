@@ -23,18 +23,21 @@ class LineDetector(Node):
         self.declare_parameter('line_color_lower', [200, 200, 200])  # BGR para branco (linhas)
         self.declare_parameter('line_color_upper', [255, 255, 255])
         self.declare_parameter('debug_image', True)
-        self.declare_parameter('canny_threshold1', 30)  # Valores mais baixos para melhor detecção
-        self.declare_parameter('canny_threshold2', 100)
-        self.declare_parameter('hough_threshold', 20)  # Reduzido para detectar linhas mais tênues
-        self.declare_parameter('min_line_length', 25)  # Reduzido para pegar linhas menores
-        self.declare_parameter('max_line_gap', 10)     # Mantido para não conectar objetos não relacionados
+        self.declare_parameter('canny_threshold1', 25)  # Reduzido para detectar mais bordas
+        self.declare_parameter('canny_threshold2', 75)  # Reduzido para detectar mais bordas
+        self.declare_parameter('hough_threshold', 15)  # Reduzido para detectar mais linhas
+        self.declare_parameter('min_line_length', 20)  # Reduzido para detectar linhas menores
+        self.declare_parameter('max_line_gap', 15)     # Aumentado para conectar segmentos próximos
         self.declare_parameter('use_field_mask', True)
-        self.declare_parameter('binary_threshold', 160)  # Reduzido para pegar mais áreas brancas
-        self.declare_parameter('use_adaptive_threshold', True)  # Uso de threshold adaptativo
-        self.declare_parameter('use_histogram_eq', True)  # Melhora do contraste
-        # Parâmetros para filtro de cor HSV para branco - valores menos restritivos
-        self.declare_parameter('white_hsv_lower', [0, 0, 150])  # Valor V reduzido para 150
-        self.declare_parameter('white_hsv_upper', [180, 40, 255])  # Saturação aumentada para 40
+        self.declare_parameter('binary_threshold', 140)  # Reduzido para pegar mais áreas brancas
+        self.declare_parameter('use_adaptive_threshold', True)
+        self.declare_parameter('use_histogram_eq', True)
+        self.declare_parameter('use_clahe', True)     # Novo: usar CLAHE para melhorar contraste local
+        # Parâmetros para filtro de cor HSV para branco - valores ainda menos restritivos
+        self.declare_parameter('white_hsv_lower', [0, 0, 130])  # Valor V reduzido para 130
+        self.declare_parameter('white_hsv_upper', [180, 60, 255])  # Saturação aumentada para 60
+        # Parâmetros para realce de linhas
+        self.declare_parameter('enhance_lines', True)  # Ativar realce de linhas
         
         # Obter parâmetros
         self.line_color_lower = np.array(self.get_parameter('line_color_lower').value)
@@ -49,8 +52,13 @@ class LineDetector(Node):
         self.binary_threshold = self.get_parameter('binary_threshold').value
         self.use_adaptive_threshold = self.get_parameter('use_adaptive_threshold').value
         self.use_histogram_eq = self.get_parameter('use_histogram_eq').value
+        self.use_clahe = self.get_parameter('use_clahe').value
         self.white_hsv_lower = np.array(self.get_parameter('white_hsv_lower').value)
         self.white_hsv_upper = np.array(self.get_parameter('white_hsv_upper').value)
+        self.enhance_lines = self.get_parameter('enhance_lines').value
+        
+        # Configurar CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         
         # Publishers
         self.lines_image_pub = self.create_publisher(Image, 'lines_image', 10)
@@ -149,31 +157,63 @@ class LineDetector(Node):
         # Criar cópia da imagem para debug
         debug_image = image.copy()
         
+        # Aplicar suavização para reduzir ruído
+        image_smooth = cv2.GaussianBlur(image, (5, 5), 0)
+        
         # Converter para escala de cinza para processamento
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(image_smooth, cv2.COLOR_BGR2GRAY)
+        
+        # Aplicar máscara do campo primeiro para focar apenas na região de interesse
+        if self.use_field_mask and self.field_mask is not None:
+            # Redimensionar a máscara se necessário
+            if gray.shape != self.field_mask.shape:
+                field_mask_resized = cv2.resize(self.field_mask, (gray.shape[1], gray.shape[0]))
+            else:
+                field_mask_resized = self.field_mask
+                
+            # Aplicar máscara à imagem cinza
+            gray_masked = cv2.bitwise_and(gray, field_mask_resized)
+        else:
+            gray_masked = gray
+        
+        # Realçar contraste na imagem cinza
+        if self.use_clahe:
+            # Usar CLAHE para melhorar o contraste local
+            gray_enhanced = self.clahe.apply(gray_masked)
+        elif self.use_histogram_eq:
+            # Usar equalização global de histograma
+            gray_enhanced = cv2.equalizeHist(gray_masked)
+        else:
+            gray_enhanced = gray_masked
+        
+        # Adicionar uma cópia da imagem realçada à imagem de debug
+        eq_debug = cv2.cvtColor(gray_enhanced, cv2.COLOR_GRAY2BGR)
+        smaller_debug = cv2.resize(eq_debug, (eq_debug.shape[1]//4, eq_debug.shape[0]//4))
+        h, w = smaller_debug.shape[:2]
+        debug_image[0:h, 0:w] = smaller_debug
+        cv2.putText(debug_image, "Enhanced", (10, h+15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         
         # Adicionar filtro HSV para detectar apenas cores brancas
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(image_smooth, cv2.COLOR_BGR2HSV)
         white_mask = cv2.inRange(hsv, self.white_hsv_lower, self.white_hsv_upper)
         
-        # Melhorar o contraste da imagem usando equalização de histograma
-        if self.use_histogram_eq:
-            gray = cv2.equalizeHist(gray)
-            # Adicionar uma cópia da equalização à imagem de debug
-            eq_debug = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-            smaller_debug = cv2.resize(eq_debug, (eq_debug.shape[1]//4, eq_debug.shape[0]//4))
-            h, w = smaller_debug.shape[:2]
-            debug_image[0:h, 0:w] = smaller_debug
-            cv2.putText(debug_image, "EQ", (10, h+15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        # Se melhoramento de linhas estiver ativado, aplicar realce de bordas
+        if self.enhance_lines:
+            # Kernel para realce de bordas
+            sharpen_kernel = np.array([[-1, -1, -1],
+                                     [-1,  9, -1],
+                                     [-1, -1, -1]])
+            # Aplicar kernel de realce
+            gray_enhanced = cv2.filter2D(gray_enhanced, -1, sharpen_kernel)
         
         # Aplicar threshold para destacar as linhas brancas
         if self.use_adaptive_threshold:
             # Usar um threshold adaptativo que se ajusta às variações de iluminação
-            binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            binary = cv2.adaptiveThreshold(gray_enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
                                          cv2.THRESH_BINARY, 11, 2)
         else:
             # Ou usar um threshold global, com valor ajustado
-            _, binary = cv2.threshold(gray, self.binary_threshold, 255, cv2.THRESH_BINARY)
+            _, binary = cv2.threshold(gray_enhanced, self.binary_threshold, 255, cv2.THRESH_BINARY)
         
         # Aplicar a máscara de cor branca para limitar a detecção apenas às áreas brancas
         binary = cv2.bitwise_and(binary, white_mask)
@@ -183,24 +223,17 @@ class LineDetector(Node):
         white_percentage = (white_pixel_count / (white_mask.shape[0] * white_mask.shape[1])) * 100
         self.get_logger().debug(f'Pixels brancos: {white_pixel_count} ({white_percentage:.2f}%)')
         
-        # Se estiver usando a máscara do campo fornecida, aplicá-la PRIMEIRO
-        if field_mask is not None:
+        # Se estiver usando a máscara do campo fornecida externamente, aplicá-la
+        if field_mask is not None and field_mask is not self.field_mask:
             # Redimensionar a máscara se necessário
             if binary.shape != field_mask.shape:
                 field_mask = cv2.resize(field_mask, (binary.shape[1], binary.shape[0]))
             
             # Aplicar a máscara
             binary = cv2.bitwise_and(binary, field_mask)
-        # Se estiver usando a máscara do campo (a fornecida pelo nó), aplicá-la
-        elif self.use_field_mask and self.field_mask is not None:
-            # Redimensionar a máscara se necessário
-            if binary.shape != self.field_mask.shape:
-                self.field_mask = cv2.resize(self.field_mask, (binary.shape[1], binary.shape[0]))
             
-            # Aplicar a máscara
-            binary = cv2.bitwise_and(binary, self.field_mask)
-            
-            # Debug para a máscara do campo
+        # Debug para a máscara do campo
+        if self.field_mask is not None:
             field_mask_sum = np.sum(self.field_mask > 0)
             self.get_logger().debug(f'Pixels na máscara do campo: {field_mask_sum}')
         
@@ -224,6 +257,9 @@ class LineDetector(Node):
         # Detectar bordas com Canny
         edges = cv2.Canny(binary, self.canny_threshold1, self.canny_threshold2)
         
+        # Dilatação das bordas para melhorar a detecção de linhas
+        edges = cv2.dilate(edges, kernel, iterations=1)
+        
         # Adicionar uma cópia das bordas à imagem de debug
         edges_debug = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
         smaller_edges = cv2.resize(edges_debug, (edges_debug.shape[1]//4, edges_debug.shape[0]//4))
@@ -241,20 +277,31 @@ class LineDetector(Node):
         
         # Desenhar as linhas detectadas
         if lines is not None:
-            self.get_logger().info(f"Encontradas {len(lines)} linhas brutas")
             
             # Filtrar as linhas para remover aquelas que não estão dentro do campo
             filtered_lines = []
             for line in lines:
                 x1, y1, x2, y2 = line[0]
                 
+                # Cálculo do comprimento da linha
+                line_length = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+                
                 # Verificar se os pontos da linha estão dentro da máscara do campo
                 if self.field_mask is not None:
                     h, w = self.field_mask.shape
                     if 0 <= x1 < w and 0 <= y1 < h and 0 <= x2 < w and 0 <= y2 < h:
-                        # Condição mais relaxada: apenas um dos pontos precisa estar na máscara
-                        if self.field_mask[y1, x1] > 0 or self.field_mask[y2, x2] > 0:
-                            filtered_lines.append(line)
+                        # Para linhas longas, aceitar se qualquer ponto estiver na máscara
+                        if line_length > 50:
+                            if self.field_mask[y1, x1] > 0 or self.field_mask[y2, x2] > 0:
+                                filtered_lines.append(line)
+                        # Para linhas mais curtas, verificar também pontos intermediários
+                        else:
+                            # Verificar o ponto médio da linha
+                            mid_x, mid_y = int((x1 + x2) / 2), int((y1 + y2) / 2)
+                            if 0 <= mid_x < w and 0 <= mid_y < h and self.field_mask[mid_y, mid_x] > 0:
+                                filtered_lines.append(line)
+                            elif self.field_mask[y1, x1] > 0 and self.field_mask[y2, x2] > 0:
+                                filtered_lines.append(line)
                 else:
                     filtered_lines.append(line)
             
@@ -263,10 +310,6 @@ class LineDetector(Node):
                 x1, y1, x2, y2 = line[0]
                 cv2.line(lines_image, (x1, y1), (x2, y2), 255, 2)
                 cv2.line(debug_image, (x1, y1), (x2, y2), (0, 0, 255), 2)
-            
-            self.get_logger().info(f"Detectadas {len(filtered_lines)} linhas de {len(lines)} originais")
-        else:
-            self.get_logger().warn("Nenhuma linha detectada")
         
         # Adicionar informações sobre os parâmetros na imagem de debug
         info_text = f"Linhas: {0 if lines is None else len(lines)} | ML:{self.min_line_length} MG:{self.max_line_gap} H:{self.hough_threshold}"
@@ -274,7 +317,7 @@ class LineDetector(Node):
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
         
         # Adicionar informações de HSV
-        hsv_text = f"HSV: V>{self.white_hsv_lower[2]}"
+        hsv_text = f"HSV: V>{self.white_hsv_lower[2]}, S<{self.white_hsv_upper[1]}"
         cv2.putText(debug_image, hsv_text, (10, debug_image.shape[0]-40), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
         
