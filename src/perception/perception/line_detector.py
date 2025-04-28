@@ -25,13 +25,16 @@ class LineDetector(Node):
         self.declare_parameter('debug_image', True)
         self.declare_parameter('canny_threshold1', 30)  # Valores mais baixos para melhor detecção
         self.declare_parameter('canny_threshold2', 100)
-        self.declare_parameter('hough_threshold', 25)  # Reduzido para detectar linhas mais tênues
-        self.declare_parameter('min_line_length', 20)  # Reduzido para pegar linhas menores
-        self.declare_parameter('max_line_gap', 15)     # Aumentado para conectar segmentos próximos
+        self.declare_parameter('hough_threshold', 30)  # Aumentado para maior confiança
+        self.declare_parameter('min_line_length', 35)  # Aumentado para evitar detecções espúrias
+        self.declare_parameter('max_line_gap', 10)     # Reduzido para não conectar objetos não relacionados
         self.declare_parameter('use_field_mask', True)
-        self.declare_parameter('binary_threshold', 160)  # Novo parâmetro com valor mais baixo para threshold
+        self.declare_parameter('binary_threshold', 180)  # Valor mais alto para enfatizar linhas brancas
         self.declare_parameter('use_adaptive_threshold', True)  # Novo parâmetro para usar threshold adaptativo
         self.declare_parameter('use_histogram_eq', True)  # Novo parâmetro para melhorar contraste
+        # Parâmetros para filtro de cor HSV para branco
+        self.declare_parameter('white_hsv_lower', [0, 0, 180])  # HSV para branco (linhas)
+        self.declare_parameter('white_hsv_upper', [180, 30, 255])
         
         # Obter parâmetros
         self.line_color_lower = np.array(self.get_parameter('line_color_lower').value)
@@ -46,6 +49,8 @@ class LineDetector(Node):
         self.binary_threshold = self.get_parameter('binary_threshold').value
         self.use_adaptive_threshold = self.get_parameter('use_adaptive_threshold').value
         self.use_histogram_eq = self.get_parameter('use_histogram_eq').value
+        self.white_hsv_lower = np.array(self.get_parameter('white_hsv_lower').value)
+        self.white_hsv_upper = np.array(self.get_parameter('white_hsv_upper').value)
         
         # Publishers
         self.lines_image_pub = self.create_publisher(Image, 'lines_image', 10)
@@ -141,8 +146,12 @@ class LineDetector(Node):
         # Criar cópia da imagem para debug
         debug_image = image.copy()
         
-        # Converter para escala de cinza
+        # Converter para escala de cinza para processamento
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        # Adicionar filtro HSV para detectar apenas cores brancas
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        white_mask = cv2.inRange(hsv, self.white_hsv_lower, self.white_hsv_upper)
         
         # Melhorar o contraste da imagem usando equalização de histograma
         if self.use_histogram_eq:
@@ -160,10 +169,13 @@ class LineDetector(Node):
             binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
                                          cv2.THRESH_BINARY, 11, 2)
         else:
-            # Ou usar um threshold global, mas com valor mais baixo
+            # Ou usar um threshold global, mas com valor mais alto para destacar branco
             _, binary = cv2.threshold(gray, self.binary_threshold, 255, cv2.THRESH_BINARY)
         
-        # Se estiver usando a máscara do campo fornecida, aplicá-la
+        # Aplicar a máscara de cor branca para limitar a detecção apenas às áreas brancas
+        binary = cv2.bitwise_and(binary, white_mask)
+        
+        # Se estiver usando a máscara do campo fornecida, aplicá-la PRIMEIRO
         if field_mask is not None:
             # Redimensionar a máscara se necessário
             if binary.shape != field_mask.shape:
@@ -213,17 +225,33 @@ class LineDetector(Node):
         
         # Desenhar as linhas detectadas
         if lines is not None:
+            # Filtrar as linhas para remover aquelas que não estão dentro do campo
+            filtered_lines = []
             for line in lines:
+                x1, y1, x2, y2 = line[0]
+                
+                # Verificar se os pontos da linha estão dentro da máscara do campo
+                if self.field_mask is not None:
+                    h, w = self.field_mask.shape
+                    if 0 <= x1 < w and 0 <= y1 < h and 0 <= x2 < w and 0 <= y2 < h:
+                        # Verificar se os pontos da linha estão em pixels brancos na máscara
+                        if self.field_mask[y1, x1] > 0 and self.field_mask[y2, x2] > 0:
+                            filtered_lines.append(line)
+                else:
+                    filtered_lines.append(line)
+            
+            # Desenhar as linhas filtradas
+            for line in filtered_lines:
                 x1, y1, x2, y2 = line[0]
                 cv2.line(lines_image, (x1, y1), (x2, y2), 255, 2)
                 cv2.line(debug_image, (x1, y1), (x2, y2), (0, 0, 255), 2)
             
-            self.get_logger().debug(f"Detectadas {len(lines)} linhas")
+            self.get_logger().debug(f"Detectadas {len(filtered_lines)} linhas de {len(lines)} originais")
         else:
             self.get_logger().warn("Nenhuma linha detectada")
         
         # Adicionar informações sobre os parâmetros na imagem de debug
-        info_text = f"T:{self.binary_threshold} C:{self.canny_threshold1}/{self.canny_threshold2} H:{self.hough_threshold}"
+        info_text = f"Linhas: {0 if lines is None else len(lines)} | ML:{self.min_line_length} MG:{self.max_line_gap} H:{self.hough_threshold}"
         cv2.putText(debug_image, info_text, (10, debug_image.shape[0]-10), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
         

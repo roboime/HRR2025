@@ -23,7 +23,7 @@ class FieldDetector(Node):
         self.declare_parameter('field_color_lower', [35, 80, 25])  # HSV para verde (campo)
         self.declare_parameter('field_color_upper', [65, 255, 255])
         self.declare_parameter('debug_image', True)
-        self.declare_parameter('min_field_area_ratio', 0.1)  # Área mínima do campo em relação à imagem
+        self.declare_parameter('min_field_area_ratio', 0.05)  # Reduzido para 5% da imagem
         
         # Obter parâmetros
         self.field_color_lower = np.array(self.get_parameter('field_color_lower').value)
@@ -119,7 +119,7 @@ class FieldDetector(Node):
         # Aplicar operações morfológicas para remover ruído
         kernel = np.ones((5, 5), np.uint8)
         mask = cv2.erode(mask, kernel, iterations=1)
-        mask = cv2.dilate(mask, kernel, iterations=2)
+        mask = cv2.dilate(mask, kernel, iterations=3)  # Aumentado para 3 para melhor preenchimento
         
         # Verificar se a área do campo é suficiente
         field_area_ratio = np.sum(mask > 0) / (mask.shape[0] * mask.shape[1])
@@ -140,6 +140,10 @@ class FieldDetector(Node):
             # Criar máscara apenas com o maior contorno
             field_mask = np.zeros_like(mask)
             cv2.drawContours(field_mask, [largest_contour], 0, 255, -1)
+            
+            # Suavizar a máscara para melhorar a detecção de linhas
+            field_mask = cv2.GaussianBlur(field_mask, (5, 5), 0)
+            _, field_mask = cv2.threshold(field_mask, 128, 255, cv2.THRESH_BINARY)
             
             # Criar imagem da fronteira do campo
             field_boundary = np.zeros_like(mask)
