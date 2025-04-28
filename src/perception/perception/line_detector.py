@@ -23,12 +23,15 @@ class LineDetector(Node):
         self.declare_parameter('line_color_lower', [200, 200, 200])  # BGR para branco (linhas)
         self.declare_parameter('line_color_upper', [255, 255, 255])
         self.declare_parameter('debug_image', True)
-        self.declare_parameter('canny_threshold1', 50)
-        self.declare_parameter('canny_threshold2', 150)
-        self.declare_parameter('hough_threshold', 50)
-        self.declare_parameter('min_line_length', 30)
-        self.declare_parameter('max_line_gap', 10)
+        self.declare_parameter('canny_threshold1', 30)  # Valores mais baixos para melhor detecção
+        self.declare_parameter('canny_threshold2', 100)
+        self.declare_parameter('hough_threshold', 25)  # Reduzido para detectar linhas mais tênues
+        self.declare_parameter('min_line_length', 20)  # Reduzido para pegar linhas menores
+        self.declare_parameter('max_line_gap', 15)     # Aumentado para conectar segmentos próximos
         self.declare_parameter('use_field_mask', True)
+        self.declare_parameter('binary_threshold', 160)  # Novo parâmetro com valor mais baixo para threshold
+        self.declare_parameter('use_adaptive_threshold', True)  # Novo parâmetro para usar threshold adaptativo
+        self.declare_parameter('use_histogram_eq', True)  # Novo parâmetro para melhorar contraste
         
         # Obter parâmetros
         self.line_color_lower = np.array(self.get_parameter('line_color_lower').value)
@@ -40,6 +43,9 @@ class LineDetector(Node):
         self.min_line_length = self.get_parameter('min_line_length').value
         self.max_line_gap = self.get_parameter('max_line_gap').value
         self.use_field_mask = self.get_parameter('use_field_mask').value
+        self.binary_threshold = self.get_parameter('binary_threshold').value
+        self.use_adaptive_threshold = self.get_parameter('use_adaptive_threshold').value
+        self.use_histogram_eq = self.get_parameter('use_histogram_eq').value
         
         # Publishers
         self.lines_image_pub = self.create_publisher(Image, 'lines_image', 10)
@@ -138,8 +144,24 @@ class LineDetector(Node):
         # Converter para escala de cinza
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         
+        # Melhorar o contraste da imagem usando equalização de histograma
+        if self.use_histogram_eq:
+            gray = cv2.equalizeHist(gray)
+            # Adicionar uma cópia da equalização à imagem de debug
+            eq_debug = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+            smaller_debug = cv2.resize(eq_debug, (eq_debug.shape[1]//4, eq_debug.shape[0]//4))
+            h, w = smaller_debug.shape[:2]
+            debug_image[0:h, 0:w] = smaller_debug
+            cv2.putText(debug_image, "EQ", (10, h+15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        
         # Aplicar threshold para destacar as linhas brancas
-        _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+        if self.use_adaptive_threshold:
+            # Usar um threshold adaptativo que se ajusta às variações de iluminação
+            binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                         cv2.THRESH_BINARY, 11, 2)
+        else:
+            # Ou usar um threshold global, mas com valor mais baixo
+            _, binary = cv2.threshold(gray, self.binary_threshold, 255, cv2.THRESH_BINARY)
         
         # Se estiver usando a máscara do campo fornecida, aplicá-la
         if field_mask is not None:
@@ -161,10 +183,26 @@ class LineDetector(Node):
         # Aplicar operações morfológicas para remover ruído
         kernel = np.ones((3, 3), np.uint8)
         binary = cv2.erode(binary, kernel, iterations=1)
-        binary = cv2.dilate(binary, kernel, iterations=1)
+        binary = cv2.dilate(binary, kernel, iterations=2)  # Aumentado para 2 para fechar pequenos espaços
+
+        # Adicionar uma cópia do resultado binário à imagem de debug
+        binary_debug = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+        smaller_binary = cv2.resize(binary_debug, (binary_debug.shape[1]//4, binary_debug.shape[0]//4))
+        h, w = smaller_binary.shape[:2]
+        x_offset = w  # Posicionar à direita da imagem equalizada
+        debug_image[0:h, x_offset:x_offset+w] = smaller_binary
+        cv2.putText(debug_image, "Binary", (x_offset+10, h+15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         
         # Detectar bordas com Canny
         edges = cv2.Canny(binary, self.canny_threshold1, self.canny_threshold2)
+        
+        # Adicionar uma cópia das bordas à imagem de debug
+        edges_debug = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+        smaller_edges = cv2.resize(edges_debug, (edges_debug.shape[1]//4, edges_debug.shape[0]//4))
+        h, w = smaller_edges.shape[:2]
+        x_offset = 2*w  # Posicionar à direita da imagem binária
+        debug_image[0:h, x_offset:x_offset+w] = smaller_edges
+        cv2.putText(debug_image, "Edges", (x_offset+10, h+15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         
         # Detectar linhas com transformada de Hough
         lines = cv2.HoughLinesP(edges, 1, np.pi/180, self.hough_threshold,
@@ -179,6 +217,15 @@ class LineDetector(Node):
                 x1, y1, x2, y2 = line[0]
                 cv2.line(lines_image, (x1, y1), (x2, y2), 255, 2)
                 cv2.line(debug_image, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            
+            self.get_logger().debug(f"Detectadas {len(lines)} linhas")
+        else:
+            self.get_logger().warn("Nenhuma linha detectada")
+        
+        # Adicionar informações sobre os parâmetros na imagem de debug
+        info_text = f"T:{self.binary_threshold} C:{self.canny_threshold1}/{self.canny_threshold2} H:{self.hough_threshold}"
+        cv2.putText(debug_image, info_text, (10, debug_image.shape[0]-10), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
         
         return lines_image, debug_image
 
