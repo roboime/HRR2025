@@ -24,66 +24,69 @@ import sys
 
 # Importar componentes YOEO se disponíveis
 try:
-    print("DEBUG: Tentando importar YOEO com import relativo (.yoeo)")
-    from .yoeo.yoeo_handler import YOEOHandler
-    from .yoeo.yoeo_model import YOEOModel
-    YOEO_AVAILABLE = True
-    print("DEBUG: Import relativo do YOEO bem-sucedido")
-except ImportError as e:
-    print(f"DEBUG: Falha no import relativo do YOEO: {str(e)}")
-    try:
-        # Tentativa alternativa se o import relativo falhar
-        print("DEBUG: Tentando importar YOEO com import absoluto (perception.yoeo)")
-        from perception.yoeo.yoeo_handler import YOEOHandler
-        from perception.yoeo.yoeo_model import YOEOModel
-        YOEO_AVAILABLE = True
-        print("DEBUG: Import absoluto do YOEO bem-sucedido")
-    except ImportError as e:
-        print(f"DEBUG: Falha no import absoluto do YOEO: {str(e)}")
+    # Abordagem direta que já mostrou funcionar
+    print("DEBUG: Importando YOEO diretamente dos arquivos")
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Verificar a existência dos arquivos
+    yoeo_handler_path = os.path.join(current_dir, 'yoeo', 'yoeo_handler.py')
+    yoeo_model_path = os.path.join(current_dir, 'yoeo', 'yoeo_model.py')
+    
+    print(f"DEBUG: Verificando existência dos arquivos:")
+    print(f"DEBUG: yoeo_handler.py existe: {os.path.exists(yoeo_handler_path)}")
+    print(f"DEBUG: yoeo_model.py existe: {os.path.exists(yoeo_model_path)}")
+    
+    # Função auxiliar para importar módulos a partir do caminho do arquivo
+    def import_from_file(module_name, file_path):
+        print(f"DEBUG: Tentando importar {module_name} de {file_path}")
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        if spec is None:
+            print(f"DEBUG: Especificação não encontrada para {file_path}")
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
         try:
-            # Tenta importar de forma direta como último recurso
-            print("DEBUG: Tentando importar YOEO diretamente do caminho do arquivo")
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            print(f"DEBUG: Diretório atual: {current_dir}")
-            
-            # Função auxiliar para importar módulos a partir do caminho do arquivo
-            if 'import_from_file' not in locals():
-                def import_from_file(module_name, file_path):
-                    print(f"DEBUG: Tentando importar {module_name} de {file_path}")
-                    spec = importlib.util.spec_from_file_location(module_name, file_path)
-                    if spec is None:
-                        print(f"DEBUG: Especificação não encontrada para {file_path}")
-                        return None
-                    module = importlib.util.module_from_spec(spec)
-                    sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+            print(f"DEBUG: Módulo {module_name} importado com sucesso")
+            return module
+        except ImportError as ie:
+            if 'SegmentationType' in str(ie):
+                print(f"DEBUG: Criando SegmentationType fake para resolver o problema")
+                # Criar um enum fake para SegmentationType
+                from enum import Enum
+                class SegmentationType(Enum):
+                    """Enumeração fake para segmentação."""
+                    FIELD = 0
+                    LINE = 1
+                # Injetar no módulo
+                setattr(module, 'SegmentationType', SegmentationType)
+                # Tentar novamente a execução do módulo
+                try:
                     spec.loader.exec_module(module)
-                    print(f"DEBUG: Módulo {module_name} importado com sucesso")
+                    print(f"DEBUG: Módulo {module_name} importado com sucesso após injetar SegmentationType")
                     return module
-            
-            # Importar os módulos YOEO diretamente
-            yoeo_handler_path = os.path.join(current_dir, 'yoeo', 'yoeo_handler.py')
-            yoeo_model_path = os.path.join(current_dir, 'yoeo', 'yoeo_model.py')
-            
-            print(f"DEBUG: Verificando existência dos arquivos:")
-            print(f"DEBUG: yoeo_handler.py existe: {os.path.exists(yoeo_handler_path)}")
-            print(f"DEBUG: yoeo_model.py existe: {os.path.exists(yoeo_model_path)}")
-            
-            yoeo_handler_module = import_from_file('yoeo_handler', yoeo_handler_path)
-            yoeo_model_module = import_from_file('yoeo_model', yoeo_model_path)
-            
-            if yoeo_handler_module and yoeo_model_module:
-                YOEOHandler = yoeo_handler_module.YOEOHandler
-                YOEOModel = yoeo_model_module.YOEOModel
-                YOEO_AVAILABLE = True
-                print("DEBUG: Módulos YOEO importados diretamente dos arquivos.")
-            else:
-                YOEO_AVAILABLE = False
-                print("AVISO: YOEO não está disponível. Usando apenas detectores tradicionais.")
-        except Exception as e:
-            YOEO_AVAILABLE = False
-            print(f"DEBUG: Erro ao importar YOEO diretamente: {str(e)}")
-            print(f"AVISO: YOEO não está disponível. Erro: {str(e)}")
-            print("Usando apenas detectores tradicionais.")
+                except Exception as e2:
+                    print(f"DEBUG: Erro após injetar SegmentationType: {str(e2)}")
+                    return None
+            print(f"DEBUG: Erro ao carregar módulo {module_name}: {str(ie)}")
+            return None
+    
+    # Importar os módulos YOEO diretamente
+    yoeo_handler_module = import_from_file('yoeo_handler', yoeo_handler_path)
+    yoeo_model_module = import_from_file('yoeo_model', yoeo_model_path)
+    
+    if yoeo_handler_module and yoeo_model_module:
+        YOEOHandler = yoeo_handler_module.YOEOHandler
+        YOEOModel = yoeo_model_module.YOEOModel
+        YOEO_AVAILABLE = True
+        print("DEBUG: Módulos YOEO importados com sucesso")
+    else:
+        YOEO_AVAILABLE = False
+        print("AVISO: YOEO não está disponível. Falha ao importar módulos.")
+except Exception as e:
+    YOEO_AVAILABLE = False
+    print(f"DEBUG: Erro ao importar YOEO: {str(e)}")
+    print("AVISO: YOEO não está disponível. Usando apenas detectores tradicionais.")
 
 # Importar detectores tradicionais
 try:
