@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-Nó ROS para detecção e segmentação usando o modelo YOEO.
+Nó ROS para detecção usando o modelo YOLOv4-Tiny.
 
-Este nó implementa a interface ROS para o sistema YOEO, recebendo imagens
-da câmera, processando-as com o modelo YOEO e publicando os resultados
-de detecção e segmentação.
+Este nó implementa a interface ROS para o sistema YOLOv4-Tiny, recebendo imagens
+da câmera, processando-as com o modelo YOLOv4-Tiny e publicando os resultados
+de detecção.
 """
 
 import os
@@ -22,19 +22,14 @@ from vision_msgs.msg import Detection2DArray, Detection2D, ObjectHypothesisWithP
 from geometry_msgs.msg import PoseWithCovariance, Pose
 from std_msgs.msg import Header
 
-from .yoeo_handler import YOEOHandler, DetectionType, SegmentationType
+from .yoeo_handler import YOEOHandler, DetectionType
 from .components.ball_component import BallDetectionComponent
-from .components.field_component import FieldSegmentationComponent
-from .components.line_component import LineSegmentationComponent
 from .components.goal_component import GoalDetectionComponent
 from .components.robot_component import RobotDetectionComponent
-from .components.referee_component import RefereeDetectionComponent
 
 # Opcionalmente, importe os detectores tradicionais para fallback
 try:
     from src.perception.src.ball_detector import BallDetector
-    from src.perception.src.field_detector import FieldDetector
-    from src.perception.src.line_detector import LineDetector
     from src.perception.src.goal_detector import GoalDetector
     from src.perception.src.obstacle_detector import ObstacleDetector
     TRADITIONAL_DETECTORS_AVAILABLE = True
@@ -44,18 +39,18 @@ except ImportError:
 
 class YOEODetector(Node):
     """
-    Nó ROS para detecção e segmentação usando o modelo YOEO.
+    Nó ROS para detecção usando o modelo YOLOv4-Tiny.
     
-    Este nó recebe imagens da câmera, processa-as com o modelo YOEO
-    e publica os resultados de detecção e segmentação.
+    Este nó recebe imagens da câmera, processa-as com o modelo YOLOv4-Tiny
+    e publica os resultados de detecção.
     """
     
     def __init__(self):
-        """Inicializa o nó detector YOEO."""
-        super().__init__('yoeo_detector')
+        """Inicializa o nó detector YOLOv4-Tiny."""
+        super().__init__('yolo_detector')
         
         # Declarar parâmetros
-        self.declare_parameter('model_path', 'src/perception/resource/models/yoeo_model.h5')
+        self.declare_parameter('model_path', 'src/perception/resource/models/yolov4_tiny.h5')
         self.declare_parameter('config_file', 'src/perception/config/vision_params.yaml')
         self.declare_parameter('input_width', 416)
         self.declare_parameter('input_height', 416)
@@ -66,11 +61,8 @@ class YOEODetector(Node):
         
         # Parâmetros para habilitar/desabilitar componentes
         self.declare_parameter('enable_ball_detection', True)
-        self.declare_parameter('enable_field_segmentation', True)
-        self.declare_parameter('enable_line_segmentation', True)
         self.declare_parameter('enable_goal_detection', True)
         self.declare_parameter('enable_robot_detection', True)
-        self.declare_parameter('enable_referee_detection', False)
         
         # Parâmetro para fallback para detectores tradicionais
         self.declare_parameter('fallback_to_traditional', True)
@@ -87,18 +79,15 @@ class YOEODetector(Node):
         
         # Flags para componentes
         self.enable_ball_detection = self.get_parameter('enable_ball_detection').value
-        self.enable_field_segmentation = self.get_parameter('enable_field_segmentation').value
-        self.enable_line_segmentation = self.get_parameter('enable_line_segmentation').value
         self.enable_goal_detection = self.get_parameter('enable_goal_detection').value
         self.enable_robot_detection = self.get_parameter('enable_robot_detection').value
-        self.enable_referee_detection = self.get_parameter('enable_referee_detection').value
         
         self.fallback_to_traditional = self.get_parameter('fallback_to_traditional').value and TRADITIONAL_DETECTORS_AVAILABLE
         
         # Carregar configuração
         self.config = self._load_config()
         
-        # Inicializar o manipulador YOEO
+        # Inicializar o manipulador YOLOv4-Tiny
         self.yoeo_handler = YOEOHandler(
             model_path=self.model_path,
             input_width=self.input_width,
@@ -140,7 +129,7 @@ class YOEODetector(Node):
         self.total_time = 0
         self.fps = 0
         
-        self.get_logger().info('Nó YOEO Detector inicializado')
+        self.get_logger().info('Nó YOLOv4-Tiny Detector inicializado')
     
     def _load_config(self):
         """Carrega o arquivo de configuração."""
@@ -154,7 +143,7 @@ class YOEODetector(Node):
             return {}
     
     def _init_components(self):
-        """Inicializa os componentes de detecção e segmentação."""
+        """Inicializa os componentes de detecção."""
         self.components = {}
         
         # Componente de detecção de bola
@@ -164,22 +153,6 @@ class YOEODetector(Node):
                 ball_diameter=self.config.get('ball', {}).get('diameter', 0.043)
             )
             self.get_logger().info('Componente de detecção de bola inicializado')
-        
-        # Componente de segmentação de campo
-        if self.enable_field_segmentation:
-            self.components['field'] = FieldSegmentationComponent(
-                yoeo_handler=self.yoeo_handler,
-                min_field_area_ratio=self.config.get('field', {}).get('min_area_ratio', 0.1)
-            )
-            self.get_logger().info('Componente de segmentação de campo inicializado')
-        
-        # Componente de segmentação de linhas
-        if self.enable_line_segmentation:
-            self.components['line'] = LineSegmentationComponent(
-                yoeo_handler=self.yoeo_handler,
-                field_component=self.components.get('field', None)
-            )
-            self.get_logger().info('Componente de segmentação de linhas inicializado')
         
         # Componente de detecção de gol
         if self.enable_goal_detection:
@@ -197,325 +170,289 @@ class YOEODetector(Node):
             )
             self.get_logger().info('Componente de detecção de robô inicializado')
         
-        # Componente de detecção de árbitro
-        if self.enable_referee_detection:
-            self.components['referee'] = RefereeDetectionComponent(
-                yoeo_handler=self.yoeo_handler
-            )
-            self.get_logger().info('Componente de detecção de árbitro inicializado')
-        
-        # Configurar detectores tradicionais para fallback se solicitado
+        # Configurar detectores tradicionais para fallback, se disponíveis
         if self.fallback_to_traditional:
             self.setup_traditional_detectors()
     
     def setup_traditional_detectors(self):
         """Configura detectores tradicionais para fallback."""
-        if not TRADITIONAL_DETECTORS_AVAILABLE:
-            self.get_logger().warn('Detectores tradicionais não disponíveis para fallback')
-            return
-        
-        # Ball detector
-        if self.enable_ball_detection and 'ball' in self.components:
-            traditional_ball_detector = BallDetector()
-            self.components['ball'].set_fallback_detector(traditional_ball_detector)
-            self.get_logger().info('Detector tradicional de bola configurado para fallback')
-        
-        # Field detector
-        if self.enable_field_segmentation and 'field' in self.components:
-            traditional_field_detector = FieldDetector()
-            self.components['field'].set_fallback_detector(traditional_field_detector)
-            self.get_logger().info('Detector tradicional de campo configurado para fallback')
-        
-        # Line detector
-        if self.enable_line_segmentation and 'line' in self.components:
-            traditional_line_detector = LineDetector()
-            self.components['line'].set_fallback_detector(traditional_line_detector)
-            self.get_logger().info('Detector tradicional de linhas configurado para fallback')
-        
-        # Goal detector
-        if self.enable_goal_detection and 'goal' in self.components:
-            traditional_goal_detector = GoalDetector()
-            self.components['goal'].set_fallback_detector(traditional_goal_detector)
-            self.get_logger().info('Detector tradicional de gols configurado para fallback')
-        
-        # Robot detector (usando ObstacleDetector)
-        if self.enable_robot_detection and 'robot' in self.components:
-            traditional_robot_detector = ObstacleDetector()
-            self.components['robot'].set_fallback_detector(traditional_robot_detector)
-            self.get_logger().info('Detector tradicional de robôs configurado para fallback')
+        try:
+            if 'ball' in self.components and TRADITIONAL_DETECTORS_AVAILABLE:
+                ball_detector = BallDetector()
+                self.components['ball'].set_fallback_detector(ball_detector)
+                self.get_logger().info('Detector tradicional de bola configurado como fallback')
+                
+            if 'goal' in self.components and TRADITIONAL_DETECTORS_AVAILABLE:
+                goal_detector = GoalDetector()
+                self.components['goal'].set_fallback_detector(goal_detector)
+                self.get_logger().info('Detector tradicional de gol configurado como fallback')
+                
+            if 'robot' in self.components and TRADITIONAL_DETECTORS_AVAILABLE:
+                robot_detector = ObstacleDetector()
+                self.components['robot'].set_fallback_detector(robot_detector)
+                self.get_logger().info('Detector tradicional de robô configurado como fallback')
+        except Exception as e:
+            self.get_logger().error(f'Erro ao configurar detectores tradicionais: {e}')
     
     def _init_publishers(self):
-        """Inicializa os publishers para os resultados de detecção e segmentação."""
-        self.publishers = {}
-        
+        """Inicializa os publishers ROS."""
         # Publishers para detecções
+        self.detection_publishers = {}
+        
         if self.enable_ball_detection:
-            self.publishers['ball'] = self.create_publisher(
+            self.detection_publishers[DetectionType.BALL] = self.create_publisher(
                 Detection2DArray,
-                'vision/ball/detections',
+                'vision/ball_detections',
                 10
             )
         
         if self.enable_goal_detection:
-            self.publishers['goal'] = self.create_publisher(
+            self.detection_publishers[DetectionType.GOAL] = self.create_publisher(
                 Detection2DArray,
-                'vision/goal/detections',
+                'vision/goal_detections',
                 10
             )
         
         if self.enable_robot_detection:
-            self.publishers['robot'] = self.create_publisher(
+            self.detection_publishers[DetectionType.ROBOT] = self.create_publisher(
                 Detection2DArray,
-                'vision/robot/detections',
-                10
-            )
-        
-        if self.enable_referee_detection:
-            self.publishers['referee'] = self.create_publisher(
-                Detection2DArray,
-                'vision/referee/detections',
-                10
-            )
-        
-        # Publishers para segmentações
-        if self.enable_field_segmentation:
-            self.publishers['field_mask'] = self.create_publisher(
-                Image,
-                'vision/field/mask',
-                10
-            )
-        
-        if self.enable_line_segmentation:
-            self.publishers['line_mask'] = self.create_publisher(
-                Image,
-                'vision/line/mask',
+                'vision/robot_detections',
                 10
             )
         
         # Publisher para imagem de debug
         if self.debug_image:
-            self.publishers['debug_image'] = self.create_publisher(
+            self.debug_publisher = self.create_publisher(
                 Image,
-                'vision/debug/image',
+                'vision/debug_image',
                 10
             )
     
     def camera_info_callback(self, msg):
-        """Callback para receber informações da câmera."""
+        """Callback para informações da câmera."""
         self.camera_info = msg
         
         # Atualizar informações da câmera nos componentes
-        for component_name, component in self.components.items():
+        for _, component in self.components.items():
             if hasattr(component, 'set_camera_info'):
-                component.set_camera_info(self.camera_info)
+                component.set_camera_info(msg)
     
     def image_callback(self, msg):
-        """Callback para processar imagens da câmera."""
-        start_time = time.time()
-        
+        """Callback para imagens da câmera."""
         try:
-            # Converter mensagem ROS para imagem OpenCV
+            # Converter a mensagem ROS para imagem OpenCV
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            
+            # Processar a imagem
+            start_time = time.time()
+            results = self._process_image(cv_image)
+            processing_time = time.time() - start_time
+            
+            # Atualizar estatísticas
+            self.frame_count += 1
+            self.total_time += processing_time
+            self.fps = self.frame_count / self.total_time
+            
+            # Publicar resultados
+            self._publish_results(results, msg.header)
+            
         except CvBridgeError as e:
-            self.get_logger().error(f'Erro na conversão da imagem: {e}')
-            return
-        
-        # Processar a imagem com o modelo YOEO
-        results = self._process_image(cv_image)
-        
-        # Publicar resultados
-        self._publish_results(results, msg.header)
-        
-        # Calcular FPS
-        self.frame_count += 1
-        elapsed_time = time.time() - start_time
-        self.total_time += elapsed_time
-        
-        if self.frame_count % 10 == 0:
-            self.fps = 10 / self.total_time
-            self.total_time = 0
-            self.get_logger().info(f'FPS: {self.fps:.2f}')
+            self.get_logger().error(f'Erro ao converter imagem: {e}')
+        except Exception as e:
+            self.get_logger().error(f'Erro ao processar imagem: {e}')
     
     def _process_image(self, image):
         """
-        Processa a imagem com o modelo YOEO e componentes.
+        Processa a imagem com o modelo YOLOv4-Tiny e componentes.
         
         Args:
-            image: Imagem OpenCV (BGR)
+            image: Imagem BGR do OpenCV
             
         Returns:
-            Dicionário com os resultados de cada componente
+            Dicionário com resultados de detecção
         """
-        results = {}
-        debug_image = image.copy() if self.debug_image else None
+        # Obter detecções do modelo YOLOv4-Tiny
+        detection_types = []
         
-        # Processar cada componente
-        for component_name, component in self.components.items():
-            try:
-                component_result = component.process(image)
-                results[component_name] = component_result
-                
-                # Adicionar visualizações à imagem de debug
-                if self.debug_image and hasattr(component, 'draw_detections'):
-                    component.draw_detections(debug_image, component_result)
-            except Exception as e:
-                self.get_logger().error(f'Erro no processamento do componente {component_name}: {e}')
+        if self.enable_ball_detection:
+            detection_types.append(DetectionType.BALL)
         
-        # Adicionar FPS à imagem de debug
+        if self.enable_goal_detection:
+            detection_types.append(DetectionType.GOAL)
+        
+        if self.enable_robot_detection:
+            detection_types.append(DetectionType.ROBOT)
+        
+        results = self.yoeo_handler.get_detections(image, detection_types=detection_types)
+        
+        # Processar resultados com componentes
+        processed_results = {
+            'ball_detections': [],
+            'goal_detections': [],
+            'robot_detections': [],
+            'debug_image': None
+        }
+        
+        # Processar bolas
+        if 'ball' in self.components:
+            processed_results['ball_detections'] = self.components['ball'].process(image)
+        
+        # Processar gols
+        if 'goal' in self.components:
+            processed_results['goal_detections'] = self.components['goal'].process(image)
+        
+        # Processar robôs
+        if 'robot' in self.components:
+            processed_results['robot_detections'] = self.components['robot'].process(image)
+        
+        # Gerar imagem de debug
         if self.debug_image:
+            debug_image = image.copy()
+            
+            # Desenhar detecções de cada componente
+            if 'ball' in self.components and processed_results['ball_detections']:
+                debug_image = self.components['ball'].draw_detections(
+                    debug_image, processed_results['ball_detections']
+                )
+            
+            if 'goal' in self.components and processed_results['goal_detections']:
+                debug_image = self.components['goal'].draw_detections(
+                    debug_image, processed_results['goal_detections']
+                )
+            
+            if 'robot' in self.components and processed_results['robot_detections']:
+                debug_image = self.components['robot'].draw_detections(
+                    debug_image, processed_results['robot_detections']
+                )
+            
+            # Adicionar informações de FPS
             cv2.putText(
                 debug_image,
-                f'FPS: {self.fps:.2f}',
+                f"FPS: {self.fps:.1f}",
                 (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1,
                 (0, 255, 0),
                 2
             )
-            results['debug_image'] = debug_image
+            
+            processed_results['debug_image'] = debug_image
         
-        return results
+        return processed_results
     
     def _publish_results(self, results, header):
         """
-        Publica os resultados de detecção e segmentação.
+        Publica os resultados nos tópicos ROS.
         
         Args:
-            results: Dicionário com os resultados de cada componente
+            results: Dicionário com resultados processados
             header: Cabeçalho da mensagem original
         """
         # Publicar detecções de bola
-        if 'ball' in results and 'ball' in self.publishers:
-            ball_detections = self._create_detection_msg(
-                results['ball'],
-                header,
-                'ball'
+        if DetectionType.BALL in self.detection_publishers and results['ball_detections']:
+            ball_msg = self._create_detection_msg(
+                results['ball_detections'], header, DetectionType.BALL
             )
-            self.publishers['ball'].publish(ball_detections)
+            self.detection_publishers[DetectionType.BALL].publish(ball_msg)
         
         # Publicar detecções de gol
-        if 'goal' in results and 'goal' in self.publishers:
-            goal_detections = self._create_detection_msg(
-                results['goal'],
-                header,
-                'goal'
+        if DetectionType.GOAL in self.detection_publishers and results['goal_detections']:
+            goal_msg = self._create_detection_msg(
+                results['goal_detections'], header, DetectionType.GOAL
             )
-            self.publishers['goal'].publish(goal_detections)
+            self.detection_publishers[DetectionType.GOAL].publish(goal_msg)
         
         # Publicar detecções de robô
-        if 'robot' in results and 'robot' in self.publishers:
-            robot_detections = self._create_detection_msg(
-                results['robot'],
-                header,
-                'robot'
+        if DetectionType.ROBOT in self.detection_publishers and results['robot_detections']:
+            robot_msg = self._create_detection_msg(
+                results['robot_detections'], header, DetectionType.ROBOT
             )
-            self.publishers['robot'].publish(robot_detections)
-        
-        # Publicar detecções de árbitro
-        if 'referee' in results and 'referee' in self.publishers:
-            referee_detections = self._create_detection_msg(
-                results['referee'],
-                header,
-                'referee'
-            )
-            self.publishers['referee'].publish(referee_detections)
-        
-        # Publicar máscara de campo
-        if 'field' in results and 'field_mask' in self.publishers:
-            field_mask = results['field'].get('mask')
-            if field_mask is not None:
-                try:
-                    mask_msg = self.bridge.cv2_to_imgmsg(field_mask, "mono8")
-                    mask_msg.header = header
-                    self.publishers['field_mask'].publish(mask_msg)
-                except CvBridgeError as e:
-                    self.get_logger().error(f'Erro na conversão da máscara de campo: {e}')
-        
-        # Publicar máscara de linha
-        if 'line' in results and 'line_mask' in self.publishers:
-            line_mask = results['line'].get('mask')
-            if line_mask is not None:
-                try:
-                    mask_msg = self.bridge.cv2_to_imgmsg(line_mask, "mono8")
-                    mask_msg.header = header
-                    self.publishers['line_mask'].publish(mask_msg)
-                except CvBridgeError as e:
-                    self.get_logger().error(f'Erro na conversão da máscara de linha: {e}')
+            self.detection_publishers[DetectionType.ROBOT].publish(robot_msg)
         
         # Publicar imagem de debug
-        if 'debug_image' in results and 'debug_image' in self.publishers:
+        if self.debug_image and results['debug_image'] is not None:
             try:
                 debug_msg = self.bridge.cv2_to_imgmsg(results['debug_image'], "bgr8")
                 debug_msg.header = header
-                self.publishers['debug_image'].publish(debug_msg)
+                self.debug_publisher.publish(debug_msg)
             except CvBridgeError as e:
-                self.get_logger().error(f'Erro na conversão da imagem de debug: {e}')
+                self.get_logger().error(f'Erro ao converter imagem de debug: {e}')
     
     def _create_detection_msg(self, detections, header, detection_type):
         """
-        Cria uma mensagem Detection2DArray a partir das detecções.
+        Cria uma mensagem Detection2DArray para publicação.
         
         Args:
             detections: Lista de detecções
             header: Cabeçalho da mensagem
-            detection_type: Tipo de detecção ('ball', 'goal', 'robot', 'referee')
+            detection_type: Tipo de detecção
             
         Returns:
             Mensagem Detection2DArray
         """
-        detection_array = Detection2DArray()
-        detection_array.header = header
-        
-        if not detections:
-            return detection_array
+        msg = Detection2DArray()
+        msg.header = header
         
         for detection in detections:
             det_msg = Detection2D()
             det_msg.header = header
             
-            # Definir centro da detecção
-            if 'center' in detection:
-                center_x, center_y = detection['center']
-                det_msg.bbox.center.position.x = float(center_x)
-                det_msg.bbox.center.position.y = float(center_y)
+            # Extrair coordenadas da caixa delimitadora
+            x1, y1, x2, y2 = detection['bbox']
             
-            # Definir tamanho da caixa delimitadora
-            if 'bbox' in detection:
-                x, y, w, h = detection['bbox']
-                det_msg.bbox.size_x = float(w)
-                det_msg.bbox.size_y = float(h)
+            # Calcular centro e tamanho
+            center_x = (x1 + x2) / 2
+            center_y = (y1 + y2) / 2
+            width = x2 - x1
+            height = y2 - y1
+            
+            # Definir posição 2D
+            det_msg.bbox.center.position.x = center_x
+            det_msg.bbox.center.position.y = center_y
+            det_msg.bbox.center.position.z = 0.0
+            
+            # Definir orientação (identidade)
+            det_msg.bbox.center.orientation.w = 1.0
+            
+            # Definir tamanho
+            det_msg.bbox.size_x = width
+            det_msg.bbox.size_y = height
             
             # Adicionar hipótese de objeto
             hypothesis = ObjectHypothesisWithPose()
-            hypothesis.hypothesis.class_id = detection_type
-            hypothesis.hypothesis.score = float(detection.get('confidence', 1.0))
+            hypothesis.id = str(detection_type.value)
+            hypothesis.score = float(detection['confidence'])
             
-            # Adicionar pose 3D se disponível
+            # Adicionar posição 3D, se disponível
             if 'position_3d' in detection and detection['position_3d'] is not None:
                 x, y, z = detection['position_3d']
-                hypothesis.pose.pose.position.x = float(x)
-                hypothesis.pose.pose.position.y = float(y)
-                hypothesis.pose.pose.position.z = float(z)
+                
+                pose = PoseWithCovariance()
+                pose.pose.position.x = x
+                pose.pose.position.y = y
+                pose.pose.position.z = z
+                pose.pose.orientation.w = 1.0
+                
+                hypothesis.pose = pose
             
             det_msg.results.append(hypothesis)
-            detection_array.detections.append(det_msg)
+            msg.detections.append(det_msg)
         
-        return detection_array
-
+        return msg
 
 def main(args=None):
-    """Função principal para iniciar o nó ROS."""
+    """Função principal para iniciar o nó detector YOLOv4-Tiny."""
     rclpy.init(args=args)
-    node = YOEODetector()
     
     try:
+        node = YOEODetector()
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
+    except Exception as e:
+        print(f"Erro no nó detector YOLOv4-Tiny: {e}")
     finally:
-        node.destroy_node()
         rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main() 

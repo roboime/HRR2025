@@ -2,562 +2,517 @@
 # -*- coding: utf-8 -*-
 
 """
-Utilitários para processamento de dados para o modelo YOEO.
+Utilitários para processamento de dados do modelo YOLOv4-Tiny.
 
-Este módulo fornece funções para carregar, processar e aumentar
-dados para treinamento e avaliação do modelo YOEO.
+Este módulo fornece funções e classes para o carregamento, processamento
+e preparação de dados para o modelo de detecção YOLOv4-Tiny.
 """
 
 import os
-import cv2
 import json
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.utils import Sequence
-import albumentations as A
-from pycocotools import mask as coco_mask
-
 
 def load_image(image_path):
     """
-    Carrega uma imagem do disco.
+    Carrega uma imagem a partir do caminho especificado.
     
     Args:
-        image_path: Caminho para a imagem
+        image_path: Caminho para o arquivo de imagem
         
     Returns:
-        Imagem no formato BGR
-    """
-    img = cv2.imread(image_path)
-    if img is None:
-        raise ValueError(f"Não foi possível carregar a imagem: {image_path}")
-    return img
-
-
-def load_mask(mask_path):
-    """
-    Carrega uma máscara de segmentação do disco.
-    
-    Args:
-        mask_path: Caminho para a máscara
+        Imagem carregada (array NumPy)
         
-    Returns:
-        Máscara como array numpy
+    Raises:
+        IOError: Se a imagem não puder ser carregada
     """
-    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-    if mask is None:
-        raise ValueError(f"Não foi possível carregar a máscara: {mask_path}")
-    return mask
-
+    try:
+        # Verificar se o arquivo existe
+        if not os.path.exists(image_path):
+            raise IOError(f"Arquivo de imagem não encontrado: {image_path}")
+        
+        # Carregar imagem com TensorFlow
+        image = tf.io.read_file(image_path)
+        image = tf.image.decode_image(image, channels=3, expand_animations=False)
+        
+        # Converter para NumPy array
+        image = image.numpy()
+        
+        # Verificar se a imagem foi carregada corretamente
+        if image.size == 0:
+            raise IOError(f"Imagem vazia carregada de: {image_path}")
+            
+        return image
+    except Exception as e:
+        raise IOError(f"Erro ao carregar a imagem {image_path}: {str(e)}")
 
 def load_annotations(annotation_path):
     """
-    Carrega anotações de detecção de objetos de um arquivo JSON.
+    Carrega anotações de detecção de objetos a partir de um arquivo JSON.
     
     Args:
-        annotation_path: Caminho para o arquivo JSON
+        annotation_path: Caminho para o arquivo de anotações
         
     Returns:
-        Lista de anotações
+        Dicionário contendo anotações de detecções
+        
+    Raises:
+        IOError: Se o arquivo de anotações não puder ser carregado
     """
     try:
+        # Verificar se o arquivo existe
+        if not os.path.exists(annotation_path):
+            raise IOError(f"Arquivo de anotações não encontrado: {annotation_path}")
+        
+        # Carregar JSON
         with open(annotation_path, 'r') as f:
             annotations = json.load(f)
+            
         return annotations
     except Exception as e:
-        raise ValueError(f"Erro ao carregar anotações de {annotation_path}: {e}")
-
+        raise IOError(f"Erro ao carregar anotações de {annotation_path}: {str(e)}")
 
 def create_augmentation_pipeline(config):
     """
-    Cria um pipeline de aumento de dados baseado na configuração.
+    Cria uma pipeline de augmentação de dados com base na configuração.
     
     Args:
-        config: Dicionário com configurações de aumento
-        
+        config: Dicionário com parâmetros de configuração para augmentação
+            - flip_horizontal: Aplicar flip horizontal
+            - flip_vertical: Aplicar flip vertical
+            - rotation_range: Intervalo de rotação em graus
+            - brightness_range: Intervalo de ajuste de brilho
+            - zoom_range: Intervalo de zoom
+            
     Returns:
-        Pipeline de aumento do Albumentations
+        Função de augmentação que pode ser aplicada a imagens e caixas delimitadoras
     """
-    # Extrair parâmetros de configuração com valores padrão
-    rotation_range = config.get('rotation_range', 10)
-    width_shift = config.get('width_shift_range', 0.1)
-    height_shift = config.get('height_shift_range', 0.1)
+    # Valores padrão se não especificados
+    flip_horizontal = config.get('flip_horizontal', True)
+    flip_vertical = config.get('flip_vertical', False)
+    rotation_range = config.get('rotation_range', 15)
     brightness_range = config.get('brightness_range', [0.8, 1.2])
-    horizontal_flip = config.get('horizontal_flip', True)
+    zoom_range = config.get('zoom_range', [0.8, 1.2])
     
-    # Garantir que os parâmetros não são None
-    if rotation_range is None:
-        rotation_range = 10
-    if width_shift is None:
-        width_shift = 0.1
-    if height_shift is None:
-        height_shift = 0.1
-    if brightness_range is None:
-        brightness_range = [0.8, 1.2]
-    if horizontal_flip is None:
-        horizontal_flip = True
+    def augment(image, boxes=None):
+        """
+        Aplica transformações de augmentação à imagem e caixas delimitadoras.
         
-    # Verificar se é uma lista para o brightness_range
-    if isinstance(brightness_range, list) and len(brightness_range) >= 2:
-        brightness_limit = brightness_range[1] - brightness_range[0]
-    else:
-        brightness_limit = 0.2
+        Args:
+            image: Imagem a ser augmentada (array NumPy)
+            boxes: Caixas delimitadoras no formato [x_min, y_min, width, height]
+            
+        Returns:
+            Imagem augmentada e caixas delimitadoras ajustadas
+        """
+        # Converter imagem para tensor
+        img_tensor = tf.convert_to_tensor(image)
+        h, w = img_tensor.shape[:2]
+        
+        # Se não houver caixas, criar um array vazio
+        if boxes is None:
+            boxes = np.zeros((0, 4))
+        
+        # Flip horizontal
+        if flip_horizontal and tf.random.uniform(()) > 0.5:
+            img_tensor = tf.image.flip_left_right(img_tensor)
+            # Ajustar coordenadas das caixas
+            if boxes.shape[0] > 0:
+                boxes[:, 0] = w - boxes[:, 0] - boxes[:, 2]
+        
+        # Flip vertical
+        if flip_vertical and tf.random.uniform(()) > 0.5:
+            img_tensor = tf.image.flip_up_down(img_tensor)
+            # Ajustar coordenadas das caixas
+            if boxes.shape[0] > 0:
+                boxes[:, 1] = h - boxes[:, 1] - boxes[:, 3]
+        
+        # Ajuste de brilho
+        if brightness_range:
+            factor = tf.random.uniform((), 
+                                      brightness_range[0], 
+                                      brightness_range[1])
+            img_tensor = tf.image.adjust_brightness(img_tensor, factor - 1.0)
+        
+        # Normalizar imagem para evitar valores fora do intervalo 0-255
+        img_tensor = tf.clip_by_value(img_tensor, 0, 255)
+        
+        # Converter de volta para NumPy
+        augmented_image = img_tensor.numpy()
+        
+        return augmented_image, boxes
     
-    # Criar pipeline de aumento
-    transform = A.Compose([
-        A.Rotate(limit=rotation_range, p=0.5),
-        A.ShiftScaleRotate(shift_limit=max(width_shift, height_shift), scale_limit=0.1, rotate_limit=0, p=0.5),
-        A.RandomBrightnessContrast(brightness_limit=brightness_limit, contrast_limit=0.2, p=0.5),
-        A.HorizontalFlip(p=0.5 if horizontal_flip else 0),
-        A.OneOf([
-            A.GaussNoise(p=1),
-            A.GaussianBlur(p=1),
-        ], p=0.3),
-    ], bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
-    
-    return transform
-
+    return augment
 
 def normalize_image(image):
     """
-    Normaliza uma imagem para entrada no modelo.
+    Normaliza uma imagem para entrada no modelo YOLOv4-Tiny.
     
     Args:
-        image: Imagem BGR
+        image: Imagem a ser normalizada (array NumPy)
         
     Returns:
-        Imagem normalizada
+        Imagem normalizada com valores entre 0 e 1
     """
-    # Converter BGR para RGB
-    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    
-    # Normalizar para [0, 1]
-    normalized = rgb_image.astype(np.float32) / 255.0
-    
-    return normalized
-
+    # Converter para float32 e normalizar para [0, 1]
+    image = image.astype(np.float32) / 255.0
+    return image
 
 def prepare_dataset(config):
     """
-    Prepara os conjuntos de dados de treinamento, validação e teste.
+    Prepara datasets de treinamento, validação e teste com base na configuração.
     
     Args:
-        config: Configuração do treinamento
-        
+        config: Dicionário com configurações para preparação do dataset
+            - data_dir: Diretório contendo os dados
+            - train_dir: Diretório específico para dados de treinamento
+            - val_dir: Diretório específico para dados de validação
+            - test_dir: Diretório específico para dados de teste
+            - train_annotations: Caminho para anotações de treinamento
+            - val_annotations: Caminho para anotações de validação (opcional)
+            - test_annotations: Caminho para anotações de teste (opcional)
+            - batch_size: Tamanho do batch para os geradores
+            - input_shape: Forma de entrada para o modelo [height, width]
+            - augmentation: Configuração para augmentação (apenas treinamento)
+            
     Returns:
-        Geradores de dados para treinamento, validação e teste
+        Tupla contendo (train_generator, val_generator, test_generator)
+        Qualquer um dos geradores pode ser None se não existir.
     """
-    # Extrair parâmetros da configuração
-    batch_size = config['batch_size']
-    input_size = (config['input_height'], config['input_width'])
+    # Obter diretórios específicos ou usar data_dir como base
+    data_dir = config.get('data_dir', '')
+    train_dir = config.get('train_dir', os.path.join(data_dir, 'train'))
+    val_dir = config.get('val_dir', os.path.join(data_dir, 'valid'))
+    test_dir = config.get('test_dir', os.path.join(data_dir, 'test'))
     
-    # Criar pipeline de aumento de dados
-    augmentation = create_augmentation_pipeline(config)
+    # Caminhos para arquivos de anotações
+    train_annotations = config.get('train_annotations', '_annotations.coco.json')
+    val_annotations = config.get('val_annotations', '_annotations.coco.json')
+    test_annotations = config.get('test_annotations', '_annotations.coco.json')
     
-    # Criar geradores de dados
-    train_generator = YOEODataGenerator(
-        data_dir=config['train_dir'],
-        batch_size=batch_size,
-        input_size=input_size,
-        num_classes=len(config['classes']),
-        num_seg_classes=len(config['segmentation_classes']),
-        augmentation=augmentation,
-        shuffle=True
+    # Construir caminhos completos para os arquivos de anotações
+    train_annot_path = os.path.join(train_dir, os.path.basename(train_annotations))
+    val_annot_path = os.path.join(val_dir, os.path.basename(val_annotations))
+    test_annot_path = os.path.join(test_dir, os.path.basename(test_annotations))
+    
+    # Outros parâmetros
+    batch_size = config.get('batch_size', 8)
+    input_shape = (
+        config.get('input_height', 416),
+        config.get('input_width', 416)
     )
+    augmentation_config = config.get('augmentation', {})
     
-    val_generator = YOEODataGenerator(
-        data_dir=config['val_dir'],
-        batch_size=batch_size,
-        input_size=input_size,
-        num_classes=len(config['classes']),
-        num_seg_classes=len(config['segmentation_classes']),
-        augmentation=None,
-        shuffle=False
-    )
+    # Criar pipeline de augmentação
+    augmentation_fn = create_augmentation_pipeline(augmentation_config)
     
-    # Criar gerador de teste se o diretório existir
+    # Inicializar geradores como None
+    train_generator = None
+    val_generator = None 
     test_generator = None
-    if 'test_dir' in config and os.path.exists(config['test_dir']):
-        test_generator = YOEODataGenerator(
-            data_dir=config['test_dir'],
-            batch_size=1,  # Batch size 1 para teste
-            input_size=input_size,
-            num_classes=len(config['classes']),
-            num_seg_classes=len(config['segmentation_classes']),
-            augmentation=None,
-            shuffle=False
+    
+    # Dataset de treinamento
+    if os.path.exists(train_annot_path):
+        print(f"Usando anotações de treinamento: {train_annot_path}")
+        train_generator = YOEODataGenerator(
+            annotation_path=train_annot_path,
+            batch_size=batch_size,
+            input_shape=input_shape,
+            shuffle=True,
+            augmentation=augmentation_fn,
+            data_dir=train_dir  # Usar o diretório de treinamento específico
+        )
+    else:
+        print(f"AVISO: Arquivo de anotações de treinamento não encontrado: {train_annot_path}")
+        print("Para verificar se os dados existem, execute: ")
+        print(f"  ls -la {os.path.dirname(train_annot_path)}")
+    
+    # Dataset de validação
+    if os.path.exists(val_annot_path):
+        print(f"Usando anotações de validação: {val_annot_path}")
+        val_generator = YOEODataGenerator(
+            annotation_path=val_annot_path,
+            batch_size=batch_size,
+            input_shape=input_shape,
+            shuffle=False,
+            data_dir=val_dir  # Usar o diretório de validação específico
         )
     
+    # Dataset de teste
+    if os.path.exists(test_annot_path):
+        print(f"Usando anotações de teste: {test_annot_path}")
+        test_generator = YOEODataGenerator(
+            annotation_path=test_annot_path,
+            batch_size=batch_size,
+            input_shape=input_shape,
+            shuffle=False,
+            data_dir=test_dir  # Usar o diretório de teste específico
+        )
+    
+    # Verificar se temos pelo menos um gerador
+    if not train_generator and not val_generator and not test_generator:
+        print("ERRO: Nenhum dataset foi encontrado. Verifique os caminhos de anotações.")
+        print(f"Diretórios procurados:")
+        print(f"  - Treinamento: {train_dir}")
+        print(f"  - Validação: {val_dir}")
+        print(f"  - Teste: {test_dir}")
+        
+    # Retornar tupla de geradores
     return train_generator, val_generator, test_generator
 
-
-class YOEODataGenerator(tf.keras.utils.Sequence):
+class YOEODataGenerator(Sequence):
     """
-    Gerador de dados para o modelo YOEO.
+    Gerador de dados para o modelo YOLOv4-Tiny.
     
-    Este gerador carrega imagens e anotações no formato COCO,
-    que contém tanto segmentação quanto bounding boxes.
+    Esta classe carrega imagens e anotações no formato COCO 
+    e os prepara para o treinamento do modelo.
     """
     
-    def __init__(self, data_dir, batch_size=8, input_size=(416, 416), 
-                 num_classes=3, num_seg_classes=2, augmentation=None, shuffle=True):
+    def __init__(self, annotation_path, batch_size=8, input_shape=(416, 416),
+                 shuffle=True, augmentation=None, data_dir=''):
         """
         Inicializa o gerador de dados.
         
         Args:
-            data_dir: Diretório contendo imagens e annotations.json
-            batch_size: Tamanho do lote
-            input_size: Tamanho de entrada do modelo (altura, largura)
-            num_classes: Número de classes de detecção (bola, gol, robo)
-            num_seg_classes: Número de classes de segmentação (linha, campo)
-            augmentation: Pipeline de aumento de dados
+            annotation_path: Caminho para o arquivo de anotações (formato COCO)
+            batch_size: Tamanho do batch
+            input_shape: Dimensões da imagem de entrada (height, width)
             shuffle: Se deve embaralhar os dados a cada época
+            augmentation: Função de augmentação a ser aplicada (opcional)
+            data_dir: Diretório base para imagens (prefixo para caminhos relativos)
         """
-        self.data_dir = data_dir
+        self.annotation_path = annotation_path
         self.batch_size = batch_size
-        self.input_size = input_size
-        self.num_classes = num_classes  # Deve ser 3
-        self.num_seg_classes = num_seg_classes  # Deve ser 2
-        self.augmentation = augmentation
+        self.input_shape = input_shape
         self.shuffle = shuffle
+        self.augmentation = augmentation
+        self.data_dir = data_dir
         
-        # Classes válidas
-        self.valid_classes = {'bola': 0, 'gol': 1, 'robo': 2}
-        self.valid_seg_classes = {'linha': 0, 'campo': 1}
+        # Carregar anotações
+        self.annotations = load_annotations(annotation_path)
         
-        # Carregar anotações COCO
-        with open(os.path.join(data_dir, 'annotations.json'), 'r') as f:
-            self.coco_data = json.load(f)
+        # Extrair informações das anotações
+        self.image_info = self.annotations['images']
+        self.annotations_info = self.annotations['annotations']
+        self.categories = {cat['id']: cat for cat in self.annotations['categories']}
         
-        # Criar índice de imagens
-        self.image_ids = [img['id'] for img in self.coco_data['images']]
-        self.image_info = {img['id']: img for img in self.coco_data['images']}
+        # Organizar anotações por imagem
+        self.image_annotations = {}
+        for ann in self.annotations_info:
+            image_id = ann['image_id']
+            if image_id not in self.image_annotations:
+                self.image_annotations[image_id] = []
+            self.image_annotations[image_id].append(ann)
         
-        # Criar mapeamento de categorias
-        self.cat_mapping = {}
-        for cat in self.coco_data['categories']:
-            if cat['name'] in self.valid_classes:
-                self.cat_mapping[cat['id']] = self.valid_classes[cat['name']]
-        
-        # Criar índice de anotações por imagem (apenas classes válidas)
-        self.annotations = {}
-        for ann in self.coco_data['annotations']:
-            img_id = ann['image_id']
-            # Verificar se é uma categoria válida
-            if ann['category_id'] in self.cat_mapping:
-                if img_id not in self.annotations:
-                    self.annotations[img_id] = []
-                self.annotations[img_id].append(ann)
-        
+        # Criar lista de índices de imagens
+        self.image_ids = sorted([img['id'] for img in self.image_info])
         self.indexes = np.arange(len(self.image_ids))
+        
+        # Embaralhar dados se necessário
         if self.shuffle:
             np.random.shuffle(self.indexes)
-        
-        super(YOEODataGenerator, self).__init__()
     
     def __len__(self):
-        """Retorna o número de lotes por época."""
+        """Retorna o número de batches no gerador."""
         return int(np.ceil(len(self.image_ids) / self.batch_size))
     
-    def __getitem__(self, idx):
+    def __getitem__(self, index):
         """
         Retorna um batch de dados.
         
         Args:
-            idx: Índice do batch
+            index: Índice do batch
             
         Returns:
-            Tupla (X, Y) onde X é um array Numpy de imagens de entrada
-            e Y é uma lista de arrays Numpy [det_small, det_medium, det_large, seg]
+            Tupla (batch_images, {"output_1": batch_targets, "output_2": batch_targets}) para treinamento
         """
-        # Calcular os índices das imagens para este batch
-        indices = self.indexes[idx * self.batch_size:(idx + 1) * self.batch_size]
+        # Gerar índices para o batch atual
+        batch_indexes = self.indexes[index * self.batch_size:
+                                    (index + 1) * self.batch_size]
         
-        # Inicializar arrays para as imagens e saídas
-        batch_images = np.zeros(
-            (len(indices), self.input_size[0], self.input_size[1], 3),
-            dtype=np.float32
-        )
+        # Selecionar IDs de imagem para este batch
+        batch_image_ids = [self.image_ids[i] for i in batch_indexes]
         
-        # Inicializar arrays para detecção em diferentes escalas
-        det_small_dims = (13, 13)
-        det_medium_dims = (26, 26)
-        det_large_dims = (52, 52)
+        # Inicializar arrays para imagens e alvos
+        batch_images = np.zeros((len(batch_image_ids), 
+                                *self.input_shape, 3), 
+                               dtype=np.float32)
         
-        batch_det_small = np.zeros(
-            (len(indices), det_small_dims[0], det_small_dims[1], 3, 5 + self.num_classes),
-            dtype=np.float32
-        )
-        batch_det_medium = np.zeros(
-            (len(indices), det_medium_dims[0], det_medium_dims[1], 3, 5 + self.num_classes),
-            dtype=np.float32
-        )
-        batch_det_large = np.zeros(
-            (len(indices), det_large_dims[0], det_large_dims[1], 3, 5 + self.num_classes),
-            dtype=np.float32
-        )
+        # Para simplicidade, vamos definir uma saída de detecção básica
+        # Formato: [batch_size, max_boxes, (x, y, w, h, class_id)]
+        max_boxes = 100  # Número máximo de caixas por imagem
+        batch_detection_targets = np.zeros((len(batch_image_ids), 
+                                           max_boxes, 5), 
+                                          dtype=np.float32)
         
-        # Inicializar array para segmentação
-        seg_dims = (self.input_size[0], self.input_size[1])
-        batch_segmentation = np.zeros(
-            (len(indices), seg_dims[0], seg_dims[1], self.num_seg_classes),
-            dtype=np.float32
-        )
-        
-        # Processar cada imagem no batch
-        for i, image_index in enumerate(indices):
-            # Obter caminho da imagem
-            img_id = self.image_ids[image_index]
-            img_info = self.image_info[img_id]
-            img_anns = self.annotations.get(img_id, [])
+        # Carregar e processar cada imagem no batch
+        for i, image_id in enumerate(batch_image_ids):
+            # Encontrar informações da imagem
+            image_info = next(img for img in self.image_info if img['id'] == image_id)
             
-            # Carregar imagem
-            img_path = os.path.join(self.data_dir, img_info['file_name'])
-            image = cv2.imread(img_path)
-            if image is None:
-                raise ValueError(f"Não foi possível carregar a imagem: {img_path}")
+            # Carregar imagem - verificar caminhos de anotações
+            file_name = image_info['file_name']
             
-            # Criar máscara de segmentação com as mesmas dimensões da imagem
-            # Isso é importante para garantir que a augmentação funcione corretamente
-            mask = np.zeros((image.shape[0], image.shape[1]), dtype=np.uint8)
+            # Determinar o tipo de caminho (treinamento, validação ou teste)
+            if 'train' in self.annotation_path.lower():
+                img_path = os.path.join(os.path.dirname(self.annotation_path), file_name)
+            elif 'valid' in self.annotation_path.lower() or 'val' in self.annotation_path.lower():
+                img_path = os.path.join(os.path.dirname(self.annotation_path), file_name)
+            elif 'test' in self.annotation_path.lower():
+                img_path = os.path.join(os.path.dirname(self.annotation_path), file_name)
+            else:
+                # Caminho padrão
+                img_path = os.path.join(self.data_dir, file_name)
             
-            # Processar anotações
-            boxes = []
-            class_labels = []
-            
-            for ann in img_anns:
-                # Processar segmentação
-                if 'segmentation' in ann:
-                    # Verificar se é uma classe de segmentação válida
-                    class_name = next((cat['name'] for cat in self.coco_data['categories'] 
-                                    if cat['id'] == ann['category_id']), None)
-                    
-                    if class_name in self.valid_seg_classes:
-                        # Converter polígonos/RLE para máscara binária
-                        if isinstance(ann['segmentation'], dict):  # RLE
-                            seg_mask = self._rle_to_mask(ann['segmentation'], img_info['height'], img_info['width'])
-                        else:  # Polígono
-                            seg_mask = self._polygon_to_mask(ann['segmentation'], img_info['height'], img_info['width'])
-                        
-                        # Adicionar à máscara apropriada na dimensão original da imagem
-                        seg_mask = cv2.resize(seg_mask, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST)
-                        seg_idx = self.valid_seg_classes[class_name]
-                        mask[seg_mask > 0] = seg_idx
+            try:
+                # Tentar carregar a imagem
+                image = load_image(img_path)
+                orig_height, orig_width = image.shape[:2]
                 
-                # Processar bounding box
-                if 'bbox' in ann and ann['category_id'] in self.cat_mapping:
-                    x, y, w, h = ann['bbox']
-                    # Converter para formato YOLO (x_center, y_center, width, height)
-                    x_center = (x + w/2) / img_info['width']
-                    y_center = (y + h/2) / img_info['height']
-                    width = w / img_info['width']
-                    height = h / img_info['height']
-                    
-                    boxes.append([x_center, y_center, width, height])
-                    class_labels.append(self.cat_mapping[ann['category_id']])
-            
-            # Aplicar aumento de dados se disponível
-            if self.augmentation and boxes:
-                augmented = self.augmentation(
-                    image=image,
-                    mask=mask,
-                    bboxes=boxes,
-                    class_labels=class_labels
-                )
-                image = augmented['image']
-                mask = augmented['mask']
-                boxes = augmented['bboxes']
-                class_labels = augmented['class_labels']
-            
-            # Redimensionar imagem e máscara para as dimensões de entrada
-            image = cv2.resize(image, self.input_size[::-1])
-            mask = cv2.resize(mask, self.input_size[::-1], interpolation=cv2.INTER_NEAREST)
-            
-            # Normalizar imagem
-            image = image.astype(np.float32) / 255.0
-            
-            # Preencher arrays do lote
-            batch_images[i] = image
-            
-            # Processar anotações para detecção
-            for j, (box, class_id) in enumerate(zip(boxes, class_labels)):
-                if j >= 100:  # Limitar a 100 objetos por imagem
-                    break
+                # Redimensionar imagem
+                image = tf.image.resize(image, self.input_shape).numpy()
                 
-                # Verifica se class_id é válido
-                class_id = int(class_id)  # Garante que class_id seja um inteiro
-                if class_id >= self.num_classes:
-                    print(f"AVISO: class_id {class_id} é maior que o número de classes ({self.num_classes}). Ignorando esta detecção.")
-                    continue
+                # Aplicar augmentação se disponível
+                boxes = []
+                classes = []
                 
-                # Calcular tamanho do objeto para determinar em qual escala ele deve aparecer
-                area = width * height
+                # Obter anotações para esta imagem
+                anns = self.image_annotations.get(image_id, [])
                 
-                # Determinar em qual escala o objeto deve aparecer
-                scales = []
-                if area < 0.04:  # Objetos pequenos
-                    scales.append(0)
-                if 0.03 < area < 0.16:  # Objetos médios
-                    scales.append(1)
-                if area > 0.12:  # Objetos grandes
-                    scales.append(2)
-                
-                # Se o objeto não se encaixa em nenhuma escala, colocá-lo na escala mais apropriada
-                if not scales:
-                    if area < 0.1:
-                        scales.append(0)
-                    elif area < 0.2:
-                        scales.append(1)
-                    else:
-                        scales.append(2)
-                
-                # Adicionar objeto a cada escala apropriada
-                for scale in scales:
-                    # Determinar as dimensões da grade para esta escala
-                    grid_height, grid_width = (det_small_dims, det_medium_dims, det_large_dims)[scale]
-                    
-                    # Calcular a célula da grade onde o centro do objeto cai
-                    grid_x = int(x_center * grid_width)
-                    grid_y = int(y_center * grid_height)
-                    
-                    # Restringir para os limites da grade
-                    grid_x = max(0, min(grid_x, grid_width - 1))
-                    grid_y = max(0, min(grid_y, grid_height - 1))
-                    
-                    # Calcular deslocamento dentro da célula
-                    x_offset = x_center * grid_width - grid_x
-                    y_offset = y_center * grid_height - grid_y
-                    
-                    # Para cada âncora nesta escala
-                    for anchor_idx in range(3):
-                        # Selecionar o batch de saída correto
-                        if scale == 0:
-                            output_batch = batch_det_small
-                        elif scale == 1:
-                            output_batch = batch_det_medium
-                        else:
-                            output_batch = batch_det_large
-                        
-                        # Verificar se esta célula já tem um objeto
-                        if output_batch[i, grid_y, grid_x, anchor_idx, 4] == 1.0:
-                            continue
-                        
-                        # Preencher dados do objeto
-                        output_batch[i, grid_y, grid_x, anchor_idx, 0] = x_offset
-                        output_batch[i, grid_y, grid_x, anchor_idx, 1] = y_offset
-                        output_batch[i, grid_y, grid_x, anchor_idx, 2] = width
-                        output_batch[i, grid_y, grid_x, anchor_idx, 3] = height
-                        output_batch[i, grid_y, grid_x, anchor_idx, 4] = 1.0  # objectness
-                        output_batch[i, grid_y, grid_x, anchor_idx, 5 + class_id] = 1.0  # class
+                for j, ann in enumerate(anns):
+                    if j >= max_boxes:
                         break
-            
-            # Processar máscara para segmentação (converter para one-hot)
-            for c in range(self.num_seg_classes):
-                batch_segmentation[i, :, :, c] = (mask == c).astype(np.float32)
+                        
+                    # Extrair coordenadas da caixa delimitadora
+                    bbox = ann['bbox']  # [x, y, width, height] formato COCO
+                    
+                    # Normalizar coordenadas para o intervalo [0, 1]
+                    x = bbox[0] / orig_width
+                    y = bbox[1] / orig_height
+                    w = bbox[2] / orig_width
+                    h = bbox[3] / orig_height
+                    
+                    # Armazenar caixa e classe
+                    boxes.append([x, y, w, h])
+                    classes.append(ann['category_id'])
+                
+                # Converter para arrays NumPy
+                boxes = np.array(boxes, dtype=np.float32)
+                classes = np.array(classes, dtype=np.int32)
+                
+                # Aplicar augmentação se especificada
+                if self.augmentation and len(boxes) > 0:
+                    image, boxes = self.augmentation(image, boxes)
+                
+                # Normalizar imagem
+                image = normalize_image(image)
+                
+                # Armazenar imagem no batch
+                batch_images[i] = image
+                
+                # Preencher alvos de detecção
+                for j, (box, cls) in enumerate(zip(boxes, classes)):
+                    if j < max_boxes:
+                        # Formato: [x, y, w, h, class_id]
+                        batch_detection_targets[i, j, :4] = box
+                        batch_detection_targets[i, j, 4] = cls
+                
+            except Exception as e:
+                print(f"Erro ao processar imagem {img_path}: {str(e)}")
+                # Manter arrays zerados para esta imagem
         
-        # Retornar batch de imagens e saídas como uma tupla
-        # TensorFlow espera receber um dict para cada saída em vez de uma lista
-        return batch_images, {
-            "detection_small": batch_det_small,
-            "detection_medium": batch_det_medium,
-            "detection_large": batch_det_large,
-            "segmentation": batch_segmentation
-        }
+        # Retornar batch de imagens e alvos no formato de dicionário
+        return batch_images, {"output_1": batch_detection_targets, "output_2": batch_detection_targets}
     
     def on_epoch_end(self):
-        """Chamado no final de cada época."""
+        """Chamado no final de cada época para embaralhar os dados."""
         if self.shuffle:
             np.random.shuffle(self.indexes)
-    
-    def _rle_to_mask(self, rle, height, width):
-        """Converte RLE para máscara binária."""
-        if isinstance(rle['counts'], list):
-            rle = coco_mask.frPyObjects(rle, height, width)
-        mask = coco_mask.decode(rle)
-        return cv2.resize(mask, self.input_size[::-1], interpolation=cv2.INTER_NEAREST)
-    
-    def _polygon_to_mask(self, polygons, height, width):
-        """Converte polígonos para máscara binária."""
-        mask = np.zeros((height, width), dtype=np.uint8)
-        for polygon in polygons:
-            pts = np.array(polygon).reshape((-1, 2)).astype(np.int32)
-            cv2.fillPoly(mask, [pts], 1)
-        return cv2.resize(mask, self.input_size[::-1], interpolation=cv2.INTER_NEAREST)
 
-
-def visualize_batch(batch_images, batch_outputs, class_names, seg_class_names, num_samples=4):
+def visualize_batch(batch_images, batch_outputs, class_names, num_samples=4):
     """
-    Visualiza um lote de dados para debugging.
+    Visualiza um batch de imagens e suas detecções.
     
     Args:
-        batch_images: Lote de imagens
-        batch_outputs: Saídas do modelo (pode ser uma lista ou um dicionário)
-        class_names: Nomes das classes de detecção
-        seg_class_names: Nomes das classes de segmentação
+        batch_images: Lote de imagens normalizadas [batch_size, height, width, 3]
+        batch_outputs: Saída do modelo para o lote
+        class_names: Lista de nomes de classes
         num_samples: Número de amostras a visualizar
         
     Returns:
-        Lista de imagens visualizadas
+        Figura matplotlib com as visualizações
     """
-    import matplotlib.pyplot as plt
-    from matplotlib.colors import ListedColormap
-    
-    # Extrair segmentação e usar y_small para detecção
-    if isinstance(batch_outputs, dict):
-        # Formato de dicionário (antigo formato)
-        batch_detection = batch_outputs['detection_small']  # Usar a escala pequena para visualização
-        batch_segmentation = batch_outputs['segmentation']
-    else:
-        # Formato de lista (novo formato)
-        batch_detection = batch_outputs[0]  # Primeira escala de detecção (y_small)
-        batch_segmentation = batch_outputs[3]  # Segmentação
-    
-    num_samples = min(num_samples, len(batch_images))
-    
-    visualizations = []
-    
-    for i in range(num_samples):
-        # Converter imagem de volta para BGR e [0, 255]
-        image = batch_images[i].copy()
-        image = (image * 255).astype(np.uint8)
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
         
-        # Criar visualização da segmentação
-        seg_map = np.argmax(batch_segmentation[i], axis=-1)
+        # Limitar o número de amostras
+        num_samples = min(num_samples, batch_images.shape[0])
         
-        # Criar mapa de cores para segmentação
-        colors = plt.cm.get_cmap('tab10', len(seg_class_names))
-        seg_vis = np.zeros((seg_map.shape[0], seg_map.shape[1], 3), dtype=np.uint8)
+        # Criar figura
+        fig, axes = plt.subplots(num_samples, 1, figsize=(10, 4 * num_samples))
+        if num_samples == 1:
+            axes = [axes]
         
-        for c in range(len(seg_class_names)):
-            mask = (seg_map == c)
-            color = (np.array(colors(c)[:3]) * 255).astype(np.uint8)
-            seg_vis[mask] = color
-        
-        # Sobrepor segmentação na imagem
-        overlay = cv2.addWeighted(image, 0.7, seg_vis, 0.3, 0)
-        
-        # Desenhar caixas delimitadoras
-        for j in range(100):  # Máximo de 100 objetos
-            confidence = batch_detection[i, j, 4]
-            if confidence > 0.5:  # Limiar de confiança
-                # Extrair coordenadas e classe
-                x_center, y_center, width, height = batch_detection[i, j, :4]
-                class_probs = batch_detection[i, j, 5:]
-                class_id = np.argmax(class_probs)
+        # Para cada amostra
+        for i in range(num_samples):
+            # Obter imagem
+            img = batch_images[i].copy()
+            
+            # Desnormalizar imagem para visualização
+            if img.max() <= 1.0:
+                img = img * 255.0
+            img = img.astype(np.uint8)
+            
+            # Exibir imagem
+            axes[i].imshow(img)
+            
+            # Formato de saída depende do tipo de modelo (detecção)
+            if isinstance(batch_outputs, np.ndarray):
+                # Assumimos que a saída é [batch, num_boxes, 5+]
+                # onde 5+ é [x, y, w, h, confidence, class_probs...]
+                detections = batch_outputs[i]
                 
-                # Converter para coordenadas de pixel
-                x1 = int((x_center - width / 2) * image.shape[1])
-                y1 = int((y_center - height / 2) * image.shape[0])
-                x2 = int((x_center + width / 2) * image.shape[1])
-                y2 = int((y_center + height / 2) * image.shape[0])
+                # Filtrar detecções por confiança
+                confidence_threshold = 0.3
+                valid_detections = detections[detections[:, 4] > confidence_threshold]
                 
-                # Desenhar retângulo e rótulo
-                cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                label = f"{class_names[class_id]}: {confidence:.2f}"
-                cv2.putText(overlay, label, (x1, y1 - 10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                # Exibir caixas
+                for det in valid_detections:
+                    x, y, w, h = det[:4]
+                    confidence = det[4]
+                    
+                    # Converter para coordenadas absolutas
+                    img_h, img_w = img.shape[:2]
+                    x1 = int(x * img_w)
+                    y1 = int(y * img_h)
+                    width = int(w * img_w)
+                    height = int(h * img_h)
+                    
+                    # Criar retângulo
+                    rect = patches.Rectangle(
+                        (x1, y1), width, height, 
+                        linewidth=2, edgecolor='r', facecolor='none'
+                    )
+                    axes[i].add_patch(rect)
+                    
+                    # Adicionar rótulo
+                    class_id = int(det[5]) if len(det) > 5 else 0
+                    class_name = class_names[class_id] if class_id < len(class_names) else f"Class {class_id}"
+                    axes[i].text(
+                        x1, y1 - 5, 
+                        f"{class_name}: {confidence:.2f}",
+                        color='white', fontsize=10, 
+                        bbox=dict(facecolor='red', alpha=0.5)
+                    )
+            
+            axes[i].set_title(f"Amostra {i+1}")
+            axes[i].axis('off')
         
-        visualizations.append(overlay)
+        plt.tight_layout()
+        return fig
     
-    return visualizations 
+    except ImportError:
+        print("matplotlib é necessário para visualizar os resultados.")
+        return None 

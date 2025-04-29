@@ -2,413 +2,223 @@
 # -*- coding: utf-8 -*-
 
 """
-Implementação do modelo YOEO (You Only Encode Once) para detecção de objetos
-e segmentação semântica em tempo real para a RoboIME.
+Implementação do modelo YOLOv4-Tiny para detecção de objetos.
 
-Este módulo define a arquitetura neural do modelo YOEO, que combina detecção
-de objetos e segmentação semântica em uma única rede neural eficiente.
+Este módulo contém a implementação do modelo YOLOv4-Tiny
+adaptado para detecção de objetos em contexto de futebol robótico.
 """
 
-import os
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import Model
-from tensorflow.keras.layers import (
-    Input, Conv2D, BatchNormalization, LeakyReLU, Add, 
-    MaxPooling2D, UpSampling2D, Concatenate, Lambda
-)
-from tensorflow.keras.regularizers import l2
+from tensorflow.keras.layers import (Input, Conv2D, BatchNormalization,
+                                    LeakyReLU, MaxPool2D, ZeroPadding2D,
+                                    Concatenate, Lambda, UpSampling2D)
+from tensorflow.keras.models import Model
+
 
 class YOEOModel:
     """
-    Implementação do modelo YOEO (You Only Encode Once) que combina detecção
-    de objetos e segmentação semântica em uma única rede neural.
+    Implementação do modelo YOLOv4-Tiny para detecção de objetos.
     
-    Esta classe implementa uma arquitetura baseada em YOLO com um backbone
-    compartilhado e duas cabeças: uma para detecção de objetos e outra para
-    segmentação semântica.
+    Esta classe implementa o modelo YOLOv4-Tiny para detecção de objetos
+    (bola, gol, robô) em contexto de futebol robótico.
     """
     
-    def __init__(self, 
-                 input_shape=(416, 416, 3),
-                 num_classes=3,
-                 num_seg_classes=2,
-                 anchors=None):
+    def __init__(self, input_shape=(416, 416, 3), num_classes=3, detection_only=True):
         """
-        Inicializa o modelo YOEO.
+        Inicializa o modelo YOLOv4-Tiny.
         
         Args:
-            input_shape (tuple): Formato da imagem de entrada (altura, largura, canais)
-            num_classes (int): Número de classes para detecção de objetos
-            num_seg_classes (int): Número de classes para segmentação semântica
-            anchors (list): Lista de anchors para as diferentes escalas
+            input_shape: Forma de entrada para o modelo (altura, largura, canais)
+            num_classes: Número de classes para detecção
+            detection_only: Se True, remove completamente a parte de segmentação
         """
         self.input_shape = input_shape
         self.num_classes = num_classes
-        self.num_seg_classes = num_seg_classes
+        self.detection_only = detection_only
         
-        # Anchors padrão se não forem fornecidos
-        if anchors is None:
-            self.anchors = {
-                'large': [[0.28, 0.22], [0.38, 0.48], [0.9, 0.78]],
-                'medium': [[0.07, 0.15], [0.15, 0.11], [0.14, 0.29]],
-                'small': [[0.02, 0.03], [0.04, 0.07], [0.08, 0.06]]
-            }
-        else:
-            self.anchors = anchors
-            
-        self.model = None
-    
-    def _conv_block(self, x, filters, kernel_size, strides=1, use_bias=False):
+        # Definir anchors para cada escala
+        self.anchors = {
+            'large': [[81, 82], [135, 169], [344, 319]],  # 13x13
+            'small': [[23, 27], [37, 58], [81, 82]]      # 26x26
+        }
+        
+    def _conv_block(self, x, filters, size, strides=1, batch_norm=True):
         """
-        Bloco convolucional básico: Conv2D + BatchNorm + LeakyReLU
+        Bloco de convolução com normalização em lote e ativação.
         
         Args:
             x: Tensor de entrada
-            filters: Número de filtros
-            kernel_size: Tamanho do kernel
-            strides: Stride da convolução
-            use_bias: Se deve usar bias na camada convolucional
+            filters: Número de filtros para a camada convolucional
+            size: Tamanho do kernel
+            strides: Tamanho do stride para a convolução
+            batch_norm: Se deve aplicar normalização em lote
             
         Returns:
-            Tensor de saída após aplicar o bloco convolucional
+            Tensor resultante
         """
-        x = Conv2D(filters, kernel_size, strides=strides, padding='same',
-                   use_bias=use_bias, kernel_regularizer=l2(5e-4))(x)
-        x = BatchNormalization()(x)
-        x = LeakyReLU(alpha=0.1)(x)
-        return x
+        padding = 'same'
+        
+        conv = Conv2D(filters=filters, kernel_size=size,
+                      strides=strides, padding=padding,
+                      use_bias=not batch_norm,
+                      kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                      kernel_initializer=tf.random_normal_initializer(stddev=0.01))(x)
+        
+        if batch_norm:
+            conv = BatchNormalization()(conv)
+            conv = LeakyReLU(alpha=0.1)(conv)
+            
+        return conv
     
-    def _residual_block(self, x, filters):
+    def _detection_head(self, x, num_anchors, num_classes):
         """
-        Bloco residual com conexão de atalho
+        Cabeçalho de detecção YOLOv4-Tiny.
         
         Args:
             x: Tensor de entrada
-            filters: Número de filtros
+            num_anchors: Número de anchors
+            num_classes: Número de classes
             
         Returns:
-            Tensor de saída após aplicar o bloco residual
+            Tensor de saída com predições
         """
-        shortcut = x
-        x = self._conv_block(x, filters // 2, 1)
-        x = self._conv_block(x, filters, 3)
-        x = Add()([shortcut, x])
-        return x
+        # Número de parâmetros por bbox: 4 (x,y,w,h) + 1 (objectness) + num_classes
+        num_filters = num_anchors * (5 + num_classes)
+        
+        x = self._conv_block(x, filters=num_filters, size=1, batch_norm=False)
+        
+        # Usar camada Reshape nativa do Keras em vez de Lambda
+        # Isso evita problemas com KerasTensor
+        input_shape = tf.keras.backend.int_shape(x)
+        target_shape = (input_shape[1], input_shape[2], num_anchors, 5 + num_classes)
+        
+        # Reshape para [batch, grid_h, grid_w, num_anchors, box_params]
+        # onde box_params = [x, y, w, h, objectness, ...class_probs]
+        return tf.keras.layers.Reshape(target_shape)(x)
     
-    def _detection_head(self, inputs, num_anchors, num_classes):
-        """
-        Cabeça de detecção para uma escala específica
-        
-        Args:
-            inputs: Tensor de entrada
-            num_anchors: Número de anchors para esta escala
-            num_classes: Número de classes para detecção
-            
-        Returns:
-            Tensor de saída para detecção de objetos
-        """
-        x = self._conv_block(inputs, 256, 3)
-        x = Conv2D(num_anchors * (5 + num_classes), 1, padding='same')(x)
-
-        # Envolvemos a lógica de shape e reshape dentro de um Lambda
-        def reshape_yolo(t):
-            shape = tf.shape(t)
-            b, h, w, c = shape[0], shape[1], shape[2], shape[3]
-            # c deve ser == num_anchors*(5 + num_classes)
-            return tf.reshape(t, [b, h, w, num_anchors, 5 + num_classes])
-
-        x = Lambda(reshape_yolo)(x)
-        return x
-    
-    def _segmentation_head(self, features, num_seg_classes):
-        """
-        Cabeça de segmentação que processa as features do backbone.
-        
-        Args:
-            features: Lista de features do backbone em diferentes escalas
-            num_seg_classes: Número de classes de segmentação
-            
-        Returns:
-            Tensor de saída para segmentação
-        """
-        # Imprimir as formas das features para debug
-        print("Formas das features:")
-        for i, feat in enumerate(features):
-            print(f"Feature {i}: {feat.shape}")
-        
-        # Começa no final (menor resolução)
-        x = features[-1]  # (None, 13, 13, 1024)
-        
-        # Upsampling para 26x26
-        x = self._conv_block(x, 512, 1)
-        x = UpSampling2D(2)(x)
-        x = Concatenate()([x, features[-2]])  # Concatenar com feature de 26x26
-        x = self._conv_block(x, 256, 3)
-        
-        # Upsampling para 52x52
-        x = self._conv_block(x, 128, 1)
-        x = UpSampling2D(2)(x)
-        x = Concatenate()([x, features[-3]])  # Concatenar com feature de 52x52
-        x = self._conv_block(x, 128, 3)
-        
-        # Upsampling para 104x104
-        x = self._conv_block(x, 64, 1)
-        x = UpSampling2D(2)(x)
-        x = Concatenate()([x, features[-4]])  # Concatenar com feature de 104x104
-        x = self._conv_block(x, 64, 3)
-        
-        # Upsampling para 208x208
-        x = self._conv_block(x, 32, 1)
-        x = UpSampling2D(2)(x)
-        x = Concatenate()([x, features[-5]])  # Concatenar com feature de 208x208
-        x = self._conv_block(x, 32, 3)
-        
-        # Upsampling final para 416x416 (tamanho original)
-        x = self._conv_block(x, 16, 1)
-        x = UpSampling2D(2)(x)
-        x = self._conv_block(x, 16, 3)
-        
-        # Camada final de segmentação
-        x = Conv2D(num_seg_classes, 1, padding='same', activation='softmax')(x)
-        
-        return x
-
-    def backbone(self, inputs):
-        """
-        Implementa o backbone da rede que extrai features em diferentes escalas.
-        
-        Args:
-            inputs: Tensor de entrada
-            
-        Returns:
-            Tupla de tensores de features (pequena, média, grande)
-        """
-        features = []
-        
-        # Bloco inicial
-        x = self._conv_block(inputs, 32, 3)
-        
-        # Blocos downsampling
-        x = self._conv_block(x, 64, 3, strides=2)
-        features.append(x)  # 208x208
-        
-        x = self._conv_block(x, 128, 3, strides=2)
-        for _ in range(2):
-            x = self._residual_block(x, 128)
-        features.append(x)  # 104x104
-        
-        x = self._conv_block(x, 256, 3, strides=2)
-        for _ in range(8):
-            x = self._residual_block(x, 256)
-        features.append(x)  # 52x52
-        
-        x = self._conv_block(x, 512, 3, strides=2)
-        for _ in range(8):
-            x = self._residual_block(x, 512)
-        features.append(x)  # 26x26
-        
-        x = self._conv_block(x, 1024, 3, strides=2)
-        for _ in range(4):
-            x = self._residual_block(x, 1024)
-        features.append(x)  # 13x13
-        
-        # Processamento para gerar features para detecção em diferentes escalas
-        # Feature grande (para objetos pequenos)
-        x_large = self._conv_block(features[-1], 512, 1)
-        x_large = self._conv_block(x_large, 1024, 3)
-        x_large = self._conv_block(x_large, 512, 1)
-        
-        # Feature média (para objetos médios)
-        x_medium = self._conv_block(x_large, 256, 1)
-        x_medium = UpSampling2D(2)(x_medium)
-        x_medium = Concatenate()([x_medium, features[-2]])
-        x_medium = self._conv_block(x_medium, 256, 1)
-        x_medium = self._conv_block(x_medium, 512, 3)
-        x_medium = self._conv_block(x_medium, 256, 1)
-        
-        # Feature pequena (para objetos grandes)
-        x_small = self._conv_block(x_medium, 128, 1)
-        x_small = UpSampling2D(2)(x_small)
-        x_small = Concatenate()([x_small, features[-3]])
-        x_small = self._conv_block(x_small, 128, 1)
-        x_small = self._conv_block(x_small, 256, 3)
-        x_small = self._conv_block(x_small, 128, 1)
-        
-        return x_small, x_medium, x_large
-
-    def detection_head(self, x, num_classes, name):
-        """
-        Implementa a cabeça de detecção para o modelo.
-        
-        Args:
-            x: Tensor de entrada
-            num_classes: Número de classes de detecção
-            name: Nome da cabeça de detecção
-            
-        Returns:
-            Tensor de saída para detecção
-        """
-        num_anchors = 3  # Usando 3 âncoras por escala
-        
-        # Aplicar convoluções e gerar saída
-        x = self._conv_block(x, 256, 3)
-        x = Conv2D(num_anchors * (5 + num_classes), 1, padding='same', name=name)(x)
-        
-        # Reshape para formato adequado [batch, grid_h, grid_w, anchors, 5+num_classes]
-        def reshape_detection(t):
-            shape = tf.shape(t)
-            batch_size, height, width, channels = shape[0], shape[1], shape[2], shape[3]
-            return tf.reshape(t, [batch_size, height, width, num_anchors, 5 + num_classes])
-        
-        x = Lambda(reshape_detection, name=f"{name}_reshape")(x)
-        return x
-
-    def segmentation_head(self, x_small, x_medium, x_large, num_seg_classes):
-        """
-        Implementa a cabeça de segmentação para o modelo.
-        
-        Args:
-            x_small: Feature map pequena
-            x_medium: Feature map média
-            x_large: Feature map grande
-            num_seg_classes: Número de classes de segmentação
-            
-        Returns:
-            Tensor de saída para segmentação
-        """
-        # Começar com a feature map média
-        x = self._conv_block(x_medium, 256, 3)
-        
-        # Upsample e concatenar com a feature map pequena
-        x = self._conv_block(x, 128, 1)
-        x = UpSampling2D(2)(x)
-        x = Concatenate()([x, x_small])
-        
-        # Continuar upsampling para alcançar a resolução de entrada
-        for filters in [128, 64, 32]:
-            x = self._conv_block(x, filters, 3)
-            x = UpSampling2D(2)(x)
-        
-        # Camada final para segmentação
-        x = Conv2D(num_seg_classes, 1, padding='same', activation='softmax', name='segmentation')(x)
-        
-        return x
-
     def build(self):
         """
-        Constrói o modelo YOEO.
+        Constrói o modelo YOLOv4-Tiny.
         
         Returns:
-            Modelo compilado do YOEO com cabeças para detecção e segmentação.
+            Modelo Keras compilado
         """
-        # Camada de entrada
-        inputs = Input(shape=self.input_shape, name='input')
+        # Entrada
+        inputs = Input(self.input_shape)
         
-        # Backbone e feature pyramid
-        x_small, x_medium, x_large = self.backbone(inputs)
+        # Backbone (CSPDarknet53-Tiny)
+        x = self._conv_block(inputs, 32, 3)
+        x = MaxPool2D(pool_size=2, strides=2, padding='same')(x)
         
-        # Cabeças de detecção para diferentes escalas
-        detection_small = self.detection_head(x_small, self.num_classes, "detection_small")
-        detection_medium = self.detection_head(x_medium, self.num_classes, "detection_medium")
-        detection_large = self.detection_head(x_large, self.num_classes, "detection_large")
+        x = self._conv_block(x, 64, 3)
+        x = MaxPool2D(pool_size=2, strides=2, padding='same')(x)
         
-        # Cabeça de segmentação
-        segmentation = self.segmentation_head(x_small, x_medium, x_large, self.num_seg_classes)
+        x = self._conv_block(x, 128, 3)
+        x = MaxPool2D(pool_size=2, strides=2, padding='same')(x)
         
-        # Criar e retornar o modelo usando um dicionário de saídas para facilitar o treinamento
-        model = Model(
-            inputs=inputs,
-            outputs={
-                "detection_small": detection_small,
-                "detection_medium": detection_medium,
-                "detection_large": detection_large,
-                "segmentation": segmentation
-            },
-            name="yoeo"
-        )
+        x = self._conv_block(x, 256, 3)
+        route_1 = x  # Salvar para concatenação posterior
+        x = MaxPool2D(pool_size=2, strides=2, padding='same')(x)
         
-        self.model = model
+        x = self._conv_block(x, 512, 3)
+        x = MaxPool2D(pool_size=2, strides=2, padding='same')(x)
         
-        # Exibir resumo do modelo
-        print("\nResumo do modelo YOEO:")
-        print(f"- Entrada: {inputs.shape}")
-        print(f"- Detecção (pequena): {detection_small.shape}")
-        print(f"- Detecção (média): {detection_medium.shape}")
-        print(f"- Detecção (grande): {detection_large.shape}")
-        print(f"- Segmentação: {segmentation.shape}")
+        x = self._conv_block(x, 1024, 3)
+        
+        # Detection branches
+        # Branch 1 (13x13 grid)
+        branch_1 = self._conv_block(x, 256, 1)
+        branch_1 = self._conv_block(branch_1, 512, 3)
+        branch_1_detection = self._detection_head(branch_1, len(self.anchors['large']), self.num_classes)
+        
+        # Branch 2 (26x26 grid)
+        branch_2 = self._conv_block(branch_1, 128, 1)
+        
+        # Use uma camada de UpSampling2D em vez de Lambda com tf.image.resize
+        # Isso evita problemas de KerasTensor sendo usado em uma função TensorFlow
+        # A UpSampling2D é uma camada nativa do Keras que não causa esse problema
+        route_1_shape = tf.keras.backend.int_shape(route_1)
+        branch_1_shape = tf.keras.backend.int_shape(branch_2)
+        
+        # Calcular fator de upsampling 
+        upsampling_factor = route_1_shape[1] // branch_1_shape[1]
+        
+        # Substituir Lambda por UpSampling2D
+        branch_2 = tf.keras.layers.UpSampling2D(size=(upsampling_factor, upsampling_factor))(branch_2)
+        
+        branch_2 = Concatenate()([branch_2, route_1])
+        branch_2 = self._conv_block(branch_2, 256, 3)
+        branch_2_detection = self._detection_head(branch_2, len(self.anchors['small']), self.num_classes)
+        
+        # Adicionar nomes às camadas de saída
+        branch_1_output = tf.keras.layers.Reshape(
+            tf.keras.backend.int_shape(branch_1_detection)[1:],
+            name="output_1"
+        )(branch_1_detection)
+        
+        branch_2_output = tf.keras.layers.Reshape(
+            tf.keras.backend.int_shape(branch_2_detection)[1:],
+            name="output_2"
+        )(branch_2_detection)
+        
+        # Se for somente detecção, remover qualquer parte de segmentação
+        if self.detection_only:
+            model = Model(inputs, [branch_2_output, branch_1_output])
+        else:
+            # Criar um output dummy de segmentação para manter compatibilidade
+            # Usando camadas nativas do Keras em vez de Lambda
+            zero_initializer = tf.keras.initializers.Zeros()
+            dummy_segmentation = tf.keras.layers.Conv2D(
+                filters=1,
+                kernel_size=1,
+                padding='same',
+                kernel_initializer=zero_initializer,
+                bias_initializer=zero_initializer,
+                trainable=False
+            )(inputs)
+            
+            # Garantir que o tamanho seja correto usando Resize
+            dummy_segmentation = tf.keras.layers.experimental.preprocessing.Resizing(
+                self.input_shape[0], self.input_shape[1]
+            )(dummy_segmentation)
+            
+            model = Model(inputs, [branch_2_output, branch_1_output, dummy_segmentation])
         
         return model
     
     def load_weights(self, weights_path):
         """
-        Carrega pesos pré-treinados para o modelo
+        Carrega os pesos do modelo a partir de um arquivo.
         
         Args:
             weights_path: Caminho para o arquivo de pesos
-            
-        Returns:
-            True se os pesos foram carregados com sucesso, False caso contrário
         """
-        if self.model is None:
-            self.build()
-            
-        try:
-            if weights_path.endswith('.h5'):
-                self.model.load_weights(weights_path)
-            else:
-                self.model = tf.keras.models.load_model(weights_path)
-            return True
-        except Exception as e:
-            print(f"Erro ao carregar pesos: {e}")
-            return False
+        model = self.build()
+        model.load_weights(weights_path)
+        return model
     
-    def save(self, model_path):
+    def save(self, save_path):
         """
-        Salva o modelo em um arquivo
+        Salva o modelo em um arquivo.
         
         Args:
-            model_path: Caminho para salvar o modelo
-            
-        Returns:
-            True se o modelo foi salvo com sucesso, False caso contrário
+            save_path: Caminho para salvar o modelo
         """
-        if self.model is None:
-            print("Modelo não foi construído ainda.")
-            return False
-            
-        try:
-            if model_path.endswith('.h5'):
-                self.model.save_weights(model_path)
-            else:
-                self.model.save(model_path)
-            return True
-        except Exception as e:
-            print(f"Erro ao salvar modelo: {e}")
-            return False
-    
+        model = self.build()
+        model.save(save_path)
+        
     def summary(self):
         """
-        Exibe um resumo da arquitetura do modelo
+        Exibe um resumo da arquitetura do modelo.
         """
-        if self.model is None:
-            self.build()
-        
-        return self.model.summary()
+        model = self.build()
+        model.summary()
 
 
 if __name__ == "__main__":
     # Exemplo de uso
-    model = YOEOModel(input_shape=(416, 416, 3), num_classes=3, num_seg_classes=2)
-    model.build()
-    model.summary()
-    
-    # Verificar formato das saídas
-    dummy_input = np.zeros((1, 416, 416, 3), dtype=np.float32)
-    outputs = model.model.predict(dummy_input)
-    
-    print("\nFormatos das saídas:")
-    print(f"Detecção (escala pequena): {outputs['detection_small'].shape}")
-    print(f"Detecção (escala média): {outputs['detection_medium'].shape}")
-    print(f"Detecção (escala grande): {outputs['detection_large'].shape}")
-    print(f"Segmentação: {outputs['segmentation'].shape}") 
+    model = YOEOModel(input_shape=(416, 416, 3), num_classes=3, detection_only=True)
+    yolo = model.build()
+    yolo.summary()
+    print("Modelo YOLOv4-Tiny para detecção construído com sucesso!") 

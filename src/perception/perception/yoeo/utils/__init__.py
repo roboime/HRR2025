@@ -2,60 +2,45 @@
 # -*- coding: utf-8 -*-
 
 """
-Utilitários para o sistema YOEO.
+Utilitários para o sistema YOLOv4-Tiny.
 
-Este módulo contém funções e classes auxiliares para o sistema YOEO,
-incluindo:
+Este módulo fornece funções para auxiliar o funcionamento do modelo YOLOv4-Tiny
+para detecção de objetos em imagens de robô futebol, incluindo:
 
-- Funções para pré-processamento de imagens
-- Funções para pós-processamento de detecções e segmentações
-- Utilitários para visualização de resultados
-- Funções para avaliação de desempenho
-- Utilitários para conversão de formatos de dados
-- Funções para calibração de câmera
+- Processamento de imagens (pré-processamento, aumento de dados)
+- Pós-processamento de detecções (NMS, conversão de coordenadas)
+- Avaliação de desempenho (mAP, recall, precision)
+- Geradores de dados para treinamento
 
-Estes utilitários são usados pelos componentes principais do sistema YOEO
-para facilitar o processamento de imagens e a manipulação de dados.
 """
 
+import numpy as np
 from .data_utils import (
-    load_image, load_mask, load_annotations,
-    normalize_image, prepare_dataset, YOEODataGenerator,
-    visualize_batch
+    load_image,
+    load_annotations,
+    normalize_image,
+    prepare_dataset,
+    create_augmentation_pipeline
 )
-
 from .loss_utils import (
-    detection_loss, segmentation_loss, YOEOLoss,
-    detection_metrics, segmentation_metrics,
-    iou_metric, dice_coefficient
+    detection_loss,
+    detection_metrics,
+    create_detection_loss
 )
 
 # Versão do módulo de utilitários
-__version__ = '0.1.0'
+__version__ = '0.2.0'
 
-# Exportação das funções e classes principais (a serem implementadas)
+# Exportação das funções e classes principais
 __all__ = [
-    # Pré-processamento
-    # 'preprocess_image',
-    # 'normalize_image',
-    
-    # Pós-processamento
-    # 'filter_detections',
-    # 'apply_nms',
-    
-    # Visualização
-    # 'draw_detections',
-    # 'draw_segmentation',
-    
-    # Avaliação
-    # 'calculate_map',
-    # 'calculate_iou',
-    
-    # Conversão
-    # 'detection_to_ros_msg',
-    # 'segmentation_to_ros_msg',
-    
-    # Calibração
-    # 'calibrate_camera',
-    # 'undistort_image',
+    # Data utils
+    'load_image',
+    'load_annotations',
+    'normalize_image',
+    'prepare_dataset',
+    'create_augmentation_pipeline',
+    # Loss utils
+    'detection_loss',
+    'detection_metrics',
+    'create_detection_loss'
 ] 

@@ -1,99 +1,69 @@
-# Configuracao para treinamento do modelo YOEO
+# Configuração para treinamento do modelo YOLOv4-Tiny
+# Otimizado para detecção de objetos em futebol de robôs (apenas bounding boxes)
 
-# Configuracaes do modelo
-input_width: 416
-input_height: 416
+# Classes de detecção
 classes: [
   'bola',    # Bola de futebol
   'gol',     # Postes de gol
-  'robo'     # Robos (proprios e adversarios)
-]
-segmentation_classes: [
-  'linha',   # Linhas do campo
-  'campo'    # Area do campo
+  'robo'     # Robôs (próprios e adversários)
 ]
 
-# Configuracoes do dataset
-dataset_base_dir: "resources/dataset"
+# Configurações do modelo
+input_width: 416
+input_height: 416
+batch_size: 8
+epochs: 100
+
+# Diretórios dos datasets
+data_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset"
 train_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/train"
-val_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/val"
+val_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/valid"
 test_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/test"
+
+# Arquivos de anotações
+train_annotations: "train/_annotations.coco.json"
+val_annotations: "valid/_annotations.coco.json"
+test_annotations: "test/_annotations.coco.json"
+
+# Diretórios de saída
+checkpoint_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models/checkpoints"
+log_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models/logs"
+output_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models"
+
+# Hiperparâmetros de treinamento
+learning_rate: 0.001
+warmup_epochs: 3
+early_stopping_patience: 15
+
+# Augmentação de dados
+augmentation:
+  rotation_range: 10
+  width_shift_range: 0.1
+  height_shift_range: 0.1
+  brightness_range: [0.8, 1.2]
+  horizontal_flip: true
+  vertical_flip: false
+  zoom_range: 0.1
+  random_crop: false
+  
+# Opções de exportação
+export_tensorrt: true
+use_pretrained: true
+pretrained_weights: null  # Será baixado automaticamente se use_pretrained=true
+
+# Parâmetros de otimização
+mixed_precision: true
+workers: 8
+use_multiprocessing: true
 
 # Estrutura do dataset esperada:
 # resources/dataset/
 #   ├── train/
 #   │   ├── img1.png
-#   │   └── annotations.json     # Anotacoes COCO com segmentação e bounding boxes
-#   ├── val/
+#   │   └── _annotations.coco.json     # Anotações COCO com bounding boxes
+#   ├── valid/
 #   │   ├── img2.png
-#   │   └── annotations.json
+#   │   └── _annotations.coco.json
 #   └── test/
 #       ├── img3.png
-#       └── annotations.json
-
-# Configuracoes de treinamento
-batch_size: 8
-epochs: 10
-learning_rate: 0.001
-weight_decay: 0.0005
-early_stopping_patience: 10
-reduce_lr_patience: 5
-
-# Configuracoes de aumento de dados
-rotation_range: 5
-width_shift_range: 0.1
-height_shift_range: 0.1
-brightness_range: [0.8, 1.2]
-horizontal_flip: true
-
-# Diretorios de saida
-checkpoint_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models/checkpoints"
-log_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models/logs"
-output_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models"
-
-# Opções de exportacao
-export_tensorrt: true
-pretrained_weights: null  # Caminho para pesos pre-treinados (opcional)
-
-# Anchors para diferentes escalas (pre-definidos)
-anchors_large: [[0.28, 0.22], [0.38, 0.48], [0.9, 0.78]]    # Para objetos grandes
-anchors_medium: [[0.07, 0.15], [0.15, 0.11], [0.14, 0.29]]  # Para objetos médios
-anchors_small: [[0.02, 0.03], [0.04, 0.07], [0.08, 0.06]]   # Para objetos pequenos 
-
-# Diretórios
-data_dir: 'src/perception/resources/dataset'
-checkpoint_dir: 'src/perception/resources/models/checkpoints'
-log_dir: 'src/perception/resources/logs'
-output_dir: 'src/perception/resources/models'
-
-# Pré-processamento de dados
-input_height: 416
-input_width: 416
-batch_size: 16
-validation_split: 0.2
-
-# Classes
-classes: ['bola', 'gol', 'robo']
-segmentation_classes: ['linha', 'campo']
-
-# Hiperparâmetros
-learning_rate: 0.001
-epochs: 100  
-early_stopping_patience: 10
-
-# Pesos das perdas
-detection_loss_weight: 1.0
-segmentation_loss_weight: 1.0
-
-# Augmentação
-augmentation:
-  flip_horizontal: true
-  flip_vertical: true
-  rotation_range: 5
-  brightness_range: [0.8, 1.2]
-  contrast_range: [0.8, 1.2]
-  blur_limit: 3
-  
-# Checkpoints
-save_best_only: true
-save_weights_only: true 
+#       └── _annotations.coco.json 

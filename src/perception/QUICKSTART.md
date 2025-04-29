@@ -96,4 +96,33 @@ ros2 run rqt_image_view rqt_image_view /vision/debug_image
 - **YOEO não funciona**: Verifique se o TensorFlow está instalado e o modelo está no caminho correto.
 - **Desempenho lento**: Desabilite o debug com `debug:=false` para melhor desempenho.
 
-Para mais informações, consulte o [README.md](README.md) completo. 
+Para mais informações, consulte o [README.md](README.md) completo.
+
+## Treinamento do Modelo YOLOv4-Tiny
+
+Para treinar o modelo YOLOv4-Tiny personalizado, siga os passos abaixo:
+
+1. **Organize o Dataset**:
+   ```bash
+   cd src/perception
+   mkdir -p resources/dataset/{train,val,test}
+   ```
+   Coloque as imagens e anotações no formato COCO em cada diretório.
+
+2. **Configure os Parâmetros de Treinamento**:
+   Edite o arquivo `config/training_config.yaml` conforme necessário.
+
+3. **Execute o Treinamento**:
+   ```bash
+   python -m perception.yoeo.train_yoeo --config=config/training_config.yaml
+   ```
+
+4. **Otimize com TensorRT** (para melhor desempenho):
+   ```bash
+   python -m perception.yoeo.tensorrt_converter \
+     --model_path=resources/models/yoeo_model.h5 \
+     --output_dir=resources/models \
+     --precision=FP16
+   ```
+
+Para mais detalhes, consulte o guia completo em `perception/yoeo/utils/README.md`. 

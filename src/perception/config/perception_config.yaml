@@ -62,7 +62,7 @@ camera:
 #=======================================#
 yoeo:
   # Configurações do modelo
-  model_path: "resources/models/yoeo_model.h5"  # Caminho para o modelo
+  model_path: "resources/models/yolov4_tiny_full.h5"  # Caminho para o modelo
   input_width: 416              # Largura da entrada do modelo
   input_height: 416             # Altura da entrada do modelo
   
@@ -73,11 +73,9 @@ yoeo:
   # Otimização
   use_tensorrt: true           # Usar TensorRT para otimização
   
-  # Componentes habilitados
+  # Componentes habilitados (apenas detecção)
   components:
     ball: true                  # Habilitar detecção de bola
-    field: false                 # Habilitar segmentação de campo
-    lines: false                 # Habilitar segmentação de linhas
     goals: true                 # Habilitar detecção de gols
     robots: true                # Habilitar detecção de robôs
     referee: false              # Habilitar detecção de árbitro
