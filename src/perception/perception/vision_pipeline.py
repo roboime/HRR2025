@@ -288,7 +288,7 @@ class VisionPipeline(Node):
         self.declare_parameter('use_traditional', True)
         
         # Parâmetros para YOEO
-        self.declare_parameter('yoeo_model_path', 'resource/models/yoeo_model.h5')
+        self.declare_parameter('yoeo_model_path', './src/perception/resources/models/yolov4_tiny.h5')
         self.declare_parameter('yoeo_confidence_threshold', 0.5)
         self.declare_parameter('use_tensorrt', False)
         
@@ -390,9 +390,18 @@ class VisionPipeline(Node):
         if self.use_yoeo and YOEO_AVAILABLE:
             try:
                 self.get_logger().info(f'Carregando modelo YOEO de: {self.yoeo_model_path}')
-                # Aqui normalmente carregaríamos o modelo real
-                # Para este exemplo, estamos apenas sinalizando que está disponível
-                self.yoeo_handler = True
+                # Criar configuração do modelo
+                model_config = {
+                    "model_path": self.yoeo_model_path,
+                    "input_width": 416,
+                    "input_height": 416,
+                    "confidence_threshold": self.yoeo_confidence_threshold,
+                    "iou_threshold": 0.45,
+                    "use_tensorrt": self.use_tensorrt
+                }
+                # Carregar o modelo usando o manipulador YOEO
+                from perception.yoeo.yoeo_handler import YOEOHandler
+                self.yoeo_handler = YOEOHandler(model_config)
                 self.get_logger().info('Modelo YOEO carregado com sucesso')
             except Exception as e:
                 self.get_logger().error(f'Erro ao carregar modelo YOEO: {str(e)}')
@@ -657,17 +666,149 @@ class VisionPipeline(Node):
         Returns:
             dict: Resultados do processamento
         """
-        # Este é um exemplo simplificado de como seria o processamento com YOEO
-        # Em uma implementação real, isso chamaria o detector YOEO e processaria os resultados
+        # Verificar se o manipulador YOEO está disponível
+        if self.yoeo_handler is None:
+            return {'success': False}
+            
+        try:
+            # Converter BGR para RGB (o modelo espera RGB)
+            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            # Processar a imagem com o manipulador YOEO
+            detections, inference_time = self.yoeo_handler.process(rgb_image)
+            
+            # Inicializar resultados
+            results = {'success': True, 'yoeo_detections': []}
+            
+            # Processar detecções
+            if detections:
+                # Separar detecções por classe
+                balls = []
+                goals = []
+                robots = []
+                
+                for det in detections:
+                    # Obter informações da detecção
+                    bbox = det['bbox']  # [x1, y1, x2, y2]
+                    class_id = det['class']
+                    confidence = det['confidence']
+                    
+                    # Adicionar à lista apropriada
+                    if class_id.name == 'BALL':
+                        balls.append(det)
+                        # Desenhar bola na imagem de debug
+                        cv2.rectangle(debug_image, 
+                                    (int(bbox[0]), int(bbox[1])), 
+                                    (int(bbox[2]), int(bbox[3])), 
+                                    (0, 255, 255), 2)
+                        cv2.putText(debug_image, f"Bola: {confidence:.2f}", 
+                                   (int(bbox[0]), int(bbox[1])-5), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                    
+                    elif class_id.name == 'GOAL':
+                        goals.append(det)
+                        # Desenhar gol na imagem de debug
+                        cv2.rectangle(debug_image, 
+                                    (int(bbox[0]), int(bbox[1])), 
+                                    (int(bbox[2]), int(bbox[3])), 
+                                    (255, 0, 0), 2)
+                        cv2.putText(debug_image, f"Gol: {confidence:.2f}", 
+                                   (int(bbox[0]), int(bbox[1])-5), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                    
+                    elif class_id.name == 'ROBOT':
+                        robots.append(det)
+                        # Desenhar robô na imagem de debug
+                        cv2.rectangle(debug_image, 
+                                    (int(bbox[0]), int(bbox[1])), 
+                                    (int(bbox[2]), int(bbox[3])), 
+                                    (255, 0, 255), 2)
+                        cv2.putText(debug_image, f"Robô: {confidence:.2f}", 
+                                   (int(bbox[0]), int(bbox[1])-5), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
+                
+                # Adicionar resultados específicos
+                if balls:
+                    results['ball'] = self._create_ball_pose_from_detection(balls[0])
+                
+                if goals:
+                    results['goals'] = self._create_goal_pose_array_from_detections(goals)
+                
+                if robots:
+                    results['robots'] = self._create_robot_pose_array_from_detections(robots)
+                
+                # Adicionar FPS na imagem de debug
+                fps_text = f"YOEO: {1.0/inference_time:.1f} FPS"
+                cv2.putText(debug_image, fps_text, 
+                           (debug_image.shape[1] - 200, 50), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+            
+            return results
+            
+        except Exception as e:
+            self.get_logger().error(f"Erro no processamento YOEO: {str(e)}")
+            return {'success': False}
+    
+    def _create_ball_pose_from_detection(self, detection):
+        """Cria uma mensagem Pose2D a partir de uma detecção de bola."""
+        bbox = detection['bbox']  # [x1, y1, x2, y2]
         
-        # Simular sucesso na detecção
-        success = True
+        # Calcular centro da bounding box
+        center_x = (bbox[0] + bbox[2]) / 2
+        center_y = (bbox[1] + bbox[3]) / 2
         
-        # Desenhar um marcador no debug para mostrar que o YOEO foi usado
-        cv2.putText(debug_image, "YOEO", (debug_image.shape[1] - 100, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+        # Calcular "raio" (metade da largura)
+        radius = (bbox[2] - bbox[0]) / 2
         
-        return {'success': success}
+        # Criar mensagem Pose2D
+        ball_pose = Pose2D()
+        ball_pose.x = float(center_x)
+        ball_pose.y = float(center_y)
+        ball_pose.theta = float(radius)  # Usar theta para o raio
+        
+        return ball_pose
+    
+    def _create_goal_pose_array_from_detections(self, detections):
+        """Cria um PoseArray a partir de detecções de gols."""
+        pose_array = PoseArray()
+        
+        for det in detections:
+            bbox = det['bbox']  # [x1, y1, x2, y2]
+            
+            # Calcular centro da bounding box
+            center_x = (bbox[0] + bbox[2]) / 2
+            center_y = (bbox[1] + bbox[3]) / 2
+            
+            # Criar pose (usando x para distância e y para distância lateral)
+            pose = Pose()
+            pose.position.x = float(center_x)
+            pose.position.y = float(center_y)
+            pose.position.z = 0.0
+            
+            pose_array.poses.append(pose)
+        
+        return pose_array
+    
+    def _create_robot_pose_array_from_detections(self, detections):
+        """Cria um PoseArray a partir de detecções de robôs."""
+        pose_array = PoseArray()
+        
+        for det in detections:
+            bbox = det['bbox']  # [x1, y1, x2, y2]
+            
+            # Calcular centro da bounding box
+            center_x = (bbox[0] + bbox[2]) / 2
+            center_y = (bbox[1] + bbox[3]) / 2
+            
+            # Criar pose (usando x para distância e y para distância lateral)
+            pose = Pose()
+            pose.position.x = float(center_x)
+            pose.position.y = float(center_y)
+            pose.position.z = 0.0
+            
+            pose_array.poses.append(pose)
+        
+        return pose_array
     
     def _process_with_traditional(self, image, debug_image):
         """
