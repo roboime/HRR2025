@@ -109,7 +109,7 @@ def setup_darknet():
     
     # Baixando Darknet pré-compilado para Windows (AlexeyAB's versão)
     print("Baixando Darknet pré-compilado para Windows...")
-    download_url = "https://github.com/AlexeyAB/darknet/releases/download/darknet_yolo_v4_pre/darknet-yolo_v4_pre.zip"
+    download_url = "https://github.com/AlexeyAB/darknet/releases/download/darknet_yolo_v4_pre/darknet_yolo_v4_pre.zip"
     if download_file(download_url, darknet_zip):
         # Extrair o arquivo zip
         with zipfile.ZipFile(darknet_zip, 'r') as zip_ref:
@@ -282,7 +282,7 @@ def train_model():
     os.makedirs(backup_dir, exist_ok=True)
     
     # Montar o comando de treinamento - adaptado para Windows
-    darknet_exe = os.path.join(DARKNET_DIR, "darknet.exe")
+    darknet_exe = os.path.join(DARKNET_DIR, "build", "darknet", "x64", "darknet.exe")
     obj_data = os.path.join(DARKNET_DIR, "data", "obj.data")
     custom_cfg = os.path.join(DARKNET_DIR, "cfg", "custom-yolov4-tiny-detector.cfg")
     conv_weights = os.path.join(DARKNET_DIR, "yolov4-tiny.conv.29")
@@ -329,7 +329,7 @@ def test_model():
         img_path = os.path.join("test", random.choice(test_images))
         
         # Executar detecção
-        darknet_exe = os.path.join(DARKNET_DIR, "darknet.exe")
+        darknet_exe = os.path.join(DARKNET_DIR, "build", "darknet", "x64", "darknet.exe")
         weights_path = os.path.join(DARKNET_DIR, "backup", "custom-yolov4-tiny-detector_best.weights")
         custom_cfg = os.path.join(DARKNET_DIR, "cfg", "custom-yolov4-tiny-detector.cfg")
         
