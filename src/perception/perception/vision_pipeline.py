@@ -24,18 +24,50 @@ import sys
 
 # Importar componentes YOEO se disponíveis
 try:
-    from .yoeo.yoeo_detector import YOEOHandler
+    from .yoeo.yoeo_handler import YOEOHandler
     from .yoeo.yoeo_model import YOEOModel
     YOEO_AVAILABLE = True
 except ImportError:
     try:
         # Tentativa alternativa se o import relativo falhar
-        from perception.yoeo.yoeo_detector import YOEOHandler
+        from perception.yoeo.yoeo_handler import YOEOHandler
         from perception.yoeo.yoeo_model import YOEOModel
         YOEO_AVAILABLE = True
     except ImportError:
-        YOEO_AVAILABLE = False
-        print("AVISO: YOEO não está disponível. Usando apenas detectores tradicionais.")
+        try:
+            # Tenta importar de forma direta como último recurso
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            # Função auxiliar para importar módulos a partir do caminho do arquivo
+            if 'import_from_file' not in locals():
+                def import_from_file(module_name, file_path):
+                    spec = importlib.util.spec_from_file_location(module_name, file_path)
+                    if spec is None:
+                        return None
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules[module_name] = module
+                    spec.loader.exec_module(module)
+                    return module
+            
+            # Importar os módulos YOEO diretamente
+            yoeo_handler_path = os.path.join(current_dir, 'yoeo', 'yoeo_handler.py')
+            yoeo_model_path = os.path.join(current_dir, 'yoeo', 'yoeo_model.py')
+            
+            yoeo_handler_module = import_from_file('yoeo_handler', yoeo_handler_path)
+            yoeo_model_module = import_from_file('yoeo_model', yoeo_model_path)
+            
+            if yoeo_handler_module and yoeo_model_module:
+                YOEOHandler = yoeo_handler_module.YOEOHandler
+                YOEOModel = yoeo_model_module.YOEOModel
+                YOEO_AVAILABLE = True
+                print("Módulos YOEO importados diretamente dos arquivos.")
+            else:
+                YOEO_AVAILABLE = False
+                print("AVISO: YOEO não está disponível. Usando apenas detectores tradicionais.")
+        except Exception as e:
+            YOEO_AVAILABLE = False
+            print(f"AVISO: YOEO não está disponível. Erro: {str(e)}")
+            print("Usando apenas detectores tradicionais.")
 
 # Importar detectores tradicionais
 try:
@@ -400,7 +432,6 @@ class VisionPipeline(Node):
                     "use_tensorrt": self.use_tensorrt
                 }
                 # Carregar o modelo usando o manipulador YOEO
-                from perception.yoeo.yoeo_handler import YOEOHandler
                 self.yoeo_handler = YOEOHandler(model_config)
                 self.get_logger().info('Modelo YOEO carregado com sucesso')
             except Exception as e:
