@@ -24,34 +24,49 @@ import sys
 
 # Importar componentes YOEO se disponíveis
 try:
+    print("DEBUG: Tentando importar YOEO com import relativo (.yoeo)")
     from .yoeo.yoeo_handler import YOEOHandler
     from .yoeo.yoeo_model import YOEOModel
     YOEO_AVAILABLE = True
-except ImportError:
+    print("DEBUG: Import relativo do YOEO bem-sucedido")
+except ImportError as e:
+    print(f"DEBUG: Falha no import relativo do YOEO: {str(e)}")
     try:
         # Tentativa alternativa se o import relativo falhar
+        print("DEBUG: Tentando importar YOEO com import absoluto (perception.yoeo)")
         from perception.yoeo.yoeo_handler import YOEOHandler
         from perception.yoeo.yoeo_model import YOEOModel
         YOEO_AVAILABLE = True
-    except ImportError:
+        print("DEBUG: Import absoluto do YOEO bem-sucedido")
+    except ImportError as e:
+        print(f"DEBUG: Falha no import absoluto do YOEO: {str(e)}")
         try:
             # Tenta importar de forma direta como último recurso
+            print("DEBUG: Tentando importar YOEO diretamente do caminho do arquivo")
             current_dir = os.path.dirname(os.path.abspath(__file__))
+            print(f"DEBUG: Diretório atual: {current_dir}")
             
             # Função auxiliar para importar módulos a partir do caminho do arquivo
             if 'import_from_file' not in locals():
                 def import_from_file(module_name, file_path):
+                    print(f"DEBUG: Tentando importar {module_name} de {file_path}")
                     spec = importlib.util.spec_from_file_location(module_name, file_path)
                     if spec is None:
+                        print(f"DEBUG: Especificação não encontrada para {file_path}")
                         return None
                     module = importlib.util.module_from_spec(spec)
                     sys.modules[module_name] = module
                     spec.loader.exec_module(module)
+                    print(f"DEBUG: Módulo {module_name} importado com sucesso")
                     return module
             
             # Importar os módulos YOEO diretamente
             yoeo_handler_path = os.path.join(current_dir, 'yoeo', 'yoeo_handler.py')
             yoeo_model_path = os.path.join(current_dir, 'yoeo', 'yoeo_model.py')
+            
+            print(f"DEBUG: Verificando existência dos arquivos:")
+            print(f"DEBUG: yoeo_handler.py existe: {os.path.exists(yoeo_handler_path)}")
+            print(f"DEBUG: yoeo_model.py existe: {os.path.exists(yoeo_model_path)}")
             
             yoeo_handler_module = import_from_file('yoeo_handler', yoeo_handler_path)
             yoeo_model_module = import_from_file('yoeo_model', yoeo_model_path)
@@ -60,12 +75,13 @@ except ImportError:
                 YOEOHandler = yoeo_handler_module.YOEOHandler
                 YOEOModel = yoeo_model_module.YOEOModel
                 YOEO_AVAILABLE = True
-                print("Módulos YOEO importados diretamente dos arquivos.")
+                print("DEBUG: Módulos YOEO importados diretamente dos arquivos.")
             else:
                 YOEO_AVAILABLE = False
                 print("AVISO: YOEO não está disponível. Usando apenas detectores tradicionais.")
         except Exception as e:
             YOEO_AVAILABLE = False
+            print(f"DEBUG: Erro ao importar YOEO diretamente: {str(e)}")
             print(f"AVISO: YOEO não está disponível. Erro: {str(e)}")
             print("Usando apenas detectores tradicionais.")
 
@@ -422,6 +438,9 @@ class VisionPipeline(Node):
         if self.use_yoeo and YOEO_AVAILABLE:
             try:
                 self.get_logger().info(f'Carregando modelo YOEO de: {self.yoeo_model_path}')
+                print(f"DEBUG: Caminho completo do modelo YOEO: {os.path.abspath(self.yoeo_model_path)}")
+                print(f"DEBUG: Arquivo existe: {os.path.exists(self.yoeo_model_path)}")
+                
                 # Criar configuração do modelo
                 model_config = {
                     "model_path": self.yoeo_model_path,
@@ -431,11 +450,18 @@ class VisionPipeline(Node):
                     "iou_threshold": 0.45,
                     "use_tensorrt": self.use_tensorrt
                 }
+                print(f"DEBUG: Configuração do modelo: {model_config}")
+                
                 # Carregar o modelo usando o manipulador YOEO
+                print("DEBUG: Iniciando criação do YOEOHandler")
                 self.yoeo_handler = YOEOHandler(model_config)
+                print("DEBUG: YOEOHandler criado com sucesso")
                 self.get_logger().info('Modelo YOEO carregado com sucesso')
             except Exception as e:
                 self.get_logger().error(f'Erro ao carregar modelo YOEO: {str(e)}')
+                import traceback
+                traceback_str = traceback.format_exc()
+                print(f"DEBUG: Traceback completo:\n{traceback_str}")
                 self.use_yoeo = False
         
         # Inicializar detectores tradicionais

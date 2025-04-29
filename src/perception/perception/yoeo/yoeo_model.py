@@ -194,9 +194,25 @@ class YOEOModel:
         Args:
             weights_path: Caminho para o arquivo de pesos
         """
-        model = self.build()
-        model.load_weights(weights_path)
-        return model
+        print(f"DEBUG: YOEOModel.load_weights() - Carregando pesos de: {weights_path}")
+        try:
+            import os
+            if not os.path.exists(weights_path):
+                print(f"DEBUG: YOEOModel.load_weights() - ERRO: Arquivo não existe: {weights_path}")
+                raise FileNotFoundError(f"Arquivo de pesos não encontrado: {weights_path}")
+                
+            print(f"DEBUG: YOEOModel.load_weights() - Construindo modelo")
+            model = self.build()
+            print(f"DEBUG: YOEOModel.load_weights() - Modelo construído, carregando pesos")
+            model.load_weights(weights_path)
+            print(f"DEBUG: YOEOModel.load_weights() - Pesos carregados com sucesso")
+            return model
+        except Exception as e:
+            print(f"DEBUG: YOEOModel.load_weights() - ERRO ao carregar pesos: {str(e)}")
+            import traceback
+            traceback_str = traceback.format_exc()
+            print(f"DEBUG: YOEOModel.load_weights() - Traceback:\n{traceback_str}")
+            raise
     
     def save(self, save_path):
         """
