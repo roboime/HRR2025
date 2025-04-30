@@ -90,6 +90,111 @@ class YOEOHandler:
             Modelo carregado ou None em caso de erro
         """
         try:
+            # Verificar se é um arquivo TensorRT (.trt)
+            is_tensorrt_model = self.model_path.lower().endswith('.trt')
+            
+            if is_tensorrt_model:
+                print("DEBUG: Arquivo TensorRT (.trt) detectado, carregando diretamente")
+                try:
+                    # Tentar carregar o modelo TensorRT
+                    import tensorflow as tf
+                    print(f"DEBUG: Carregando modelo TensorRT de: {self.model_path}")
+                    
+                    # Verificar se o arquivo existe
+                    if not os.path.exists(self.model_path):
+                        print(f"DEBUG: Arquivo TensorRT não encontrado: {self.model_path}")
+                        raise FileNotFoundError(f"Arquivo TensorRT não encontrado: {self.model_path}")
+                    
+                    # Carregar como saved_model
+                    try:
+                        # Primeiro tentar carregar como SavedModel
+                        model = tf.saved_model.load(self.model_path)
+                        print("DEBUG: Modelo TensorRT carregado com sucesso como SavedModel")
+                        return model
+                    except Exception as e1:
+                        print(f"DEBUG: Erro ao carregar como SavedModel: {e1}")
+                        try:
+                            # Tentar carregar diretamente como um modelo keras
+                            model = tf.keras.models.load_model(self.model_path)
+                            print("DEBUG: Modelo TensorRT carregado com sucesso como modelo Keras")
+                            return model
+                        except Exception as e2:
+                            print(f"DEBUG: Erro ao carregar como modelo Keras: {e2}")
+                            
+                            # Como último recurso, tentar carregar o plano de execução diretamente
+                            try:
+                                import tensorrt as trt
+                                import pycuda.driver as cuda
+                                import pycuda.autoinit
+                                
+                                # Criar runtime TensorRT
+                                TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+                                runtime = trt.Runtime(TRT_LOGGER)
+                                
+                                # Carregar o modelo
+                                with open(self.model_path, 'rb') as f:
+                                    engine_data = f.read()
+                                
+                                # Deserializar o engine
+                                engine = runtime.deserialize_cuda_engine(engine_data)
+                                
+                                # Criar um wrapper adequado para o TensorFlow
+                                class TRTModel:
+                                    def __init__(self, engine):
+                                        self.engine = engine
+                                        self.context = engine.create_execution_context()
+                                        
+                                    def predict(self, input_tensor):
+                                        # Converter para numpy se necessário
+                                        if isinstance(input_tensor, tf.Tensor):
+                                            input_data = input_tensor.numpy()
+                                        else:
+                                            input_data = input_tensor
+                                            
+                                        # Dimensões de entrada/saída
+                                        input_shape = (1, self.input_height, self.input_width, 3)
+                                        
+                                        # Alocar buffers
+                                        host_inputs = [cuda.pagelocked_empty(trt.volume(input_shape), dtype=np.float32)]
+                                        host_outputs = [cuda.pagelocked_empty(trt.volume(self.engine.get_binding_shape(1)), dtype=np.float32)]
+                                        
+                                        # Criar buffers na GPU
+                                        cuda_inputs = [cuda.mem_alloc(h_input.nbytes) for h_input in host_inputs]
+                                        cuda_outputs = [cuda.mem_alloc(h_output.nbytes) for h_output in host_outputs]
+                                        
+                                        # Copiar dados para o host
+                                        np.copyto(host_inputs[0], input_data.ravel())
+                                        
+                                        # Transferir para a GPU
+                                        cuda.memcpy_htod(cuda_inputs[0], host_inputs[0])
+                                        
+                                        # Executar a inferência
+                                        self.context.execute_v2(cuda_inputs + cuda_outputs)
+                                        
+                                        # Transferir resultados de volta
+                                        for i in range(len(host_outputs)):
+                                            cuda.memcpy_dtoh(host_outputs[i], cuda_outputs[i])
+                                            
+                                        # Remodelar para o formato esperado pelo processador YOLO
+                                        output_shapes = [self.engine.get_binding_shape(i+1) for i in range(len(host_outputs))]
+                                        outputs = [host_outputs[i].reshape(output_shapes[i]) for i in range(len(host_outputs))]
+                                        
+                                        return outputs
+                                
+                                # Criar e retornar o modelo
+                                model = TRTModel(engine)
+                                model.input_height = self.input_height
+                                model.input_width = self.input_width
+                                print("DEBUG: Modelo TensorRT carregado diretamente com sucesso")
+                                return model
+                            except Exception as e3:
+                                print(f"DEBUG: Erro ao carregar modelo TensorRT diretamente: {e3}")
+                                print("DEBUG: Recorrendo ao carregamento normal do modelo")
+                
+                except Exception as e:
+                    print(f"DEBUG: Erro ao carregar modelo TensorRT: {e}")
+                    print("DEBUG: Recorrendo ao carregamento normal do modelo")
+            
             # Criar uma instância do modelo para detecção apenas
             print("DEBUG: Criando instância do YOEOModel")
             yoeo_model = YOEOModel(
@@ -104,8 +209,8 @@ class YOEOHandler:
             model = yoeo_model.load_weights(self.model_path)
             print(f"Modelo carregado com sucesso de: {self.model_path}")
             
-            # Converter para TensorRT se solicitado
-            if self.use_tensorrt:
+            # Converter para TensorRT se solicitado e não for já um modelo TRT
+            if self.use_tensorrt and not is_tensorrt_model:
                 try:
                     print("DEBUG: Tentando converter modelo para TensorRT")
                     import tensorflow as tf

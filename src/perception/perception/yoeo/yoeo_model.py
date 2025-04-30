@@ -200,6 +200,19 @@ class YOEOModel:
             if not os.path.exists(weights_path):
                 print(f"DEBUG: YOEOModel.load_weights() - ERRO: Arquivo não existe: {weights_path}")
                 raise FileNotFoundError(f"Arquivo de pesos não encontrado: {weights_path}")
+            
+            # Verificar se é um arquivo TensorRT (.trt)
+            if weights_path.lower().endswith('.trt'):
+                print(f"DEBUG: YOEOModel.load_weights() - Arquivo TensorRT detectado")
+                try:
+                    import tensorflow as tf
+                    # Tentar carregar como modelo SavedModel
+                    trt_model = tf.saved_model.load(weights_path)
+                    print(f"DEBUG: YOEOModel.load_weights() - Modelo TensorRT carregado com sucesso")
+                    return trt_model
+                except Exception as e:
+                    print(f"DEBUG: YOEOModel.load_weights() - Erro ao carregar modelo TensorRT: {e}")
+                    print(f"DEBUG: YOEOModel.load_weights() - Tentando carregamento padrão")
                 
             print(f"DEBUG: YOEOModel.load_weights() - Construindo modelo")
             model = self.build()

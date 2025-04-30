@@ -444,6 +444,12 @@ class VisionPipeline(Node):
                 print(f"DEBUG: Caminho completo do modelo YOEO: {os.path.abspath(self.yoeo_model_path)}")
                 print(f"DEBUG: Arquivo existe: {os.path.exists(self.yoeo_model_path)}")
                 
+                # Verificar se é um modelo TensorRT (.trt)
+                is_tensorrt_model = self.yoeo_model_path.lower().endswith('.trt')
+                if is_tensorrt_model:
+                    self.use_tensorrt = True
+                    self.get_logger().info('Modelo TensorRT detectado, forçando uso_tensorrt=True')
+                
                 # Criar configuração do modelo
                 model_config = {
                     "model_path": self.yoeo_model_path,
