@@ -9,7 +9,7 @@
 
 # Configuração do pipeline
 pipeline:
-  processing_fps: 120.0          # Taxa de processamento de imagens (FPS)
+  processing_fps: 30.0          # Taxa de processamento de imagens (FPS) - reduzida
   debug_image: true             # Publicar imagens de debug
   
   # Habilitar/desabilitar sistemas
@@ -32,9 +32,9 @@ camera:
   info_topic: "/camera/camera_info"  # Tópico de informações da câmera
   
   # Configurações de imagem
-  width: 1280                   # Resolução padrão (1280x720@120fps)
-  height: 720
-  fps: 120
+  width: 320                   # Resolução reduzida (320x240)
+  height: 240
+  fps: 30
   
   # Configurações específicas para IMX219
   camera_mode: 2                 # 0=3280x2464@21fps, 1=1920x1080@60fps, 2=1280x720@120fps
@@ -52,7 +52,7 @@ camera:
   flip_method: 0              # Sem flip
   
   # Otimizações de processamento
-  use_tensorrt: true          # Usar TensorRT para otimização
+  use_tensorrt: false          # Desativado para usar ONNX diretamente
   enable_edge_enhancement: true # Aprimoramento de bordas
   enable_noise_reduction: true # Redução de ruído temporal
   enable_isp: true           # Image Signal Processing otimizado
@@ -62,16 +62,16 @@ camera:
 #=======================================#
 yoeo:
   # Configurações do modelo
-  model_path: "./src/perception/resources/models/yolov4_tiny.trt"  # Caminho para o modelo TensorRT
-  input_width: 416              # Largura da entrada do modelo
-  input_height: 416             # Altura da entrada do modelo
+  model_path: "./src/perception/resources/models/yolov4_tiny.onnx"  # Caminho para o modelo ONNX
+  input_width: 224              # Largura da entrada do modelo reduzida
+  input_height: 224             # Altura da entrada do modelo reduzida
   
   # Parâmetros de detecção
   confidence_threshold: 0.5     # Limiar de confiança para detecções
   iou_threshold: 0.45           # Limiar de IoU para NMS
   
   # Otimização
-  use_tensorrt: true           # Usar TensorRT para otimização
+  use_tensorrt: false           # Desativado para usar ONNX diretamente
   
   # Componentes habilitados (apenas detecção)
   components:

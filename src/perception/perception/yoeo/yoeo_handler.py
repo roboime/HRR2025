@@ -48,11 +48,12 @@ class YOEOHandler:
         print("DEBUG: Inicializando YOEOHandler")
         self.config = config
         self.model_path = config.get("model_path", "")
-        self.input_width = config.get("input_width", 416)
-        self.input_height = config.get("input_height", 416)
+        self.input_width = config.get("input_width", 224)
+        self.input_height = config.get("input_height", 224)
         self.confidence_threshold = config.get("confidence_threshold", 0.5)
         self.iou_threshold = config.get("iou_threshold", 0.45)
         self.use_tensorrt = config.get("use_tensorrt", False)
+        self.is_onnx_model = config.get("is_onnx_model", False)
         
         print(f"DEBUG: Configuração do YOEOHandler:")
         print(f"DEBUG: - model_path: {self.model_path}")
@@ -61,6 +62,7 @@ class YOEOHandler:
         print(f"DEBUG: - confidence_threshold: {self.confidence_threshold}")
         print(f"DEBUG: - iou_threshold: {self.iou_threshold}")
         print(f"DEBUG: - use_tensorrt: {self.use_tensorrt}")
+        print(f"DEBUG: - is_onnx_model: {self.is_onnx_model}")
         
         # Verificar se o arquivo do modelo existe
         if not os.path.exists(self.model_path):
@@ -90,109 +92,102 @@ class YOEOHandler:
             Modelo carregado ou None em caso de erro
         """
         try:
-            # Verificar se é um arquivo TensorRT (.trt)
-            is_tensorrt_model = self.model_path.lower().endswith('.trt')
-            
-            if is_tensorrt_model:
-                print("DEBUG: Arquivo TensorRT (.trt) detectado, carregando diretamente")
+            # Verificar se é um arquivo ONNX (.onnx)
+            if self.is_onnx_model or self.model_path.lower().endswith('.onnx'):
+                print("DEBUG: Arquivo ONNX (.onnx) detectado, configurando para carregar ONNX")
+                self.is_onnx_model = True
+                self.use_tensorrt = False  # Desativar TensorRT para ONNX
+                
                 try:
-                    # Tentar carregar o modelo TensorRT
-                    import tensorflow as tf
-                    print(f"DEBUG: Carregando modelo TensorRT de: {self.model_path}")
+                    # Carregar modelo ONNX usando tensorflow-onnx ou onnxruntime
+                    import onnxruntime as ort
+                    print(f"DEBUG: Carregando modelo ONNX usando ONNX Runtime")
                     
-                    # Verificar se o arquivo existe
-                    if not os.path.exists(self.model_path):
-                        print(f"DEBUG: Arquivo TensorRT não encontrado: {self.model_path}")
-                        raise FileNotFoundError(f"Arquivo TensorRT não encontrado: {self.model_path}")
+                    # Configurar opções de sessão para otimização
+                    sess_options = ort.SessionOptions()
+                    sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
                     
-                    # Carregar como saved_model
-                    try:
-                        # Primeiro tentar carregar como SavedModel
-                        model = tf.saved_model.load(self.model_path)
-                        print("DEBUG: Modelo TensorRT carregado com sucesso como SavedModel")
-                        return model
-                    except Exception as e1:
-                        print(f"DEBUG: Erro ao carregar como SavedModel: {e1}")
-                        try:
-                            # Tentar carregar diretamente como um modelo keras
-                            model = tf.keras.models.load_model(self.model_path)
-                            print("DEBUG: Modelo TensorRT carregado com sucesso como modelo Keras")
-                            return model
-                        except Exception as e2:
-                            print(f"DEBUG: Erro ao carregar como modelo Keras: {e2}")
+                    # Verificar os provedores disponíveis
+                    providers = ort.get_available_providers()
+                    print(f"DEBUG: Provedores ONNX disponíveis: {providers}")
+                    
+                    # Configurar provedores
+                    provider_list = []
+                    if 'CUDAExecutionProvider' in providers:
+                        provider_list.append('CUDAExecutionProvider')
+                    if 'CPUExecutionProvider' in providers:
+                        provider_list.append('CPUExecutionProvider')
+                    
+                    # Criar sessão ONNX
+                    onnx_session = ort.InferenceSession(
+                        self.model_path, 
+                        sess_options=sess_options,
+                        providers=provider_list
+                    )
+                    print("DEBUG: Sessão ONNX criada com sucesso")
+                    
+                    # Obter informações do modelo
+                    input_details = onnx_session.get_inputs()
+                    output_details = onnx_session.get_outputs()
+                    print(f"DEBUG: Detalhes de entrada: {input_details}")
+                    print(f"DEBUG: Detalhes de saída: {output_details}")
+                    
+                    # Criar uma classe wrapper para compatibilidade com a interface
+                    class ONNXModelWrapper:
+                        def __init__(self, session, input_details, output_details):
+                            self.session = session
+                            self.input_name = input_details[0].name
+                            self.output_names = [output.name for output in output_details]
+                        
+                        def predict(self, input_tensor):
+                            # Converter tensor TF para numpy se necessário
+                            if isinstance(input_tensor, tf.Tensor):
+                                input_np = input_tensor.numpy()
+                            else:
+                                input_np = input_tensor
                             
-                            # Como último recurso, tentar carregar o plano de execução diretamente
-                            try:
-                                import tensorrt as trt
-                                import pycuda.driver as cuda
-                                import pycuda.autoinit
-                                
-                                # Criar runtime TensorRT
-                                TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
-                                runtime = trt.Runtime(TRT_LOGGER)
-                                
-                                # Carregar o modelo
-                                with open(self.model_path, 'rb') as f:
-                                    engine_data = f.read()
-                                
-                                # Deserializar o engine
-                                engine = runtime.deserialize_cuda_engine(engine_data)
-                                
-                                # Criar um wrapper adequado para o TensorFlow
-                                class TRTModel:
-                                    def __init__(self, engine):
-                                        self.engine = engine
-                                        self.context = engine.create_execution_context()
-                                        
-                                    def predict(self, input_tensor):
-                                        # Converter para numpy se necessário
-                                        if isinstance(input_tensor, tf.Tensor):
-                                            input_data = input_tensor.numpy()
-                                        else:
-                                            input_data = input_tensor
-                                            
-                                        # Dimensões de entrada/saída
-                                        input_shape = (1, self.input_height, self.input_width, 3)
-                                        
-                                        # Alocar buffers
-                                        host_inputs = [cuda.pagelocked_empty(trt.volume(input_shape), dtype=np.float32)]
-                                        host_outputs = [cuda.pagelocked_empty(trt.volume(self.engine.get_binding_shape(1)), dtype=np.float32)]
-                                        
-                                        # Criar buffers na GPU
-                                        cuda_inputs = [cuda.mem_alloc(h_input.nbytes) for h_input in host_inputs]
-                                        cuda_outputs = [cuda.mem_alloc(h_output.nbytes) for h_output in host_outputs]
-                                        
-                                        # Copiar dados para o host
-                                        np.copyto(host_inputs[0], input_data.ravel())
-                                        
-                                        # Transferir para a GPU
-                                        cuda.memcpy_htod(cuda_inputs[0], host_inputs[0])
-                                        
-                                        # Executar a inferência
-                                        self.context.execute_v2(cuda_inputs + cuda_outputs)
-                                        
-                                        # Transferir resultados de volta
-                                        for i in range(len(host_outputs)):
-                                            cuda.memcpy_dtoh(host_outputs[i], cuda_outputs[i])
-                                            
-                                        # Remodelar para o formato esperado pelo processador YOLO
-                                        output_shapes = [self.engine.get_binding_shape(i+1) for i in range(len(host_outputs))]
-                                        outputs = [host_outputs[i].reshape(output_shapes[i]) for i in range(len(host_outputs))]
-                                        
-                                        return outputs
-                                
-                                # Criar e retornar o modelo
-                                model = TRTModel(engine)
-                                model.input_height = self.input_height
-                                model.input_width = self.input_width
-                                print("DEBUG: Modelo TensorRT carregado diretamente com sucesso")
-                                return model
-                            except Exception as e3:
-                                print(f"DEBUG: Erro ao carregar modelo TensorRT diretamente: {e3}")
-                                print("DEBUG: Recorrendo ao carregamento normal do modelo")
+                            # Executar inferência
+                            outputs = self.session.run(
+                                self.output_names, 
+                                {self.input_name: input_np}
+                            )
+                            
+                            return outputs
+                    
+                    # Criar e retornar o wrapper
+                    model = ONNXModelWrapper(onnx_session, input_details, output_details)
+                    print("DEBUG: Modelo ONNX carregado com sucesso")
+                    return model
+                    
+                except ImportError:
+                    print("DEBUG: ONNX Runtime não encontrado, tentando tensorflow-onnx")
+                    try:
+                        # Tentar usar tf2onnx
+                        import tf2onnx
+                        import tensorflow as tf
+                        
+                        # Converter ONNX para TensorFlow e carregar
+                        print("DEBUG: Convertendo ONNX para TensorFlow com tf2onnx")
+                        model_proto, _ = tf2onnx.convert.from_path(self.model_path)
+                        
+                        # Salvar em um diretório temporário
+                        import tempfile
+                        temp_dir = tempfile.mkdtemp()
+                        saved_model_dir = os.path.join(temp_dir, 'saved_model')
+                        tf2onnx.save.save_model(model_proto, saved_model_dir)
+                        
+                        # Carregar o modelo salvo
+                        model = tf.saved_model.load(saved_model_dir)
+                        print("DEBUG: Modelo ONNX convertido e carregado com tf2onnx")
+                        return model
+                        
+                    except ImportError:
+                        print("DEBUG: tf2onnx não encontrado, tentando abordagem padrão")
+                        print("DEBUG: !! ATENÇÃO: É recomendado instalar onnxruntime-gpu ou tf2onnx")
+                        print("DEBUG: Recorrendo ao carregamento padrão do modelo")
                 
                 except Exception as e:
-                    print(f"DEBUG: Erro ao carregar modelo TensorRT: {e}")
+                    print(f"DEBUG: Erro ao carregar modelo ONNX: {str(e)}")
                     print("DEBUG: Recorrendo ao carregamento normal do modelo")
             
             # Criar uma instância do modelo para detecção apenas
@@ -209,183 +204,8 @@ class YOEOHandler:
             model = yoeo_model.load_weights(self.model_path)
             print(f"Modelo carregado com sucesso de: {self.model_path}")
             
-            # Converter para TensorRT se solicitado e não for já um modelo TRT
-            if self.use_tensorrt and not is_tensorrt_model:
-                try:
-                    print("DEBUG: Tentando converter modelo para TensorRT")
-                    import tensorflow as tf
-                    print(f"DEBUG: Versão do TensorFlow: {tf.__version__}")
-                    print("DEBUG: Verificando disponibilidade do TensorRT")
-                    tensorrt_available = hasattr(tf.python, 'compiler') and hasattr(tf.python.compiler, 'tensorrt')
-                    print(f"DEBUG: TensorRT disponível: {tensorrt_available}")
-                    
-                    if tensorrt_available:
-                        print("DEBUG: Iniciando conversão para TensorRT")
-                        
-                        # Método 1: Tentar usar o módulo tensorrt_converter do projeto
-                        try:
-                            print("DEBUG: Tentando usar o conversor customizado")
-                            # Importar o conversor personalizado
-                            import sys
-                            import os
-                            
-                            # Adicionar o diretório do projeto ao caminho de importação
-                            current_dir = os.path.dirname(os.path.abspath(__file__))
-                            parent_dir = os.path.dirname(os.path.dirname(current_dir))
-                            if parent_dir not in sys.path:
-                                sys.path.append(parent_dir)
-                            
-                            # Tentar importar o conversor customizado
-                            try:
-                                from perception.yoeo.tensorrt_converter import convert_yolov4_tiny
-                                print("DEBUG: Conversor customizado importado com sucesso")
-                                
-                                # Usar o conversor customizado
-                                import tempfile
-                                temp_dir = tempfile.mkdtemp()
-                                temp_h5 = os.path.join(temp_dir, 'temp_model.h5')
-                                
-                                # Salvar o modelo primeiro
-                                model.save(temp_h5)
-                                print(f"DEBUG: Modelo salvo temporariamente em {temp_h5}")
-                                
-                                # Converter usando o método customizado
-                                optimized_model_path = convert_yolov4_tiny(
-                                    model_path=temp_h5,
-                                    output_dir=temp_dir,
-                                    input_shape=(1, self.input_height, self.input_width, 3),
-                                    precision='FP16'
-                                )
-                                
-                                # Verificar se a conversão foi bem-sucedida
-                                if optimized_model_path:
-                                    print(f"DEBUG: Modelo otimizado salvo em {optimized_model_path}")
-                                    # Carregar o modelo otimizado
-                                    trt_model = tf.saved_model.load(optimized_model_path)
-                                    print("DEBUG: Modelo TensorRT carregado com sucesso")
-                                    return trt_model
-                                else:
-                                    print("DEBUG: Falha na conversão customizada, tentando método alternativo")
-                                    raise Exception("Falha na conversão customizada")
-                                
-                            except ImportError as ie:
-                                print(f"DEBUG: Erro ao importar conversor customizado: {ie}")
-                                print("DEBUG: Tentando método de conversão alternativo")
-                                raise
-                        
-                        except Exception as e:
-                            print(f"DEBUG: Erro ao usar conversor customizado: {e}")
-                            print("DEBUG: Tentando método de conversão direto com TF-TRT")
-                        
-                        # Método 2: Usar a API direta do TensorFlow-TensorRT
-                        print("DEBUG: Usando API TensorFlow-TensorRT direta")
-                        from tensorflow.python.compiler.tensorrt import trt_convert as trt
-                        import tempfile
-                        
-                        # Verificar problemas comuns de TensorRT
-                        try:
-                            # Testar se o TensorRT está funcionando corretamente
-                            trt_version = trt.get_linked_tensorrt_version()
-                            print(f"DEBUG: Versão do TensorRT: {trt_version}")
-                        except Exception as e:
-                            print(f"DEBUG: Erro ao verificar versão do TensorRT: {e}")
-                            print("DEBUG: TensorRT pode não estar instalado corretamente")
-                            return model  # Retornar modelo original se TensorRT não estiver disponível
-                        
-                        # Definir precisão (FP32, FP16, ou INT8)
-                        precision_mode = 'FP16'  # Usar FP16 para melhor desempenho em Jetson
-                        print(f"DEBUG: Usando precisão {precision_mode}")
-                        
-                        # Primeiro salvar o modelo em um diretório temporário
-                        temp_dir = tempfile.mkdtemp()
-                        saved_model_dir = os.path.join(temp_dir, 'saved_model')
-                        print(f"DEBUG: Salvando modelo em {saved_model_dir}")
-                        
-                        # Definir assinatura de entrada para o modelo
-                        input_shape = (1, self.input_height, self.input_width, 3)
-                        
-                        try:
-                            # Salvar o modelo com sua assinatura
-                            concrete_func = None
-                            try:
-                                # Obter função concreta para inferência
-                                concrete_func = model.call.get_concrete_function(
-                                    tf.TensorSpec(shape=input_shape, dtype=tf.float32)
-                                )
-                                print("DEBUG: Função concreta obtida com sucesso")
-                            except Exception as e:
-                                print(f"DEBUG: Erro ao obter função concreta: {e}")
-                                print("DEBUG: Tentando método alternativo para obter assinatura")
-                                
-                                # Método alternativo
-                                input_tensor = tf.random.normal(input_shape)
-                                model._set_inputs(input_tensor)
-                                print("DEBUG: Entradas do modelo definidas manualmente")
-                            
-                            # Salvar o modelo
-                            if concrete_func:
-                                tf.saved_model.save(
-                                    model, 
-                                    saved_model_dir, 
-                                    signatures={'serving_default': concrete_func}
-                                )
-                            else:
-                                tf.saved_model.save(model, saved_model_dir)
-                                
-                            print("DEBUG: Modelo salvo para conversão TensorRT")
-                            
-                            # Configurar parâmetros de conversão
-                            conversion_params = trt.TrtConversionParams(
-                                precision_mode=precision_mode,
-                                max_workspace_size_bytes=8*1024*1024*1024,  # 8GB workspace
-                                maximum_cached_engines=1
-                            )
-                            
-                            # Criar conversor
-                            converter = trt.TrtGraphConverterV2(
-                                input_saved_model_dir=saved_model_dir,
-                                conversion_params=conversion_params
-                            )
-                            
-                            print("DEBUG: Convertendo modelo para TensorRT")
-                            # Converter o modelo (sem calibração para INT8)
-                            converter.convert()
-                            
-                            # Criar função de inferência otimizada
-                            def input_fn():
-                                # Gerar dados de entrada para a conversão
-                                yield [tf.random.normal(input_shape)]
-                            
-                            # Compilar para gerar os motores TensorRT
-                            print("DEBUG: Compilando motores TensorRT")
-                            converter.build(input_fn=input_fn)
-                            
-                            # Salvar o modelo convertido
-                            trt_saved_model_dir = os.path.join(temp_dir, 'trt_saved_model')
-                            converter.save(trt_saved_model_dir)
-                            print(f"DEBUG: Modelo TensorRT salvo em {trt_saved_model_dir}")
-                            
-                            # Carregar o modelo otimizado
-                            print("DEBUG: Carregando modelo TensorRT otimizado")
-                            trt_model = tf.saved_model.load(trt_saved_model_dir)
-                            print("DEBUG: Conversão para TensorRT concluída com sucesso")
-                            
-                            # Retornar o modelo otimizado
-                            return trt_model
-                            
-                        except Exception as e:
-                            print(f"DEBUG: Erro durante conversão TensorRT: {e}")
-                            print("DEBUG: Usando modelo original devido a falha na conversão")
-                    else:
-                        print("DEBUG: TensorRT não disponível, usando modelo original")
-                except Exception as e:
-                    print(f"DEBUG: Erro ao converter para TensorRT: {e}")
-                    print("DEBUG: Continuando com o modelo original")
-                    import traceback
-                    traceback_str = traceback.format_exc()
-                    print(f"DEBUG: Traceback completo de TensorRT:\n{traceback_str}")
-            
             return model
+            
         except Exception as e:
             print(f"DEBUG: Erro ao carregar o modelo: {e}")
             import traceback
