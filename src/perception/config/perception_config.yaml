@@ -52,7 +52,7 @@ camera:
   flip_method: 0              # Sem flip
   
   # Otimizações de processamento
-  use_tensorrt: false          # Desativado para usar ONNX diretamente
+  use_tensorrt: true          # Ativar TensorRT para H5
   enable_edge_enhancement: true # Aprimoramento de bordas
   enable_noise_reduction: true # Redução de ruído temporal
   enable_isp: true           # Image Signal Processing otimizado
@@ -62,7 +62,7 @@ camera:
 #=======================================#
 yoeo:
   # Configurações do modelo
-  model_path: "./src/perception/resources/models/yolov4_tiny.onnx"  # Caminho para o modelo ONNX
+  model_path: "./src/perception/resources/models/yolov4_tiny.h5"  # Caminho para o modelo H5
   input_width: 224              # Largura da entrada do modelo reduzida
   input_height: 224             # Altura da entrada do modelo reduzida
   
@@ -71,7 +71,7 @@ yoeo:
   iou_threshold: 0.45           # Limiar de IoU para NMS
   
   # Otimização
-  use_tensorrt: false           # Desativado para usar ONNX diretamente
+  use_tensorrt: true           # Usar TensorRT para aceleração (reativado)
   
   # Componentes habilitados (apenas detecção)
   components:

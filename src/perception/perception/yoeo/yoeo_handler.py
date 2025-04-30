@@ -52,8 +52,8 @@ class YOEOHandler:
         self.input_height = config.get("input_height", 224)
         self.confidence_threshold = config.get("confidence_threshold", 0.5)
         self.iou_threshold = config.get("iou_threshold", 0.45)
-        self.use_tensorrt = config.get("use_tensorrt", False)
-        self.is_onnx_model = config.get("is_onnx_model", False)
+        self.use_tensorrt = config.get("use_tensorrt", True)
+        self.is_h5_model = config.get("is_h5_model", False)
         
         print(f"DEBUG: Configuração do YOEOHandler:")
         print(f"DEBUG: - model_path: {self.model_path}")
@@ -62,7 +62,7 @@ class YOEOHandler:
         print(f"DEBUG: - confidence_threshold: {self.confidence_threshold}")
         print(f"DEBUG: - iou_threshold: {self.iou_threshold}")
         print(f"DEBUG: - use_tensorrt: {self.use_tensorrt}")
-        print(f"DEBUG: - is_onnx_model: {self.is_onnx_model}")
+        print(f"DEBUG: - is_h5_model: {self.is_h5_model}")
         
         # Verificar se o arquivo do modelo existe
         if not os.path.exists(self.model_path):
@@ -92,103 +92,107 @@ class YOEOHandler:
             Modelo carregado ou None em caso de erro
         """
         try:
-            # Verificar se é um arquivo ONNX (.onnx)
-            if self.is_onnx_model or self.model_path.lower().endswith('.onnx'):
-                print("DEBUG: Arquivo ONNX (.onnx) detectado, configurando para carregar ONNX")
-                self.is_onnx_model = True
-                self.use_tensorrt = False  # Desativar TensorRT para ONNX
+            # Verificar se é um arquivo H5 (.h5)
+            if self.is_h5_model or self.model_path.lower().endswith('.h5'):
+                print("DEBUG: Arquivo H5 (.h5) detectado, carregando modelo Keras")
                 
                 try:
-                    # Carregar modelo ONNX usando tensorflow-onnx ou onnxruntime
-                    import onnxruntime as ort
-                    print(f"DEBUG: Carregando modelo ONNX usando ONNX Runtime")
+                    # Importar TensorFlow
+                    import tensorflow as tf
                     
-                    # Configurar opções de sessão para otimização
-                    sess_options = ort.SessionOptions()
-                    sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-                    
-                    # Verificar os provedores disponíveis
-                    providers = ort.get_available_providers()
-                    print(f"DEBUG: Provedores ONNX disponíveis: {providers}")
-                    
-                    # Configurar provedores
-                    provider_list = []
-                    if 'CUDAExecutionProvider' in providers:
-                        provider_list.append('CUDAExecutionProvider')
-                    if 'CPUExecutionProvider' in providers:
-                        provider_list.append('CPUExecutionProvider')
-                    
-                    # Criar sessão ONNX
-                    onnx_session = ort.InferenceSession(
-                        self.model_path, 
-                        sess_options=sess_options,
-                        providers=provider_list
-                    )
-                    print("DEBUG: Sessão ONNX criada com sucesso")
-                    
-                    # Obter informações do modelo
-                    input_details = onnx_session.get_inputs()
-                    output_details = onnx_session.get_outputs()
-                    print(f"DEBUG: Detalhes de entrada: {input_details}")
-                    print(f"DEBUG: Detalhes de saída: {output_details}")
-                    
-                    # Criar uma classe wrapper para compatibilidade com a interface
-                    class ONNXModelWrapper:
-                        def __init__(self, session, input_details, output_details):
-                            self.session = session
-                            self.input_name = input_details[0].name
-                            self.output_names = [output.name for output in output_details]
-                        
-                        def predict(self, input_tensor):
-                            # Converter tensor TF para numpy se necessário
-                            if isinstance(input_tensor, tf.Tensor):
-                                input_np = input_tensor.numpy()
-                            else:
-                                input_np = input_tensor
-                            
-                            # Executar inferência
-                            outputs = self.session.run(
-                                self.output_names, 
-                                {self.input_name: input_np}
+                    # Definir opções de memória para TensorFlow
+                    gpus = tf.config.experimental.list_physical_devices('GPU')
+                    if gpus:
+                        try:
+                            # Permitir crescimento de memória apenas quando necessário
+                            for gpu in gpus:
+                                tf.config.experimental.set_memory_growth(gpu, True)
+                            # Limitar uso de memória
+                            tf.config.experimental.set_virtual_device_configuration(
+                                gpus[0],
+                                [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=1024)]
                             )
-                            
-                            return outputs
+                            print("DEBUG: Configurações de memória GPU aplicadas com sucesso")
+                        except RuntimeError as e:
+                            print(f"DEBUG: Erro ao configurar GPU: {str(e)}")
                     
-                    # Criar e retornar o wrapper
-                    model = ONNXModelWrapper(onnx_session, input_details, output_details)
-                    print("DEBUG: Modelo ONNX carregado com sucesso")
+                    # Carregar o modelo H5 diretamente
+                    print(f"DEBUG: Carregando modelo Keras de: {self.model_path}")
+                    model = tf.keras.models.load_model(self.model_path, compile=False)
+                    print("DEBUG: Modelo H5 carregado com sucesso")
+                    
+                    # Configurar para TensorRT se necessário
+                    if self.use_tensorrt:
+                        try:
+                            print("DEBUG: Tentando otimizar com TensorRT")
+                            # Verificar se TensorRT está disponível
+                            from tensorflow.python.compiler.tensorrt import trt_convert as trt
+                            
+                            # Verificar versão do TensorRT
+                            try:
+                                trt_version = trt.get_linked_tensorrt_version()
+                                print(f"DEBUG: Versão do TensorRT: {trt_version}")
+                                
+                                # Caminho para salvar o modelo otimizado
+                                import tempfile
+                                temp_dir = tempfile.mkdtemp()
+                                model_dir = os.path.join(temp_dir, 'temp_model')
+                                
+                                # Salvar o modelo para conversão
+                                print(f"DEBUG: Salvando modelo em: {model_dir}")
+                                tf.saved_model.save(model, model_dir)
+                                
+                                # Configurar parâmetros de conversão
+                                conversion_params = trt.TrtConversionParams(
+                                    precision_mode=trt.TrtPrecisionMode.FP16,
+                                    max_workspace_size_bytes=1<<24,  # 16MB
+                                    maximum_cached_engines=1
+                                )
+                                
+                                # Criar conversor
+                                converter = trt.TrtGraphConverterV2(
+                                    input_saved_model_dir=model_dir,
+                                    conversion_params=conversion_params
+                                )
+                                
+                                # Converter modelo
+                                print("DEBUG: Convertendo modelo para TensorRT")
+                                try:
+                                    converter.convert()
+                                    print("DEBUG: Conversão concluída, salvando modelo otimizado")
+                                    
+                                    # Salvar modelo convertido
+                                    optimized_model_dir = os.path.join(temp_dir, 'trt_model')
+                                    converter.save(optimized_model_dir)
+                                    
+                                    # Carregar modelo otimizado
+                                    optimized_model = tf.saved_model.load(optimized_model_dir)
+                                    print("DEBUG: Modelo TensorRT carregado com sucesso")
+                                    return optimized_model
+                                except Exception as e:
+                                    print(f"DEBUG: Erro durante conversão TensorRT: {str(e)}")
+                                    print("DEBUG: Usando modelo original Keras")
+                                    return model
+                            except Exception as e:
+                                print(f"DEBUG: Erro ao verificar versão TensorRT: {str(e)}")
+                                print("DEBUG: Usando modelo Keras original")
+                                return model
+                        except ImportError:
+                            print("DEBUG: TensorRT não disponível, usando modelo Keras original")
+                            return model
+                        except Exception as e:
+                            print(f"DEBUG: Erro ao configurar TensorRT: {str(e)}")
+                            return model
+                    
                     return model
                     
-                except ImportError:
-                    print("DEBUG: ONNX Runtime não encontrado, tentando tensorflow-onnx")
-                    try:
-                        # Tentar usar tf2onnx
-                        import tf2onnx
-                        import tensorflow as tf
-                        
-                        # Converter ONNX para TensorFlow e carregar
-                        print("DEBUG: Convertendo ONNX para TensorFlow com tf2onnx")
-                        model_proto, _ = tf2onnx.convert.from_path(self.model_path)
-                        
-                        # Salvar em um diretório temporário
-                        import tempfile
-                        temp_dir = tempfile.mkdtemp()
-                        saved_model_dir = os.path.join(temp_dir, 'saved_model')
-                        tf2onnx.save.save_model(model_proto, saved_model_dir)
-                        
-                        # Carregar o modelo salvo
-                        model = tf.saved_model.load(saved_model_dir)
-                        print("DEBUG: Modelo ONNX convertido e carregado com tf2onnx")
-                        return model
-                        
-                    except ImportError:
-                        print("DEBUG: tf2onnx não encontrado, tentando abordagem padrão")
-                        print("DEBUG: !! ATENÇÃO: É recomendado instalar onnxruntime-gpu ou tf2onnx")
-                        print("DEBUG: Recorrendo ao carregamento padrão do modelo")
+                except ImportError as ie:
+                    print(f"DEBUG: Erro ao importar TensorFlow: {str(ie)}")
+                    print("DEBUG: Tentando abordagem alternativa")
                 
                 except Exception as e:
-                    print(f"DEBUG: Erro ao carregar modelo ONNX: {str(e)}")
-                    print("DEBUG: Recorrendo ao carregamento normal do modelo")
+                    print(f"DEBUG: Erro ao carregar modelo H5: {str(e)}")
+                    print("DEBUG: Recorrendo ao carregamento padrão do modelo")
             
             # Criar uma instância do modelo para detecção apenas
             print("DEBUG: Criando instância do YOEOModel")

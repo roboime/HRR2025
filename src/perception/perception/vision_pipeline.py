@@ -444,12 +444,13 @@ class VisionPipeline(Node):
                 print(f"DEBUG: Caminho completo do modelo YOEO: {os.path.abspath(self.yoeo_model_path)}")
                 print(f"DEBUG: Arquivo existe: {os.path.exists(self.yoeo_model_path)}")
                 
-                # Verificar se é um modelo ONNX (.onnx)
-                is_onnx_model = self.yoeo_model_path.lower().endswith('.onnx')
-                if is_onnx_model:
-                    self.get_logger().info('Modelo ONNX detectado, configurando adequadamente')
-                    # TensorRT deve estar desativado para modelos ONNX
-                    self.use_tensorrt = False
+                # Verificar se é um modelo H5 (.h5)
+                is_h5_model = self.yoeo_model_path.lower().endswith('.h5')
+                if is_h5_model:
+                    self.get_logger().info('Modelo H5 detectado, configurando adequadamente')
+                    # Ajuste para uso com TensorRT
+                    if self.use_tensorrt:
+                        self.get_logger().info('TensorRT habilitado para otimização')
                 
                 # Criar configuração do modelo
                 model_config = {
@@ -459,7 +460,7 @@ class VisionPipeline(Node):
                     "confidence_threshold": self.yoeo_confidence_threshold,
                     "iou_threshold": 0.45,
                     "use_tensorrt": self.use_tensorrt,
-                    "is_onnx_model": is_onnx_model
+                    "is_h5_model": is_h5_model
                 }
                 print(f"DEBUG: Configuração do modelo: {model_config}")
                 
