@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-Nó ROS para detecção usando o modelo YOLOv4-Tiny.
+Nó ROS para detecção usando o modelo YOLO da Ultralytics.
 
-Este nó implementa a interface ROS para o sistema YOLOv4-Tiny, recebendo imagens
-da câmera, processando-as com o modelo YOLOv4-Tiny e publicando os resultados
+Este nó implementa a interface ROS para o sistema YOLO da Ultralytics, recebendo imagens
+da câmera, processando-as com o modelo YOLO e publicando os resultados
 de detecção.
 """
 
@@ -39,21 +39,21 @@ except ImportError:
 
 class YOEODetector(Node):
     """
-    Nó ROS para detecção usando o modelo YOLOv4-Tiny.
+    Nó ROS para detecção usando o modelo YOLO da Ultralytics.
     
-    Este nó recebe imagens da câmera, processa-as com o modelo YOLOv4-Tiny
+    Este nó recebe imagens da câmera, processa-as com o modelo YOLO
     e publica os resultados de detecção.
     """
     
     def __init__(self):
-        """Inicializa o nó detector YOLOv4-Tiny."""
+        """Inicializa o nó detector YOLO."""
         super().__init__('yolo_detector')
         
         # Declarar parâmetros
-        self.declare_parameter('model_path', 'src/perception/resource/models/yolov4_tiny.h5')
+        self.declare_parameter('model_path', 'src/perception/resource/models/yolov5n.pt')
         self.declare_parameter('config_file', 'src/perception/config/vision_params.yaml')
-        self.declare_parameter('input_width', 416)
-        self.declare_parameter('input_height', 416)
+        self.declare_parameter('input_width', 640)
+        self.declare_parameter('input_height', 640)
         self.declare_parameter('confidence_threshold', 0.5)
         self.declare_parameter('iou_threshold', 0.45)
         self.declare_parameter('use_tensorrt', False)
@@ -87,14 +87,16 @@ class YOEODetector(Node):
         # Carregar configuração
         self.config = self._load_config()
         
-        # Inicializar o manipulador YOLOv4-Tiny
+        # Inicializar o manipulador YOLO
         self.yoeo_handler = YOEOHandler(
-            model_path=self.model_path,
-            input_width=self.input_width,
-            input_height=self.input_height,
-            confidence_threshold=self.confidence_threshold,
-            iou_threshold=self.iou_threshold,
-            use_tensorrt=self.use_tensorrt
+            config={
+                "model_path": self.model_path,
+                "input_width": self.input_width,
+                "input_height": self.input_height,
+                "confidence_threshold": self.confidence_threshold,
+                "iou_threshold": self.iou_threshold,
+                "use_tensorrt": self.use_tensorrt
+            }
         )
         
         # Inicializar componentes
@@ -129,7 +131,7 @@ class YOEODetector(Node):
         self.total_time = 0
         self.fps = 0
         
-        self.get_logger().info('Nó YOLOv4-Tiny Detector inicializado')
+        self.get_logger().info('Nó YOLO Detector (Ultralytics) inicializado')
     
     def _load_config(self):
         """Carrega o arquivo de configuração."""
@@ -263,7 +265,7 @@ class YOEODetector(Node):
     
     def _process_image(self, image):
         """
-        Processa a imagem com o modelo YOLOv4-Tiny e componentes.
+        Processa a imagem com o modelo YOLO e componentes.
         
         Args:
             image: Imagem BGR do OpenCV
@@ -271,7 +273,7 @@ class YOEODetector(Node):
         Returns:
             Dicionário com resultados de detecção
         """
-        # Obter detecções do modelo YOLOv4-Tiny
+        # Obter detecções do modelo YOLO
         detection_types = []
         
         if self.enable_ball_detection:
@@ -441,7 +443,7 @@ class YOEODetector(Node):
         return msg
 
 def main(args=None):
-    """Função principal para iniciar o nó detector YOLOv4-Tiny."""
+    """Função principal para iniciar o nó detector YOLO."""
     rclpy.init(args=args)
     
     try:
@@ -450,7 +452,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        print(f"Erro no nó detector YOLOv4-Tiny: {e}")
+        print(f"Erro no nó detector YOLO: {e}")
     finally:
         rclpy.shutdown()
 

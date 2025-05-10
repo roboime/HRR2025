@@ -84,16 +84,30 @@ def create_augmentation_pipeline(config):
             - rotation_range: Intervalo de rotação em graus
             - brightness_range: Intervalo de ajuste de brilho
             - zoom_range: Intervalo de zoom
+            - random_crop: Aplicar cortes aleatórios
+            - random_blur: Aplicar desfoque aleatório
+            - mosaic: Aplicar técnica de mosaico
+            - mixup: Aplicar técnica de mixup
+            - contrast_range: Intervalo de ajuste de contraste
+            - saturation_range: Intervalo de ajuste de saturação
+            - hue_range: Intervalo de ajuste de matiz
             
     Returns:
         Função de augmentação que pode ser aplicada a imagens e caixas delimitadoras
     """
     # Valores padrão se não especificados
-    flip_horizontal = config.get('flip_horizontal', True)
-    flip_vertical = config.get('flip_vertical', False)
+    flip_horizontal = config.get('horizontal_flip', True)
+    flip_vertical = config.get('vertical_flip', False)
     rotation_range = config.get('rotation_range', 15)
     brightness_range = config.get('brightness_range', [0.8, 1.2])
-    zoom_range = config.get('zoom_range', [0.8, 1.2])
+    zoom_range = config.get('zoom_range', [0.8, 1.2]) if isinstance(config.get('zoom_range', 0.1), (list, tuple)) else [1.0-config.get('zoom_range', 0.1), 1.0+config.get('zoom_range', 0.1)]
+    random_crop = config.get('random_crop', False)
+    random_blur = config.get('random_blur', False)
+    contrast_range = config.get('contrast_range', [0.8, 1.2])
+    saturation_range = config.get('saturation_range', [0.8, 1.2])
+    hue_range = config.get('hue_range', [-0.05, 0.05])
+    width_shift_range = config.get('width_shift_range', 0.0)
+    height_shift_range = config.get('height_shift_range', 0.0)
     
     def augment(image, boxes=None):
         """
@@ -114,26 +128,240 @@ def create_augmentation_pipeline(config):
         if boxes is None:
             boxes = np.zeros((0, 4))
         
+        # Cópia das caixas originais para manipulação
+        boxes_aug = boxes.copy()
+        
         # Flip horizontal
         if flip_horizontal and tf.random.uniform(()) > 0.5:
             img_tensor = tf.image.flip_left_right(img_tensor)
             # Ajustar coordenadas das caixas
-            if boxes.shape[0] > 0:
-                boxes[:, 0] = w - boxes[:, 0] - boxes[:, 2]
+            if boxes_aug.shape[0] > 0:
+                boxes_aug[:, 0] = w - boxes_aug[:, 0] - boxes_aug[:, 2]
         
         # Flip vertical
         if flip_vertical and tf.random.uniform(()) > 0.5:
             img_tensor = tf.image.flip_up_down(img_tensor)
             # Ajustar coordenadas das caixas
-            if boxes.shape[0] > 0:
-                boxes[:, 1] = h - boxes[:, 1] - boxes[:, 3]
+            if boxes_aug.shape[0] > 0:
+                boxes_aug[:, 1] = h - boxes_aug[:, 1] - boxes_aug[:, 3]
+        
+        # Translação horizontal (com verificações de segurança)
+        if width_shift_range > 0 and tf.random.uniform(()) > 0.5:
+            # Limitar o valor do shift para evitar erros
+            max_shift = w * width_shift_range
+            shift_x = tf.random.uniform((), -max_shift, max_shift)
+            shift_x = tf.cast(shift_x, tf.int32)
+            
+            # Garantir que os valores de offset e target são válidos
+            offset_x = tf.maximum(0, -shift_x)
+            target_w = w - tf.abs(shift_x)
+            
+            # Criar imagem temporária (paddida)
+            temp_img = tf.image.pad_to_bounding_box(img_tensor, 0, 0, h, w)
+            
+            # Aplicar shift apenas se os valores forem válidos
+            if target_w > 0 and target_w <= w and offset_x >= 0 and offset_x < w:
+                try:
+                    if shift_x >= 0:
+                        img_tensor = tf.image.crop_to_bounding_box(temp_img, 0, offset_x, h, target_w)
+                        img_tensor = tf.image.pad_to_bounding_box(img_tensor, 0, 0, h, w)
+                    else:
+                        img_tensor = tf.image.crop_to_bounding_box(temp_img, 0, 0, h, target_w)
+                        img_tensor = tf.image.pad_to_bounding_box(img_tensor, 0, offset_x, h, w)
+                        
+                    # Ajustar coordenadas das caixas
+                    if boxes_aug.shape[0] > 0:
+                        boxes_aug[:, 0] = tf.clip_by_value(boxes_aug[:, 0] + tf.cast(shift_x, tf.float32) / w, 0, 1.0 - boxes_aug[:, 2])
+                except:
+                    # Em caso de erro, manter a imagem original
+                    pass
+        
+        # Translação vertical (com verificações de segurança)
+        if height_shift_range > 0 and tf.random.uniform(()) > 0.5:
+            # Limitar o valor do shift para evitar erros
+            max_shift = h * height_shift_range
+            shift_y = tf.random.uniform((), -max_shift, max_shift)
+            shift_y = tf.cast(shift_y, tf.int32)
+            
+            # Garantir que os valores de offset e target são válidos
+            offset_y = tf.maximum(0, -shift_y)
+            target_h = h - tf.abs(shift_y)
+            
+            # Criar imagem temporária (paddida)
+            temp_img = tf.image.pad_to_bounding_box(img_tensor, 0, 0, h, w)
+            
+            # Aplicar shift apenas se os valores forem válidos
+            if target_h > 0 and target_h <= h and offset_y >= 0 and offset_y < h:
+                try:
+                    if shift_y >= 0:
+                        img_tensor = tf.image.crop_to_bounding_box(temp_img, offset_y, 0, target_h, w)
+                        img_tensor = tf.image.pad_to_bounding_box(img_tensor, 0, 0, h, w)
+                    else:
+                        img_tensor = tf.image.crop_to_bounding_box(temp_img, 0, 0, target_h, w)
+                        img_tensor = tf.image.pad_to_bounding_box(img_tensor, offset_y, 0, h, w)
+                        
+                    # Ajustar coordenadas das caixas
+                    if boxes_aug.shape[0] > 0:
+                        boxes_aug[:, 1] = tf.clip_by_value(boxes_aug[:, 1] + tf.cast(shift_y, tf.float32) / h, 0, 1.0 - boxes_aug[:, 3])
+                except:
+                    # Em caso de erro, manter a imagem original
+                    pass
         
         # Ajuste de brilho
-        if brightness_range:
+        if brightness_range and tf.random.uniform(()) > 0.3:
             factor = tf.random.uniform((), 
                                       brightness_range[0], 
                                       brightness_range[1])
             img_tensor = tf.image.adjust_brightness(img_tensor, factor - 1.0)
+        
+        # Ajuste de contraste
+        if contrast_range and tf.random.uniform(()) > 0.3:
+            factor = tf.random.uniform((), 
+                                     contrast_range[0], 
+                                     contrast_range[1])
+            img_tensor = tf.image.adjust_contrast(img_tensor, factor)
+        
+        # Ajuste de saturação
+        if saturation_range and tf.random.uniform(()) > 0.3:
+            factor = tf.random.uniform((), 
+                                     saturation_range[0], 
+                                     saturation_range[1])
+            img_tensor = tf.image.adjust_saturation(img_tensor, factor)
+        
+        # Ajuste de matiz
+        if hue_range and tf.random.uniform(()) > 0.3:
+            delta = tf.random.uniform((), 
+                                     hue_range[0], 
+                                     hue_range[1])
+            img_tensor = tf.image.adjust_hue(img_tensor, delta)
+        
+        # Zoom / Escala (Implementação segura)
+        if zoom_range and tf.random.uniform(()) > 0.5:
+            scale = tf.random.uniform((), zoom_range[0], zoom_range[1])
+            scale = tf.cast(scale, tf.float32)
+            
+            # Calcular novos tamanhos para o zoom
+            new_h = tf.cast(tf.cast(h, tf.float32) * scale, tf.int32)
+            new_w = tf.cast(tf.cast(w, tf.float32) * scale, tf.int32)
+            
+            # Evitar valores inválidos
+            new_h = tf.maximum(1, tf.minimum(new_h, h * 2))
+            new_w = tf.maximum(1, tf.minimum(new_w, w * 2))
+            
+            try:
+                # Redimensionar imagem (equivalente ao zoom)
+                img_tensor = tf.image.resize(img_tensor, [new_h, new_w])
+                
+                # Se for zoom in (scale > 1), cortar o excesso de imagem
+                if scale > 1:
+                    start_h = tf.maximum(0, (new_h - h) // 2)
+                    start_w = tf.maximum(0, (new_w - w) // 2)
+                    
+                    # Garantir que o recorte está dentro dos limites
+                    if start_h + h <= new_h and start_w + w <= new_w:
+                        img_tensor = tf.image.crop_to_bounding_box(img_tensor, start_h, start_w, h, w)
+                    else:
+                        # Redimensionar de volta ao tamanho original se as dimensões não forem válidas
+                        img_tensor = tf.image.resize(img_tensor, [h, w])
+                        
+                    # Ajustar caixas para o recorte
+                    if boxes_aug.shape[0] > 0:
+                        boxes_aug[:, 0] = boxes_aug[:, 0] * scale - tf.cast(start_w, tf.float32) / w
+                        boxes_aug[:, 1] = boxes_aug[:, 1] * scale - tf.cast(start_h, tf.float32) / h
+                        boxes_aug[:, 2] = boxes_aug[:, 2] * scale
+                        boxes_aug[:, 3] = boxes_aug[:, 3] * scale
+                # Se for zoom out (scale < 1), preencher com preto
+                else:
+                    pad_h = tf.maximum(0, (h - new_h) // 2)
+                    pad_w = tf.maximum(0, (w - new_w) // 2)
+                    
+                    # Garantir que o padding está dentro dos limites
+                    if pad_h + new_h <= h and pad_w + new_w <= w:
+                        img_tensor = tf.image.pad_to_bounding_box(img_tensor, pad_h, pad_w, h, w)
+                    else:
+                        # Redimensionar de volta ao tamanho original se as dimensões não forem válidas
+                        img_tensor = tf.image.resize(img_tensor, [h, w])
+                        
+                    # Ajustar caixas para o padding
+                    if boxes_aug.shape[0] > 0:
+                        boxes_aug[:, 0] = boxes_aug[:, 0] * scale + tf.cast(pad_w, tf.float32) / w
+                        boxes_aug[:, 1] = boxes_aug[:, 1] * scale + tf.cast(pad_h, tf.float32) / h
+                        boxes_aug[:, 2] = boxes_aug[:, 2] * scale
+                        boxes_aug[:, 3] = boxes_aug[:, 3] * scale
+            except:
+                # Em caso de erro, redimensionar de volta ao tamanho original
+                img_tensor = tf.image.resize(img_tensor, [h, w])
+        
+        # Aplicar desfoque gaussiano aleatório (simplificado para evitar erros)
+        if random_blur and tf.random.uniform(()) > 0.7:
+            try:
+                # Método simplificado e mais robusto para desfoque
+                img_tensor = tf.image.resize(img_tensor, [h//2, w//2])  # Diminuir resolução
+                img_tensor = tf.image.resize(img_tensor, [h, w])  # Voltar à resolução original (causa desfoque)
+            except:
+                # Em caso de erro, manter a imagem original
+                pass
+                
+        # Cortes aleatórios mantendo objetos (versão simplificada e segura)
+        if random_crop and tf.random.uniform(()) > 0.7 and boxes_aug.shape[0] > 0:
+            try:
+                # Calcular limites do corte para garantir que objetos permaneçam visíveis
+                min_x = tf.reduce_min(boxes_aug[:, 0])
+                min_y = tf.reduce_min(boxes_aug[:, 1])
+                max_x = tf.reduce_max(boxes_aug[:, 0] + boxes_aug[:, 2])
+                max_y = tf.reduce_max(boxes_aug[:, 1] + boxes_aug[:, 3])
+                
+                # Converter para pixels
+                min_x = tf.cast(min_x * tf.cast(w, tf.float32), tf.int32)
+                min_y = tf.cast(min_y * tf.cast(h, tf.float32), tf.int32)
+                max_x = tf.cast(max_x * tf.cast(w, tf.float32), tf.int32)
+                max_y = tf.cast(max_y * tf.cast(h, tf.float32), tf.int32)
+                
+                # Calcular tamanho do corte (60-90% do tamanho original)
+                crop_factor = tf.random.uniform((), 0.6, 0.9)
+                crop_h = tf.cast(tf.cast(h, tf.float32) * crop_factor, tf.int32)
+                crop_w = tf.cast(tf.cast(w, tf.float32) * crop_factor, tf.int32)
+                
+                # Garantir que o tamanho mínimo de corte é mantido
+                crop_h = tf.maximum(crop_h, max_y - min_y)
+                crop_w = tf.maximum(crop_w, max_x - min_x)
+                
+                # Limitar o tamanho para evitar cortes maiores que a imagem
+                crop_h = tf.minimum(crop_h, h)
+                crop_w = tf.minimum(crop_w, w)
+                
+                # Escolher um ponto de início para o corte que inclua os objetos
+                # Garantir que não saímos dos limites da imagem
+                start_x = tf.maximum(0, tf.minimum(min_x, w - crop_w))
+                start_y = tf.maximum(0, tf.minimum(min_y, h - crop_h))
+                
+                # Verificar se o corte é válido
+                if crop_w > 0 and crop_h > 0 and start_x + crop_w <= w and start_y + crop_h <= h:
+                    # Aplicar o corte
+                    cropped_img = tf.image.crop_to_bounding_box(img_tensor, start_y, start_x, crop_h, crop_w)
+                    
+                    # Redimensionar de volta ao tamanho original
+                    img_tensor = tf.image.resize(cropped_img, [h, w])
+                    
+                    # Ajustar caixas para o corte
+                    if boxes_aug.shape[0] > 0:
+                        # Converter para coordenadas relativas ao corte
+                        start_x_f = tf.cast(start_x, tf.float32) / tf.cast(w, tf.float32)
+                        start_y_f = tf.cast(start_y, tf.float32) / tf.cast(h, tf.float32)
+                        scale_x = tf.cast(w, tf.float32) / tf.cast(crop_w, tf.float32)
+                        scale_y = tf.cast(h, tf.float32) / tf.cast(crop_h, tf.float32)
+                        
+                        # Ajustar coordenadas
+                        boxes_aug[:, 0] = (boxes_aug[:, 0] - start_x_f) * scale_x
+                        boxes_aug[:, 1] = (boxes_aug[:, 1] - start_y_f) * scale_y
+                        boxes_aug[:, 2] = boxes_aug[:, 2] * scale_x
+                        boxes_aug[:, 3] = boxes_aug[:, 3] * scale_y
+                        
+                        # Clipar valores para 0-1
+                        boxes_aug = tf.clip_by_value(boxes_aug, 0, 1.0)
+            except:
+                # Em caso de erro, ignorar o corte
+                pass
         
         # Normalizar imagem para evitar valores fora do intervalo 0-255
         img_tensor = tf.clip_by_value(img_tensor, 0, 255)
@@ -141,7 +369,10 @@ def create_augmentation_pipeline(config):
         # Converter de volta para NumPy
         augmented_image = img_tensor.numpy()
         
-        return augmented_image, boxes
+        # Clipar valores para 0-1
+        boxes_aug = np.clip(boxes_aug, 0, 1.0)
+        
+        return augmented_image, boxes_aug
     
     return augment
 
@@ -206,6 +437,11 @@ def prepare_dataset(config):
     
     # Criar pipeline de augmentação
     augmentation_fn = create_augmentation_pipeline(augmentation_config)
+    
+    # Armazenar config global para acesso no gerador
+    # Isso permite que o YOEODataGenerator acesse a configuração completa
+    if augmentation_fn:
+        augmentation_fn.__globals__['config'] = config
     
     # Inicializar geradores como None
     train_generator = None
@@ -289,6 +525,13 @@ class YOEODataGenerator(Sequence):
         self.augmentation = augmentation
         self.data_dir = data_dir
         
+        # Configurações para técnicas avançadas de augmentação
+        self.use_mosaic = False  # Será habilitado dinamicamente com base no config
+        self.use_mixup = False   # Será habilitado dinamicamente com base no config
+        self.mosaic_prob = 0.5   # Probabilidade de aplicar mosaic
+        self.mixup_prob = 0.3    # Probabilidade de aplicar mixup
+        self.mixup_alpha = 0.2   # Parâmetro alpha da distribuição beta para mixup
+        
         # Carregar anotações
         self.annotations = load_annotations(annotation_path)
         
@@ -309,9 +552,221 @@ class YOEODataGenerator(Sequence):
         self.image_ids = sorted([img['id'] for img in self.image_info])
         self.indexes = np.arange(len(self.image_ids))
         
+        # Verificar config de augmentação 
+        if augmentation:
+            # Verificar se há atributos para mosaic e mixup no config
+            if 'mosaic' in augmentation.__globals__.get('config', {}).get('augmentation', {}):
+                self.use_mosaic = augmentation.__globals__['config']['augmentation'].get('mosaic', False)
+            
+            if 'mixup' in augmentation.__globals__.get('config', {}).get('augmentation', {}):
+                self.use_mixup = augmentation.__globals__['config']['augmentation'].get('mixup', False)
+        
         # Embaralhar dados se necessário
         if self.shuffle:
             np.random.shuffle(self.indexes)
+    
+    def _load_image_and_boxes(self, image_id):
+        """
+        Carrega uma imagem e suas caixas delimitadoras.
+        
+        Args:
+            image_id: ID da imagem a ser carregada
+            
+        Returns:
+            image: Imagem carregada e redimensionada
+            boxes: Array de caixas delimitadoras no formato [x, y, w, h]
+            classes: Array de classes (category_ids)
+        """
+        # Encontrar informações da imagem
+        image_info = next(img for img in self.image_info if img['id'] == image_id)
+        
+        # Carregar imagem
+        file_name = image_info['file_name']
+        
+        # Determinar o tipo de caminho
+        if 'train' in self.annotation_path.lower():
+            img_path = os.path.join(os.path.dirname(self.annotation_path), file_name)
+        elif 'valid' in self.annotation_path.lower() or 'val' in self.annotation_path.lower():
+            img_path = os.path.join(os.path.dirname(self.annotation_path), file_name)
+        elif 'test' in self.annotation_path.lower():
+            img_path = os.path.join(os.path.dirname(self.annotation_path), file_name)
+        else:
+            # Caminho padrão
+            img_path = os.path.join(self.data_dir, file_name)
+        
+        # Carregar imagem
+        image = load_image(img_path)
+        orig_height, orig_width = image.shape[:2]
+        
+        # Redimensionar imagem
+        image = tf.image.resize(image, self.input_shape).numpy()
+        
+        # Obter anotações para esta imagem
+        boxes = []
+        classes = []
+        
+        anns = self.image_annotations.get(image_id, [])
+        
+        for ann in anns:
+            # Extrair coordenadas da caixa delimitadora
+            bbox = ann['bbox']  # [x, y, width, height] formato COCO
+            
+            # Normalizar coordenadas para o intervalo [0, 1]
+            x = bbox[0] / orig_width
+            y = bbox[1] / orig_height
+            w = bbox[2] / orig_width
+            h = bbox[3] / orig_height
+            
+            # Armazenar caixa e classe
+            boxes.append([x, y, w, h])
+            classes.append(ann['category_id'])
+        
+        # Converter para arrays NumPy
+        boxes = np.array(boxes, dtype=np.float32)
+        classes = np.array(classes, dtype=np.int32)
+        
+        return image, boxes, classes
+    
+    def _apply_mosaic(self, main_idx):
+        """
+        Aplica a técnica de mosaico combinando 4 imagens.
+        
+        Args:
+            main_idx: Índice da imagem principal
+            
+        Returns:
+            image: Imagem combinada em mosaico
+            boxes: Array combinado de caixas delimitadoras
+            classes: Array combinado de classes
+        """
+        # Selecionar 3 imagens adicionais aleatórias
+        available_idxs = list(set(range(len(self.image_ids))) - {main_idx})
+        if len(available_idxs) < 3:
+            # Se não houver imagens suficientes, retornar imagem original
+            image_id = self.image_ids[main_idx]
+            return self._load_image_and_boxes(image_id)
+        
+        additional_idxs = np.random.choice(available_idxs, 3, replace=False)
+        all_idxs = [main_idx] + list(additional_idxs)
+        
+        # Definir tamanho da imagem de saída
+        h, w = self.input_shape
+        
+        # Criar imagem vazia para o mosaico
+        mosaic_img = np.zeros((h, w, 3), dtype=np.float32)
+        
+        # Posição central do mosaico (com variação aleatória)
+        center_x = int(w * (0.5 + np.random.uniform(-0.1, 0.1)))
+        center_y = int(h * (0.5 + np.random.uniform(-0.1, 0.1)))
+        
+        # Lista para armazenar todas as caixas e classes
+        all_boxes = []
+        all_classes = []
+        
+        # Posições das 4 imagens no mosaico
+        positions = [
+            [0, 0, center_x, center_y],  # top-left
+            [center_x, 0, w, center_y],  # top-right
+            [0, center_y, center_x, h],  # bottom-left
+            [center_x, center_y, w, h]   # bottom-right
+        ]
+        
+        # Para cada uma das 4 imagens
+        for i, idx in enumerate(all_idxs):
+            # Carregar imagem e caixas
+            image_id = self.image_ids[idx]
+            img, boxes, classes = self._load_image_and_boxes(image_id)
+            
+            # Obter tamanho da imagem atual
+            img_h, img_w = img.shape[:2]
+            
+            # Recortar para posição no mosaico
+            x1, y1, x2, y2 = positions[i]
+            
+            # Calcular largura e altura da região
+            region_w = x2 - x1
+            region_h = y2 - y1
+            
+            # Redimensionar imagem para a região
+            img_resized = tf.image.resize(img, (region_h, region_w)).numpy()
+            
+            # Colocar imagem redimensionada no mosaico
+            mosaic_img[y1:y2, x1:x2] = img_resized
+            
+            # Se não houver caixas para esta imagem, continuar para a próxima
+            if len(boxes) == 0:
+                continue
+                
+            # Ajustar coordenadas das caixas para o mosaico
+            # Converter de [x, y, w, h] para [x1, y1, x2, y2]
+            boxes_xyxy = np.zeros_like(boxes)
+            boxes_xyxy[:, 0] = boxes[:, 0]  # x
+            boxes_xyxy[:, 1] = boxes[:, 1]  # y
+            boxes_xyxy[:, 2] = boxes[:, 0] + boxes[:, 2]  # x2 = x + w
+            boxes_xyxy[:, 3] = boxes[:, 1] + boxes[:, 3]  # y2 = y + h
+            
+            # Escalar para a região no mosaico
+            boxes_xyxy[:, 0] = boxes_xyxy[:, 0] * region_w + x1
+            boxes_xyxy[:, 1] = boxes_xyxy[:, 1] * region_h + y1
+            boxes_xyxy[:, 2] = boxes_xyxy[:, 2] * region_w + x1
+            boxes_xyxy[:, 3] = boxes_xyxy[:, 3] * region_h + y1
+            
+            # Converter de volta para [x, y, w, h]
+            boxes_mosaic = np.zeros_like(boxes)
+            boxes_mosaic[:, 0] = boxes_xyxy[:, 0] / w  # normalizado pela largura do mosaico
+            boxes_mosaic[:, 1] = boxes_xyxy[:, 1] / h  # normalizado pela altura do mosaico
+            boxes_mosaic[:, 2] = (boxes_xyxy[:, 2] - boxes_xyxy[:, 0]) / w  # largura normalizada
+            boxes_mosaic[:, 3] = (boxes_xyxy[:, 3] - boxes_xyxy[:, 1]) / h  # altura normalizada
+            
+            # Clipar valores para garantir que estão entre 0 e 1
+            boxes_mosaic = np.clip(boxes_mosaic, 0, 1)
+            
+            # Adicionar apenas caixas válidas (largura e altura > 0)
+            valid_indices = (boxes_mosaic[:, 2] > 0.005) & (boxes_mosaic[:, 3] > 0.005)
+            all_boxes.append(boxes_mosaic[valid_indices])
+            all_classes.append(classes[valid_indices])
+        
+        # Concatenar todas as caixas e classes
+        if all_boxes:
+            all_boxes = np.vstack(all_boxes)
+            all_classes = np.concatenate(all_classes)
+        else:
+            all_boxes = np.zeros((0, 4), dtype=np.float32)
+            all_classes = np.array([], dtype=np.int32)
+        
+        return mosaic_img, all_boxes, all_classes
+    
+    def _apply_mixup(self, img1, boxes1, classes1):
+        """
+        Aplica a técnica de mixup misturando duas imagens.
+        
+        Args:
+            img1: Primeira imagem
+            boxes1: Caixas da primeira imagem
+            classes1: Classes da primeira imagem
+            
+        Returns:
+            image: Imagem misturada
+            boxes: Array combinado de caixas delimitadoras
+            classes: Array combinado de classes
+        """
+        # Selecionar uma imagem aleatória
+        idx2 = np.random.randint(0, len(self.image_ids))
+        image_id2 = self.image_ids[idx2]
+        img2, boxes2, classes2 = self._load_image_and_boxes(image_id2)
+        
+        # Gerar peso para mixup a partir de uma distribuição beta
+        alpha = self.mixup_alpha
+        lam = np.random.beta(alpha, alpha)
+        
+        # Combinar imagens
+        mixed_img = lam * img1 + (1 - lam) * img2
+        
+        # Combinar caixas e classes (simplesmente concatenar)
+        boxes = np.vstack([boxes1, boxes2]) if len(boxes2) > 0 else boxes1
+        classes = np.concatenate([classes1, classes2]) if len(classes2) > 0 else classes1
+        
+        return mixed_img, boxes, classes
     
     def __len__(self):
         """Retorna o número de batches no gerador."""
@@ -331,77 +786,36 @@ class YOEODataGenerator(Sequence):
         batch_indexes = self.indexes[index * self.batch_size:
                                     (index + 1) * self.batch_size]
         
-        # Selecionar IDs de imagem para este batch
-        batch_image_ids = [self.image_ids[i] for i in batch_indexes]
-        
         # Inicializar arrays para imagens e alvos
-        batch_images = np.zeros((len(batch_image_ids), 
+        batch_images = np.zeros((len(batch_indexes), 
                                 *self.input_shape, 3), 
                                dtype=np.float32)
         
         # Para simplicidade, vamos definir uma saída de detecção básica
         # Formato: [batch_size, max_boxes, (x, y, w, h, class_id)]
         max_boxes = 100  # Número máximo de caixas por imagem
-        batch_detection_targets = np.zeros((len(batch_image_ids), 
+        batch_detection_targets = np.zeros((len(batch_indexes), 
                                            max_boxes, 5), 
                                           dtype=np.float32)
         
         # Carregar e processar cada imagem no batch
-        for i, image_id in enumerate(batch_image_ids):
-            # Encontrar informações da imagem
-            image_info = next(img for img in self.image_info if img['id'] == image_id)
-            
-            # Carregar imagem - verificar caminhos de anotações
-            file_name = image_info['file_name']
-            
-            # Determinar o tipo de caminho (treinamento, validação ou teste)
-            if 'train' in self.annotation_path.lower():
-                img_path = os.path.join(os.path.dirname(self.annotation_path), file_name)
-            elif 'valid' in self.annotation_path.lower() or 'val' in self.annotation_path.lower():
-                img_path = os.path.join(os.path.dirname(self.annotation_path), file_name)
-            elif 'test' in self.annotation_path.lower():
-                img_path = os.path.join(os.path.dirname(self.annotation_path), file_name)
-            else:
-                # Caminho padrão
-                img_path = os.path.join(self.data_dir, file_name)
-            
+        for i, idx in enumerate(batch_indexes):
             try:
-                # Tentar carregar a imagem
-                image = load_image(img_path)
-                orig_height, orig_width = image.shape[:2]
+                # Aplicar técnicas avançadas de augmentação
+                image_id = self.image_ids[idx]
                 
-                # Redimensionar imagem
-                image = tf.image.resize(image, self.input_shape).numpy()
+                # Técnica de Mosaic
+                if self.use_mosaic and np.random.random() < self.mosaic_prob:
+                    image, boxes, classes = self._apply_mosaic(idx)
+                else:
+                    # Carregamento normal
+                    image, boxes, classes = self._load_image_and_boxes(image_id)
                 
-                # Aplicar augmentação se disponível
-                boxes = []
-                classes = []
+                # Técnica de Mixup (aplicada após mosaic)
+                if self.use_mixup and np.random.random() < self.mixup_prob and len(boxes) > 0:
+                    image, boxes, classes = self._apply_mixup(image, boxes, classes)
                 
-                # Obter anotações para esta imagem
-                anns = self.image_annotations.get(image_id, [])
-                
-                for j, ann in enumerate(anns):
-                    if j >= max_boxes:
-                        break
-                        
-                    # Extrair coordenadas da caixa delimitadora
-                    bbox = ann['bbox']  # [x, y, width, height] formato COCO
-                    
-                    # Normalizar coordenadas para o intervalo [0, 1]
-                    x = bbox[0] / orig_width
-                    y = bbox[1] / orig_height
-                    w = bbox[2] / orig_width
-                    h = bbox[3] / orig_height
-                    
-                    # Armazenar caixa e classe
-                    boxes.append([x, y, w, h])
-                    classes.append(ann['category_id'])
-                
-                # Converter para arrays NumPy
-                boxes = np.array(boxes, dtype=np.float32)
-                classes = np.array(classes, dtype=np.int32)
-                
-                # Aplicar augmentação se especificada
+                # Aplicar augmentação padrão
                 if self.augmentation and len(boxes) > 0:
                     image, boxes = self.augmentation(image, boxes)
                 
@@ -419,7 +833,9 @@ class YOEODataGenerator(Sequence):
                         batch_detection_targets[i, j, 4] = cls
                 
             except Exception as e:
-                print(f"Erro ao processar imagem {img_path}: {str(e)}")
+                print(f"Erro ao processar imagem {idx}: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 # Manter arrays zerados para esta imagem
         
         # Retornar batch de imagens e alvos no formato de dicionário

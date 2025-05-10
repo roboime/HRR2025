@@ -62,7 +62,7 @@ camera:
 #=======================================#
 yoeo:
   # Configurações do modelo
-  model_path: "./src/perception/resources/models/yolov4_tiny.h5"  # Caminho para o modelo H5
+  model_path: "./src/perception/resources/models/yolo.pt"  # Caminho para o modelo H5
   input_width: 224              # Largura da entrada do modelo reduzida
   input_height: 224             # Altura da entrada do modelo reduzida
   

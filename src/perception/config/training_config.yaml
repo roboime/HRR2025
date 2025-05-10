@@ -11,14 +11,14 @@ classes: [
 # Configurações do modelo
 input_width: 416
 input_height: 416
-batch_size: 8
-epochs: 100
+batch_size: 16            # Aumentado para melhorar generalização
+epochs: 200               # Aumentado para permitir convergência completa
 
 # Diretórios dos datasets
-data_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset"
-train_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/train"
-val_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/valid"
-test_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/test"
+data_dir: "/mnt/c/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset"
+train_dir: "/mnt/c/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/train"
+val_dir: "/mnt/c/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/valid"
+test_dir: "/mnt/c/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/dataset/test"
 
 # Arquivos de anotações
 train_annotations: "train/_annotations.coco.json"
@@ -26,30 +26,41 @@ val_annotations: "valid/_annotations.coco.json"
 test_annotations: "test/_annotations.coco.json"
 
 # Diretórios de saída
-checkpoint_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models/checkpoints"
-log_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models/logs"
-output_dir: "C:/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models"
+checkpoint_dir: "/mnt/c/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models/checkpoints"
+log_dir: "/mnt/c/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models/logs"
+output_dir: "/mnt/c/Users/Keller_/Desktop/RoboIME/HSL2025/src/perception/resources/models"
 
 # Hiperparâmetros de treinamento
-learning_rate: 0.001
-warmup_epochs: 3
-early_stopping_patience: 15
+learning_rate: 0.0003     # Reduzido para estabilizar o treinamento
+warmup_epochs: 5          # Aumentado para aquecimento mais gradual
+early_stopping_patience: 25  # Aumentado para dar mais tempo para o modelo convergir
+weight_decay: 0.0001      # Adicionado L2 regularização
 
-# Augmentação de dados
+# Augmentação de dados (aumentada para melhor generalização)
 augmentation:
-  rotation_range: 10
-  width_shift_range: 0.1
-  height_shift_range: 0.1
-  brightness_range: [0.8, 1.2]
+  rotation_range: 15
+  width_shift_range: 0.15
+  height_shift_range: 0.15
+  brightness_range: [0.7, 1.3]
   horizontal_flip: true
   vertical_flip: false
-  zoom_range: 0.1
-  random_crop: false
+  zoom_range: 0.2
+  random_crop: true       # Ativado para melhor generalização
+  random_blur: true       # Adicionado para simular imagens de baixa qualidade
+  mosaic: true            # Técnica de mosaico para combinar múltiplas imagens
+  mixup: true             # Mistura de imagens para regularização
+  contrast_range: [0.8, 1.2]  # Variação de contraste
+  saturation_range: [0.8, 1.2]  # Variação de saturação
+  hue_range: [-0.05, 0.05]  # Pequenas variações de matiz
   
 # Opções de exportação
 export_tensorrt: true
 use_pretrained: true
 pretrained_weights: null  # Será baixado automaticamente se use_pretrained=true
+
+# Regularização adicional
+dropout_rate: 0.1         # Adicionar dropout nas camadas finais
+l2_reg: 0.0001            # Regularização L2 para os pesos do modelo
 
 # Parâmetros de otimização
 mixed_precision: true

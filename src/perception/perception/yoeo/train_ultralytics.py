@@ -162,6 +162,36 @@ def main():
         print(f"Erro ao exportar para ONNX: {str(e)}")
 
 
+def create_data_yaml(output_path='data.yaml', train_path='datasets/train', val_path='datasets/val',
+                    names=['bola', 'gol', 'robo']):
+    """
+    Cria um arquivo YAML de configuração para o dataset.
+    
+    Args:
+        output_path: Caminho para salvar o arquivo YAML
+        train_path: Caminho para as imagens de treinamento
+        val_path: Caminho para as imagens de validação
+        names: Lista de nomes das classes
+    """
+    data = {
+        'path': '.',  # Raiz do projeto
+        'train': train_path,  # Caminho para as imagens de treinamento
+        'val': val_path,      # Caminho para as imagens de validação
+        'test': '',           # Caminho para as imagens de teste (opcional)
+        'names': names,       # Nomes das classes
+        'nc': len(names)      # Número de classes
+    }
+    
+    # Criar diretório se não existir
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # Salvar o arquivo YAML
+    with open(output_path, 'w') as f:
+        yaml.dump(data, f, default_flow_style=False)
+    
+    print(f"Arquivo de configuração do dataset criado em: {output_path}")
+
+
 if __name__ == '__main__':
     try:
         main()
@@ -170,4 +200,4 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"Erro durante o treinamento: {str(e)}")
         import traceback
-        traceback.print_exc() 
+        traceback.print_exc()
