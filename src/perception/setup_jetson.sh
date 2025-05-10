@@ -70,7 +70,8 @@ apt-get install -y --no-install-recommends \
     gstreamer1.0-tools \
     gstreamer1.0-plugins-good \
     gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly
+    gstreamer1.0-plugins-ugly \
+    git
 
 print_info "Verificando dependências do Python..."
 pip3 install -U pip
@@ -79,7 +80,11 @@ pip3 install -U \
     numpy \
     pyyaml \
     rospkg \
-    empy
+    empy \
+    torch==1.10.0 \
+    torchvision==0.11.0 \
+    tqdm \
+    opencv-python
 
 # Verificar TensorFlow e instalar se necessário
 if ! python3 -c "import tensorflow" &> /dev/null; then
@@ -115,6 +120,62 @@ else
     print_success "TensorFlow já está instalado."
 fi
 
+# Instalar YOLOv5 original (não Ultralytics)
+print_header "Instalando YOLOv5 original"
+
+YOLOV5_DIR="/opt/yolov5"
+
+# Remover diretório anterior se existir
+if [ -d "$YOLOV5_DIR" ]; then
+    print_info "Removendo instalação anterior do YOLOv5..."
+    rm -rf "$YOLOV5_DIR"
+fi
+
+# Clonar o repositório YOLOv5 (versão compatível com Python 3.6.9)
+print_info "Clonando YOLOv5 versão 5.0 (compatível com Python 3.6.9)..."
+git clone -b v5.0 https://github.com/ultralytics/yolov5.git "$YOLOV5_DIR"
+
+if [ $? -eq 0 ]; then
+    print_success "YOLOv5 clonado com sucesso em $YOLOV5_DIR"
+    
+    # Configurar permissões
+    chown -R $SUDO_USER:$SUDO_USER "$YOLOV5_DIR"
+    chmod -R 755 "$YOLOV5_DIR"
+    
+    # Instalar dependências do YOLOv5
+    print_info "Instalando dependências do YOLOv5..."
+    cd "$YOLOV5_DIR"
+    pip3 install -r requirements.txt
+    
+    # Baixar pesos pré-treinados
+    print_info "Baixando pesos pré-treinados..."
+    # Usar curl em vez de wget e salvar diretamente no diretório
+    curl -L https://github.com/ultralytics/yolov5/releases/download/v5.0/yolov5s.pt -o "$YOLOV5_DIR/yolov5s.pt"
+    
+    if [ -f "$YOLOV5_DIR/yolov5s.pt" ]; then
+        print_success "Pesos pré-treinados baixados com sucesso."
+    else
+        print_error "Falha ao baixar pesos pré-treinados. Você pode baixá-los manualmente em:"
+        print_info "https://github.com/ultralytics/yolov5/releases/download/v5.0/yolov5s.pt"
+    fi
+    
+    # Adicionar YOLOV5_PATH ao ambiente
+    ENV_FILE="/home/$SUDO_USER/.bashrc"
+    if ! grep -q "YOLOV5_PATH" "$ENV_FILE"; then
+        echo "# Configuração do YOLOv5" >> "$ENV_FILE"
+        echo "export YOLOV5_PATH=\"$YOLOV5_DIR\"" >> "$ENV_FILE"
+        print_success "YOLOV5_PATH adicionado ao .bashrc"
+    else
+        print_success "YOLOV5_PATH já configurado."
+    fi
+    
+    # Adicionar a variável de ambiente também para o ambiente atual
+    export YOLOV5_PATH="$YOLOV5_DIR"
+    
+else
+    print_error "Falha ao clonar o repositório YOLOv5."
+fi
+
 # Configurar diretórios para os modelos
 print_header "Configurando diretórios de recursos"
 
@@ -126,6 +187,13 @@ MODELS_DIR="$RESOURCES_DIR/models"
 print_info "Criando diretórios de recursos..."
 mkdir -p "$MODELS_DIR"
 print_success "Diretórios criados: $MODELS_DIR"
+
+# Verificar se os pesos pré-treinados estão no YOLOv5_DIR e copiá-los para MODELS_DIR
+if [ -f "$YOLOV5_DIR/yolov5s.pt" ]; then
+    print_info "Copiando pesos pré-treinados para o diretório de modelos..."
+    cp "$YOLOV5_DIR/yolov5s.pt" "$MODELS_DIR/yolov5s.pt"
+    print_success "Pesos copiados para $MODELS_DIR/yolov5s.pt"
+fi
 
 # Configurar permissões e grupos
 print_header "Configurando permissões"
@@ -182,6 +250,7 @@ else
 fi
 
 print_header "Configuração concluída!"
+print_info "Ambiente YOLOv5 configurado em: $YOLOV5_DIR"
 print_info "Para testar o sistema de percepção, execute:"
 print_info "cd $WORKSPACE_DIR && ./src/perception/test_perception.sh"
 print_info "Nota: Pode ser necessário reiniciar o terminal para aplicar todas as configurações."

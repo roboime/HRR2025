@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-Nó ROS para detecção usando o modelo YOLO da Ultralytics.
+Nó ROS para detecção usando o modelo YOLO.
 
-Este nó implementa a interface ROS para o sistema YOLO da Ultralytics, recebendo imagens
+Este nó implementa a interface ROS para o sistema YOLOv5, recebendo imagens
 da câmera, processando-as com o modelo YOLO e publicando os resultados
 de detecção.
 """
@@ -39,7 +39,7 @@ except ImportError:
 
 class YOEODetector(Node):
     """
-    Nó ROS para detecção usando o modelo YOLO da Ultralytics.
+    Nó ROS para detecção usando o modelo YOLO.
     
     Este nó recebe imagens da câmera, processa-as com o modelo YOLO
     e publica os resultados de detecção.
@@ -50,7 +50,7 @@ class YOEODetector(Node):
         super().__init__('yolo_detector')
         
         # Declarar parâmetros
-        self.declare_parameter('model_path', 'src/perception/resource/models/yolov5n.pt')
+        self.declare_parameter('model_path', 'src/perception/resource/models/yolov5s.pt')
         self.declare_parameter('config_file', 'src/perception/config/vision_params.yaml')
         self.declare_parameter('input_width', 640)
         self.declare_parameter('input_height', 640)
@@ -131,7 +131,7 @@ class YOEODetector(Node):
         self.total_time = 0
         self.fps = 0
         
-        self.get_logger().info('Nó YOLO Detector (Ultralytics) inicializado')
+        self.get_logger().info('Nó YOLO Detector inicializado')
     
     def _load_config(self):
         """Carrega o arquivo de configuração."""
@@ -198,263 +198,251 @@ class YOEODetector(Node):
     
     def _init_publishers(self):
         """Inicializa os publishers ROS."""
-        # Publishers para detecções
+        # Publishers para resultados de detecção
         self.detection_publishers = {}
         
         if self.enable_ball_detection:
             self.detection_publishers[DetectionType.BALL] = self.create_publisher(
-                Detection2DArray,
-                'vision/ball_detections',
+                Detection2DArray, 
+                'yolo/ball_detections', 
                 10
             )
         
         if self.enable_goal_detection:
             self.detection_publishers[DetectionType.GOAL] = self.create_publisher(
-                Detection2DArray,
-                'vision/goal_detections',
+                Detection2DArray, 
+                'yolo/goal_detections', 
                 10
             )
         
         if self.enable_robot_detection:
             self.detection_publishers[DetectionType.ROBOT] = self.create_publisher(
-                Detection2DArray,
-                'vision/robot_detections',
+                Detection2DArray, 
+                'yolo/robot_detections', 
                 10
             )
         
         # Publisher para imagem de debug
         if self.debug_image:
-            self.debug_publisher = self.create_publisher(
-                Image,
-                'vision/debug_image',
+            self.debug_image_publisher = self.create_publisher(
+                Image, 
+                'yolo/debug_image', 
                 10
             )
     
     def camera_info_callback(self, msg):
-        """Callback para informações da câmera."""
+        """Processa mensagens de informação da câmera."""
         self.camera_info = msg
-        
-        # Atualizar informações da câmera nos componentes
-        for _, component in self.components.items():
-            if hasattr(component, 'set_camera_info'):
-                component.set_camera_info(msg)
+        self.get_logger().debug('Recebidas informações da câmera')
     
     def image_callback(self, msg):
-        """Callback para imagens da câmera."""
+        """Processa imagens recebidas da câmera."""
         try:
-            # Converter a mensagem ROS para imagem OpenCV
-            cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            # Converter a mensagem ROS para formato OpenCV
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
             
-            # Processar a imagem
+            # Iniciar tempo para cálculo de FPS
             start_time = time.time()
-            results = self._process_image(cv_image)
-            processing_time = time.time() - start_time
             
-            # Atualizar estatísticas
+            # Processar a imagem com o modelo YOLO
+            results = self._process_image(cv_image)
+            
+            # Calcular FPS
             self.frame_count += 1
-            self.total_time += processing_time
+            elapsed_time = time.time() - start_time
+            self.total_time += elapsed_time
             self.fps = self.frame_count / self.total_time
+            
+            if self.frame_count % 30 == 0:
+                self.get_logger().info(f'FPS: {self.fps:.2f}')
             
             # Publicar resultados
             self._publish_results(results, msg.header)
             
         except CvBridgeError as e:
-            self.get_logger().error(f'Erro ao converter imagem: {e}')
+            self.get_logger().error(f'Erro na conversão da imagem: {e}')
         except Exception as e:
-            self.get_logger().error(f'Erro ao processar imagem: {e}')
+            self.get_logger().error(f'Erro no processamento: {e}')
     
     def _process_image(self, image):
         """
-        Processa a imagem com o modelo YOLO e componentes.
+        Processa a imagem com o modelo YOLO.
         
         Args:
-            image: Imagem BGR do OpenCV
-            
+            image: Imagem no formato OpenCV (BGR)
+        
         Returns:
-            Dicionário com resultados de detecção
+            Dicionário com os resultados para cada tipo de detecção
         """
-        # Obter detecções do modelo YOLO
-        detection_types = []
+        results = {}
+        debug_image = image.copy() if self.debug_image else None
         
-        if self.enable_ball_detection:
-            detection_types.append(DetectionType.BALL)
-        
-        if self.enable_goal_detection:
-            detection_types.append(DetectionType.GOAL)
-        
-        if self.enable_robot_detection:
-            detection_types.append(DetectionType.ROBOT)
-        
-        results = self.yoeo_handler.get_detections(image, detection_types=detection_types)
-        
-        # Processar resultados com componentes
-        processed_results = {
-            'ball_detections': [],
-            'goal_detections': [],
-            'robot_detections': [],
-            'debug_image': None
-        }
-        
-        # Processar bolas
-        if 'ball' in self.components:
-            processed_results['ball_detections'] = self.components['ball'].process(image)
-        
-        # Processar gols
-        if 'goal' in self.components:
-            processed_results['goal_detections'] = self.components['goal'].process(image)
-        
-        # Processar robôs
-        if 'robot' in self.components:
-            processed_results['robot_detections'] = self.components['robot'].process(image)
-        
-        # Gerar imagem de debug
-        if self.debug_image:
-            debug_image = image.copy()
+        try:
+            # Processar a imagem com YOLOv5
+            detections = self.yoeo_handler.detect(image)
             
-            # Desenhar detecções de cada componente
-            if 'ball' in self.components and processed_results['ball_detections']:
-                debug_image = self.components['ball'].draw_detections(
-                    debug_image, processed_results['ball_detections']
-                )
+            # Processar cada tipo de detecção com seu componente específico
+            if self.enable_ball_detection and 'ball' in self.components:
+                ball_results = self.components['ball'].process(image, detections)
+                results[DetectionType.BALL] = ball_results
+                
+                # Desenhar resultados na imagem de debug
+                if debug_image is not None and ball_results:
+                    for box, conf, cls in zip(ball_results['boxes'], ball_results['confidences'], ball_results['classes']):
+                        x1, y1, x2, y2 = box
+                        cv2.rectangle(debug_image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+                        cv2.putText(debug_image, f'Bola: {conf:.2f}', (int(x1), int(y1) - 10),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             
-            if 'goal' in self.components and processed_results['goal_detections']:
-                debug_image = self.components['goal'].draw_detections(
-                    debug_image, processed_results['goal_detections']
-                )
+            if self.enable_goal_detection and 'goal' in self.components:
+                goal_results = self.components['goal'].process(image, detections)
+                results[DetectionType.GOAL] = goal_results
+                
+                # Desenhar resultados na imagem de debug
+                if debug_image is not None and goal_results:
+                    for box, conf, cls in zip(goal_results['boxes'], goal_results['confidences'], goal_results['classes']):
+                        x1, y1, x2, y2 = box
+                        cv2.rectangle(debug_image, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)
+                        cv2.putText(debug_image, f'Gol: {conf:.2f}', (int(x1), int(y1) - 10),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
             
-            if 'robot' in self.components and processed_results['robot_detections']:
-                debug_image = self.components['robot'].draw_detections(
-                    debug_image, processed_results['robot_detections']
-                )
+            if self.enable_robot_detection and 'robot' in self.components:
+                robot_results = self.components['robot'].process(image, detections)
+                results[DetectionType.ROBOT] = robot_results
+                
+                # Desenhar resultados na imagem de debug
+                if debug_image is not None and robot_results:
+                    for box, conf, cls in zip(robot_results['boxes'], robot_results['confidences'], robot_results['classes']):
+                        x1, y1, x2, y2 = box
+                        cv2.rectangle(debug_image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
+                        cv2.putText(debug_image, f'Robô: {conf:.2f}', (int(x1), int(y1) - 10),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
             
-            # Adicionar informações de FPS
-            cv2.putText(
-                debug_image,
-                f"FPS: {self.fps:.1f}",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 255, 0),
-                2
-            )
+            # Adicionar informações de FPS à imagem de debug
+            if debug_image is not None:
+                cv2.putText(debug_image, f'FPS: {self.fps:.2f}', (10, 30),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
             
-            processed_results['debug_image'] = debug_image
+        except Exception as e:
+            self.get_logger().error(f'Erro no processamento da imagem: {e}')
         
-        return processed_results
+        # Salvar imagem de debug para publicação
+        if debug_image is not None:
+            results['debug_image'] = debug_image
+        
+        return results
     
     def _publish_results(self, results, header):
         """
-        Publica os resultados nos tópicos ROS.
+        Publica os resultados de detecção nos tópicos ROS.
         
         Args:
-            results: Dicionário com resultados processados
-            header: Cabeçalho da mensagem original
+            results: Dicionário com os resultados para cada tipo de detecção
+            header: Header da mensagem original
         """
         # Publicar detecções de bola
-        if DetectionType.BALL in self.detection_publishers and results['ball_detections']:
-            ball_msg = self._create_detection_msg(
-                results['ball_detections'], header, DetectionType.BALL
-            )
+        if DetectionType.BALL in results and DetectionType.BALL in self.detection_publishers:
+            ball_msg = self._create_detection_msg(results[DetectionType.BALL], header, DetectionType.BALL)
             self.detection_publishers[DetectionType.BALL].publish(ball_msg)
         
         # Publicar detecções de gol
-        if DetectionType.GOAL in self.detection_publishers and results['goal_detections']:
-            goal_msg = self._create_detection_msg(
-                results['goal_detections'], header, DetectionType.GOAL
-            )
+        if DetectionType.GOAL in results and DetectionType.GOAL in self.detection_publishers:
+            goal_msg = self._create_detection_msg(results[DetectionType.GOAL], header, DetectionType.GOAL)
             self.detection_publishers[DetectionType.GOAL].publish(goal_msg)
         
         # Publicar detecções de robô
-        if DetectionType.ROBOT in self.detection_publishers and results['robot_detections']:
-            robot_msg = self._create_detection_msg(
-                results['robot_detections'], header, DetectionType.ROBOT
-            )
+        if DetectionType.ROBOT in results and DetectionType.ROBOT in self.detection_publishers:
+            robot_msg = self._create_detection_msg(results[DetectionType.ROBOT], header, DetectionType.ROBOT)
             self.detection_publishers[DetectionType.ROBOT].publish(robot_msg)
         
         # Publicar imagem de debug
-        if self.debug_image and results['debug_image'] is not None:
+        if self.debug_image and 'debug_image' in results:
             try:
-                debug_msg = self.bridge.cv2_to_imgmsg(results['debug_image'], "bgr8")
+                debug_msg = self.bridge.cv2_to_imgmsg(results['debug_image'], encoding='bgr8')
                 debug_msg.header = header
-                self.debug_publisher.publish(debug_msg)
+                self.debug_image_publisher.publish(debug_msg)
             except CvBridgeError as e:
                 self.get_logger().error(f'Erro ao converter imagem de debug: {e}')
     
     def _create_detection_msg(self, detections, header, detection_type):
         """
-        Cria uma mensagem Detection2DArray para publicação.
+        Cria uma mensagem de detecção para publicação no ROS.
         
         Args:
-            detections: Lista de detecções
-            header: Cabeçalho da mensagem
-            detection_type: Tipo de detecção
-            
-        Returns:
-            Mensagem Detection2DArray
-        """
-        msg = Detection2DArray()
-        msg.header = header
+            detections: Resultados de detecção
+            header: Header da mensagem original
+            detection_type: Tipo de detecção (BALL, GOAL, ROBOT)
         
-        for detection in detections:
-            det_msg = Detection2D()
-            det_msg.header = header
+        Returns:
+            Mensagem de detecção formatada
+        """
+        detection_array = Detection2DArray()
+        detection_array.header = header
+        
+        if not detections:
+            return detection_array
+        
+        boxes = detections.get('boxes', [])
+        confidences = detections.get('confidences', [])
+        classes = detections.get('classes', [])
+        
+        for i, (box, confidence, cls) in enumerate(zip(boxes, confidences, classes)):
+            detection = Detection2D()
+            detection.header = header
             
-            # Extrair coordenadas da caixa delimitadora
-            x1, y1, x2, y2 = detection['bbox']
+            # ID da detecção
+            detection.id = f"{detection_type.name.lower()}_{i}"
             
-            # Calcular centro e tamanho
+            # Posição central e tamanho da caixa
+            x1, y1, x2, y2 = box
             center_x = (x1 + x2) / 2
             center_y = (y1 + y2) / 2
             width = x2 - x1
             height = y2 - y1
             
-            # Definir posição 2D
-            det_msg.bbox.center.position.x = center_x
-            det_msg.bbox.center.position.y = center_y
-            det_msg.bbox.center.position.z = 0.0
+            # Definir a posição central da detecção
+            detection.bbox.center.position.x = float(center_x)
+            detection.bbox.center.position.y = float(center_y)
+            detection.bbox.center.theta = 0.0  # Orientação padrão
             
-            # Definir orientação (identidade)
-            det_msg.bbox.center.orientation.w = 1.0
-            
-            # Definir tamanho
-            det_msg.bbox.size_x = width
-            det_msg.bbox.size_y = height
+            # Definir as dimensões da caixa
+            detection.bbox.size_x = float(width)
+            detection.bbox.size_y = float(height)
             
             # Adicionar hipótese de objeto
             hypothesis = ObjectHypothesisWithPose()
-            hypothesis.id = str(detection_type.value)
-            hypothesis.score = float(detection['confidence'])
+            hypothesis.id = int(cls)  # ID da classe
+            hypothesis.score = float(confidence)
             
-            # Adicionar posição 3D, se disponível
-            if 'position_3d' in detection and detection['position_3d'] is not None:
-                x, y, z = detection['position_3d']
-                
-                pose = PoseWithCovariance()
-                pose.pose.position.x = x
-                pose.pose.position.y = y
-                pose.pose.position.z = z
-                pose.pose.orientation.w = 1.0
-                
-                hypothesis.pose = pose
+            # Pose do objeto (preenchida opcionalmente pelo componente específico)
+            pose = PoseWithCovariance()
+            pose.pose = Pose()
             
-            det_msg.results.append(hypothesis)
-            msg.detections.append(det_msg)
+            # Se o componente forneceu uma estimativa de pose, usar
+            if 'poses' in detections and i < len(detections['poses']):
+                pose.pose = detections['poses'][i]
+            
+            hypothesis.pose = pose
+            detection.results.append(hypothesis)
+            
+            detection_array.detections.append(detection)
         
-        return msg
+        return detection_array
+
 
 def main(args=None):
-    """Função principal para iniciar o nó detector YOLO."""
+    """Função principal para iniciar o nó ROS."""
     rclpy.init(args=args)
+    yolo_detector = YOEODetector()
     
     try:
-        node = YOEODetector()
-        rclpy.spin(node)
+        rclpy.spin(yolo_detector)
     except KeyboardInterrupt:
         pass
-    except Exception as e:
-        print(f"Erro no nó detector YOLO: {e}")
     finally:
+        yolo_detector.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main() 

@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-Manipulador do modelo YOLO da Ultralytics para detecção de objetos.
+Manipulador do modelo YOLO para detecção de objetos.
 
-Este módulo implementa um manipulador para o modelo YOLO da Ultralytics,
+Este módulo implementa um manipulador para o modelo YOLOv5,
 que gerencia o pré-processamento de imagens, inferência e pós-processamento
 para detecção de objetos em contexto de futebol robótico.
 """
@@ -15,8 +15,15 @@ import torch
 import cv2
 from enum import Enum, auto
 import os
+import sys
 
 from perception.yoeo.yoeo_model import YOEOModel
+
+# Verificar se o diretório do YOLOv5 foi definido
+YOLOV5_PATH = os.environ.get('YOLOV5_PATH', '/opt/yolov5')
+if YOLOV5_PATH not in sys.path:
+    sys.path.append(YOLOV5_PATH)
+    print(f"Adicionado {YOLOV5_PATH} ao sys.path")
 
 
 class DetectionType(Enum):
@@ -28,15 +35,15 @@ class DetectionType(Enum):
 
 class YOEOHandler:
     """
-    Manipulador para o modelo YOLO da Ultralytics para detecção de objetos.
+    Manipulador para o modelo YOLOv5 para detecção de objetos.
     
-    Esta classe gerencia todas as operações relacionadas ao modelo YOLO da Ultralytics,
+    Esta classe gerencia todas as operações relacionadas ao modelo YOLOv5,
     incluindo carregamento do modelo, pré-processamento de imagens e inferência.
     """
 
     def __init__(self, config):
         """
-        Inicializa o manipulador do modelo YOLO da Ultralytics.
+        Inicializa o manipulador do modelo YOLOv5.
         
         Args:
             config: Dicionário com configurações do modelo, incluindo:
@@ -54,6 +61,7 @@ class YOEOHandler:
         self.confidence_threshold = config.get("confidence_threshold", 0.5)
         self.iou_threshold = config.get("iou_threshold", 0.45)
         self.use_tensorrt = config.get("use_tensorrt", True)
+        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         
         print(f"DEBUG: Configuração do YOEOHandler:")
         print(f"DEBUG: - model_path: {self.model_path}")
@@ -62,6 +70,7 @@ class YOEOHandler:
         print(f"DEBUG: - confidence_threshold: {self.confidence_threshold}")
         print(f"DEBUG: - iou_threshold: {self.iou_threshold}")
         print(f"DEBUG: - use_tensorrt: {self.use_tensorrt}")
+        print(f"DEBUG: - device: {self.device}")
         
         # Verificar se o arquivo do modelo existe
         if not os.path.exists(self.model_path):
@@ -85,7 +94,7 @@ class YOEOHandler:
 
     def _load_model(self):
         """
-        Carrega o modelo YOLO da Ultralytics a partir do caminho especificado.
+        Carrega o modelo YOLOv5 a partir do caminho especificado.
         
         Returns:
             Modelo carregado ou None em caso de erro
@@ -102,6 +111,14 @@ class YOEOHandler:
             model = yoeo_model.load_weights(self.model_path)
             print(f"Modelo carregado com sucesso de: {self.model_path}")
             
+            # Para o YOLOv5, precisamos configurar o modelo para inferência
+            if hasattr(model, 'eval'):
+                model.eval()
+                
+            # Configurar o modelo para utilizar o dispositivo correto
+            if hasattr(model, 'to') and self.device:
+                model.to(self.device)
+                
             return model
             
         except Exception as e:
@@ -157,10 +174,42 @@ class YOEOHandler:
                     results['detections'][detection_type].append(detection)
         
         return results
+    
+    def detect(self, image):
+        """
+        Detecta objetos em uma imagem usando o modelo YOLOv5.
+        
+        Args:
+            image: Imagem numpy BGR (OpenCV)
+            
+        Returns:
+            Dicionário contendo:
+                - boxes: Lista de caixas delimitadoras [x1, y1, x2, y2]
+                - confidences: Lista de valores de confiança
+                - classes: Lista de IDs de classe
+        """
+        # Realizar inferência e obter resultados processados
+        processed_results, _ = self.process(image)
+        
+        # Organizar resultados em formato de lista
+        boxes = []
+        confidences = []
+        classes = []
+        
+        for detection in processed_results:
+            boxes.append(detection['bbox'])
+            confidences.append(detection['confidence'])
+            classes.append(detection['class'].value)
+        
+        return {
+            'boxes': boxes,
+            'confidences': confidences,
+            'classes': classes
+        }
 
     def process(self, image):
         """
-        Processa uma imagem usando o modelo YOLO da Ultralytics.
+        Processa uma imagem usando o modelo YOLOv5.
         
         Args:
             image: Imagem numpy BGR (OpenCV)
@@ -173,56 +222,168 @@ class YOEOHandler:
         if self.model is None:
             return [], 0.0
         
-        # Converter para RGB se necessário (o YOLO da Ultralytics espera RGB)
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # Pré-processar a imagem para o formato esperado pelo YOLOv5
+        img = self._preprocess(image)
         
         # Medir o tempo de inferência
         start_time = time.time()
         
-        # Realizar a inferência com o modelo Ultralytics
-        # O método 'predict' da Ultralytics já lida com o redimensionamento,
-        # pré-processamento, e pós-processamento das detecções
-        results = self.model.predict(
-            source=rgb_image,
-            conf=self.confidence_threshold,
-            iou=self.iou_threshold,
-            max_det=100,  # Máximo de detecções por imagem
-            verbose=False
-        )
+        try:
+            # Verificar se estamos usando TensorRT
+            if self.use_tensorrt and isinstance(self.model, object) and hasattr(self.model, 'engine'):
+                # Processamento específico para TensorRT
+                detections = self._process_tensorrt(img)
+            else:
+                # Inferência padrão com PyTorch
+                with torch.no_grad():
+                    # Realizar inferência
+                    output = self.model(img)
+                    
+                    # Extrair detecções do output
+                    detections = self._postprocess(output)
+            
+            # Calcular o tempo de inferência
+            inference_time = time.time() - start_time
+            
+            return detections, inference_time
         
-        # Calcular o tempo de inferência
-        inference_time = time.time() - start_time
+        except Exception as e:
+            print(f"Erro durante a inferência: {e}")
+            import traceback
+            traceback.print_exc()
+            return [], time.time() - start_time
+    
+    def _preprocess(self, image):
+        """
+        Pré-processa a imagem para inferência com o YOLOv5.
         
-        # Processar os resultados para nosso formato padrão
-        detection_results = []
+        Args:
+            image: Imagem numpy BGR
+            
+        Returns:
+            Tensor preprocessado
+        """
+        # Converter para RGB (YOLOv5 espera RGB)
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
-        # A Ultralytics retorna uma lista de resultados (um por imagem)
-        # Como estamos processando apenas uma imagem, pegamos o primeiro resultado
-        result = results[0]
+        # Redimensionar para o tamanho de entrada do modelo
+        resized = cv2.resize(rgb_image, (self.input_width, self.input_height))
         
-        # Extrair as caixas (em pixels), classes e pontuações
-        if hasattr(result, 'boxes') and len(result.boxes) > 0:
-            for i, box in enumerate(result.boxes):
-                # Obter coordenadas x1, y1, x2, y2 em formato absoluto (pixels)
-                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                
-                # Obter classe e confiança
-                class_id = int(box.cls[0].item())
-                conf = float(box.conf[0].item())
-                
-                # Mapear índice de classe Ultralytics para nosso DetectionType
-                # Assumindo que as classes são mapeadas assim: 0=Bola, 1=Gol, 2=Robô
-                if class_id < len(DetectionType):
-                    detection_type = DetectionType(class_id)
-                else:
-                    # Se tivermos alguma classe fora do nosso enum, ignorar
-                    continue
-                
-                # Adicionar à lista de detecções
-                detection_results.append({
-                    'bbox': [float(x1), float(y1), float(x2), float(y2)],
-                    'class': detection_type,
-                    'confidence': conf
-                })
+        # Converter para float, normalizar e reorganizar para formato NCHW
+        img = resized.astype(np.float32) / 255.0
+        img = np.transpose(img, (2, 0, 1))  # HWC -> CHW
+        img = np.expand_dims(img, axis=0)   # Adicionar dimensão de batch
         
-        return detection_results, inference_time 
+        # Converter para tensor PyTorch
+        img_tensor = torch.from_numpy(img).to(self.device)
+        
+        return img_tensor
+    
+    def _process_tensorrt(self, img):
+        """
+        Processa a imagem usando modelo TensorRT.
+        
+        Args:
+            img: Tensor de imagem pré-processado
+            
+        Returns:
+            Lista de detecções processadas
+        """
+        # Implementação específica para TensorRT
+        # Pode precisar ser ajustada conforme sua implementação do TensorRT
+        try:
+            # Obter output do modelo TensorRT
+            # Esta é uma implementação simplificada e deve ser ajustada conforme necessário
+            output = self.model.context.execute_v2([img.cpu().numpy()])
+            
+            # Converter output para o formato correto e processar detecções
+            # Note que o formato exato depende de como seu modelo TensorRT está configurado
+            # Esta é apenas uma estrutura básica
+            
+            # Implementação exemplo - ajuste conforme sua configuração do TensorRT
+            detections = []
+            for i in range(len(output[0])):
+                if output[1][i] > self.confidence_threshold:
+                    x1, y1, x2, y2 = output[0][i][:4]
+                    confidence = float(output[1][i])
+                    class_id = int(output[2][i])
+                    
+                    # Converter para o formato de detecção esperado
+                    detection = {
+                        'bbox': [x1, y1, x2, y2],
+                        'confidence': confidence,
+                        'class': DetectionType(class_id)
+                    }
+                    detections.append(detection)
+            
+            return detections
+            
+        except Exception as e:
+            print(f"Erro ao processar com TensorRT: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
+    def _postprocess(self, output):
+        """
+        Processa a saída do modelo YOLOv5 para obter detecções.
+        
+        Args:
+            output: Saída do modelo YOLOv5
+            
+        Returns:
+            Lista de detecções processadas
+        """
+        # Extrair detecções do output do YOLOv5
+        # O formato exato pode variar dependendo da versão do YOLOv5
+        try:
+            # Se estamos usando a versão original do YOLOv5
+            # output pode vir em diferentes formatos dependendo da versão
+            
+            # Verificar o tipo de output
+            if isinstance(output, torch.Tensor):
+                # Output é diretamente o tensor de previsão
+                prediction = output
+            elif isinstance(output, (tuple, list)):
+                # Em algumas versões o output pode ser uma lista/tupla de tensores
+                prediction = output[0]
+            elif hasattr(output, 'pred'):
+                # Em algumas versões o output é um objeto com atributo 'pred'
+                prediction = output.pred[0]
+            elif hasattr(output, 'xyxy'):
+                # Em algumas versões o output é um objeto com métodos específicos
+                # Converter para o formato xyxy (x1, y1, x2, y2)
+                prediction = output.xyxy[0]
+            else:
+                print(f"Formato de output desconhecido: {type(output)}")
+                return []
+            
+            # Converter para numpy array
+            if isinstance(prediction, torch.Tensor):
+                prediction = prediction.cpu().numpy()
+            
+            # Processar detecções
+            detections = []
+            for det in prediction:
+                # Formato esperado: [x1, y1, x2, y2, confidence, class_id]
+                if len(det) >= 6:
+                    x1, y1, x2, y2, confidence, class_id = det[:6]
+                    
+                    # Verificar se a confiança é maior que o limiar
+                    if confidence > self.confidence_threshold:
+                        # Verificar se a classe está dentro do range esperado
+                        if 0 <= class_id < len(DetectionType):
+                            detection = {
+                                'bbox': [float(x1), float(y1), float(x2), float(y2)],
+                                'confidence': float(confidence),
+                                'class': DetectionType(int(class_id))
+                            }
+                            detections.append(detection)
+            
+            return detections
+            
+        except Exception as e:
+            print(f"Erro ao processar detecções: {e}")
+            import traceback
+            traceback.print_exc()
+            return [] 
