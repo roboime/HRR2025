@@ -23,14 +23,14 @@ pip install tensorflow
 ### Iniciar o Sistema
 
 ```bash
-# Sistema completo (YOEO + tradicional)
+# Sistema YOLOv8 simplificado (6 classes)
 ros2 launch perception perception.launch.py
 
-# Apenas YOEO
-ros2 launch perception perception.launch.py mode:=yoeo
+# Sistema YOLOv8 com câmera CSI
+ros2 launch perception perception.launch.py camera_type:=csi
 
-# Apenas detectores tradicionais
-ros2 launch perception perception.launch.py mode:=traditional
+# Sistema YOLOv8 com câmera USB
+ros2 launch perception perception.launch.py camera_type:=usb
 ```
 
 ### Configurar Câmera
@@ -52,16 +52,29 @@ ros2 launch perception perception.launch.py camera_src:=csi
 
 ## Configurações Comuns
 
-Para configurar quais detectores usar para cada objeto, edite o arquivo `config/perception_config.yaml`:
+Para configurar o sistema de percepção YOLOv8 simplificado, edite o arquivo `config/perception_config.yaml`:
 
 ```yaml
-pipeline:
-  # Escolha de detector para cada tipo de objeto (opções: 'yoeo' ou 'traditional')
-  detector_ball: "yoeo"         # Detector para a bola
-  detector_field: "traditional" # Detector para o campo
-  detector_lines: "traditional" # Detector para as linhas
-  detector_goals: "yoeo"        # Detector para os gols
-  detector_robots: "yoeo"       # Detector para os robôs
+yolov8:
+  # Sistema YOLOv8 simplificado (6 classes essenciais)
+  model_path: "resources/models/robocup_simplified_yolov8.pt"
+  confidence_threshold: 0.6     # Threshold de confiança
+  iou_threshold: 0.45           # Non-maximum suppression
+  max_detections: 200           # Máximo de detecções por frame
+  device: "cuda"                # GPU (Orin Nano Super)
+  half_precision: true          # FP16 para melhor performance
+  
+  # Classes detectadas (6 classes total)
+  classes:
+    # Estratégia de jogo (2 classes)
+    ball: 0              # Bola de futebol
+    robot: 1             # Robôs (sem distinção de cor)
+    
+    # Landmarks para localização (4 classes)
+    penalty_mark: 2      # Marca do penalty
+    goal_post: 3         # Postes de gol (unificados)
+    center_circle: 4     # Círculo central
+    field_corner: 5      # Cantos do campo
 ```
 
 ## Visualização
@@ -75,9 +88,9 @@ ros2 run rqt_image_view rqt_image_view /vision/debug_image
 
 ## Exemplos de Uso Comum
 
-1. **Usando com câmera USB em modo YOEO**:
+1. **Sistema YOLOv8 com câmera USB**:
    ```bash
-   ros2 launch perception perception.launch.py mode:=yoeo camera_src:=usb
+   ros2 launch perception perception.launch.py camera_type:=usb
    ```
 
 2. **Sistema completo com debug desabilitado** (para melhor desempenho):
@@ -85,16 +98,16 @@ ros2 run rqt_image_view rqt_image_view /vision/debug_image
    ros2 launch perception perception.launch.py debug:=false
    ```
 
-3. **Detectores tradicionais com parâmetros específicos**:
+3. **YOLOv8 com modelo customizado e threshold específico**:
    ```bash
-   ros2 launch perception perception.launch.py mode:=traditional detector_ball:=traditional detector_field:=traditional
+   ros2 launch perception perception.launch.py model_path:=robocup_simplified_yolov8.pt confidence_threshold:=0.7
    ```
 
 ## Solução de Problemas
 
-- **Erro na câmera**: Verifique se a câmera está conectada e o parâmetro `camera_src` está correto.
-- **YOEO não funciona**: Verifique se o TensorFlow está instalado e o modelo está no caminho correto.
-- **Desempenho lento**: Desabilite o debug com `debug:=false` para melhor desempenho.
+- **Erro na câmera**: Verifique se a câmera está conectada e o parâmetro `camera_type` está correto (csi ou usb).
+- **YOLOv8 não carrega**: Verifique se o modelo está no caminho correto e se CUDA está disponível.
+- **Desempenho lento**: Desabilite o debug com `debug:=false` e use modelo TensorRT (.engine) para máxima performance.
 
 Para mais informações, consulte o [README.md](README.md) completo.
 

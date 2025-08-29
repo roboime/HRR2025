@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Script simplificado para testar o sistema de percepção da RoboIME
-# Este script torna mais fácil testar diferentes configurações do sistema de percepção
+# Sistema de Teste e Conveniência - Percepção RoboIME
+# Suporte dual para câmeras CSI IMX219 e USB Logitech C930
+# Jetson Orin Nano Super - Sistema YOLOv8 Simplificado (6 classes)
 
 # Configurar ambiente com codificação UTF-8
 export PYTHONIOENCODING=utf8
@@ -9,18 +10,23 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
 # Adicionar caminhos de bibliotecas importantes
-# Usar o caminho completo para o Python do sistema e adicionar ao PYTHONPATH
-export PYTHONPATH="/usr/local/lib/python3.6/dist-packages:$PYTHONPATH"
-export LD_LIBRARY_PATH="/usr/local/cuda-10.2/targets/aarch64-linux/lib:$LD_LIBRARY_PATH"
+export PYTHONPATH="/usr/local/lib/python3.10/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH"
+export LD_LIBRARY_PATH="/usr/local/cuda-12.2/targets/aarch64-linux/lib:$LD_LIBRARY_PATH"
 
 # Cores para mensagens
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 BLUE='\033[0;34m'
 YELLOW='\033[0;33m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Funções
+# Configurações
+CONFIG_FILE="src/perception/config/perception_config.yaml"
+USB_DEVICE="/dev/video0"
+
+# Funções de utilitários
 function print_header() {
     echo -e "\n${BLUE}============================================================${NC}"
     echo -e "${BLUE}$1${NC}"
@@ -28,15 +34,23 @@ function print_header() {
 }
 
 function print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
+    echo -e "${GREEN}✅ $1${NC}"
 }
 
 function print_error() {
-    echo -e "${RED}✗ $1${NC}"
+    echo -e "${RED}❌ $1${NC}"
 }
 
 function print_info() {
-    echo -e "${YELLOW}ℹ $1${NC}"
+    echo -e "${YELLOW}💡 $1${NC}"
+}
+
+function print_warning() {
+    echo -e "${PURPLE}⚠️  $1${NC}"
+}
+
+function print_camera() {
+    echo -e "${CYAN}🎥 $1${NC}"
 }
 
 # Verificar se o script está sendo executado na raiz do workspace
@@ -48,288 +62,441 @@ if [[ "$PWD" != "$WORKSPACE_DIR" ]]; then
     cd "$WORKSPACE_DIR"
 fi
 
-# Verificar instalação do ROS 2
-print_header "Verificando ambiente"
+# Função para verificar ambiente básico
+check_environment() {
+    print_header "🔍 Verificando Ambiente"
 
-if ! command -v ros2 &> /dev/null; then
-    print_error "ROS 2 não encontrado. Certifique-se de que o ROS 2 está instalado e configurado."
-    exit 1
-fi
-print_success "ROS 2 encontrado."
-
-# Verificar workspace
-if [ ! -f "./install/setup.bash" ]; then
-    print_error "Arquivo setup.bash não encontrado. Execute 'colcon build' primeiro."
-    exit 1
-fi
-print_success "Workspace encontrado."
-
-# Verificar pacote de percepção
-if [ ! -d "./src/perception" ]; then
-    print_error "Pacote 'perception' não encontrado."
-    exit 1
-fi
-print_success "Pacote 'perception' encontrado."
-
-# Verificar se o pacote foi construído
-if [ ! -d "./install/perception" ]; then
-    print_error "O pacote 'perception' não foi construído. Execute 'colcon build --packages-select perception'."
-    exit 1
-fi
-print_success "Pacote 'perception' construído."
-
-# Configurar ambiente ROS
-print_info "Configurando ambiente ROS 2..."
-source ./install/setup.bash
-
-# Adicionar caminho das bibliotecas Python do sistema ao PYTHONPATH de forma mais abrangente
-print_info "Configurando caminhos para bibliotecas Python..."
-export PYTHONPATH="/usr/local/lib/python3.6/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH"
-print_success "PYTHONPATH configurado: $PYTHONPATH"
-
-# Verificar dependências
-print_header "Verificando dependências"
-
-# Verificar TensorFlow com tratamento de erros mais robusto
-echo "Verificando TensorFlow..."
-if python3 -c "import tensorflow as tf; print(f'TensorFlow versão: {tf.__version__}')" 2>tensorflow_error.log; then
-    print_success "TensorFlow está funcionando."
-    # Verificar GPU no TensorFlow
-    if python3 -c "import tensorflow as tf; print(f'GPU disponível: {len(tf.config.list_physical_devices(\"GPU\")) > 0}')" 2>tensorflow_gpu_error.log; then
-        print_success "GPU disponível para TensorFlow."
-    else
-        print_info "GPU não disponível para TensorFlow. O sistema funcionará mais lento."
+    # Verificar ROS 2
+    if ! command -v ros2 &> /dev/null; then
+        print_error "ROS 2 não encontrado. Certifique-se de que o ROS 2 está instalado e configurado."
+        return 1
     fi
-else
-    print_error "TensorFlow não encontrado ou com erro. Tentando instalar..."
-    pip3 install tensorflow==2.4.0
-    
-    # Verificar novamente após instalação
-    if python3 -c "import tensorflow as tf; print(f'TensorFlow versão: {tf.__version__}')" 2>/dev/null; then
-        print_success "TensorFlow instalado com sucesso."
-    else
-        print_error "Não foi possível instalar o TensorFlow. O detector YOLOv4-Tiny não funcionará."
+    print_success "ROS 2 encontrado"
+
+    # Verificar workspace
+    if [ ! -f "./install/setup.bash" ]; then
+        print_error "Arquivo setup.bash não encontrado. Execute 'colcon build' primeiro."
+        return 1
     fi
-fi
+    print_success "Workspace encontrado"
 
-# Verificar OpenCV com tratamento de erros mais robusto
-echo "Verificando OpenCV..."
-if python3 -c "import cv2; print(f'OpenCV versão: {cv2.__version__}')" 2>opencv_error.log; then
-    print_success "OpenCV está funcionando."
-else
-    print_error "OpenCV não encontrado ou com erro. Tentando instalar..."
-    pip3 install opencv-python
-    
-    # Verificar novamente após instalação
-    if python3 -c "import cv2; print(f'OpenCV versão: {cv2.__version__}')" 2>/dev/null; then
-        print_success "OpenCV instalado com sucesso."
-    else
-        print_error "Não foi possível instalar o OpenCV. Os detectores tradicionais não funcionarão."
+    # Verificar pacote de percepção
+    if [ ! -d "./src/perception" ]; then
+        print_error "Pacote 'perception' não encontrado."
+        return 1
     fi
-fi
+    print_success "Pacote 'perception' encontrado"
 
-# Verificar se o modelo YOLOv4-Tiny existe
-echo "Verificando modelo YOLOv4-Tiny..."
-MODEL_PATH="./src/perception/resources/models/yolov4_tiny.h5"
-if [ -f "$MODEL_PATH" ]; then
-    print_success "Modelo YOLOv4-Tiny encontrado em $MODEL_PATH"
-else
-    print_error "Modelo YOLOv4-Tiny não encontrado em $MODEL_PATH"
-    # Verificar diretório alternativo
-    ALT_MODEL_PATH="./install/perception/share/perception/resources/models/yolov4_tiny.h5"
-    if [ -f "$ALT_MODEL_PATH" ]; then
-        print_success "Modelo YOLOv4-Tiny encontrado em $ALT_MODEL_PATH"
-    else
-        print_info "O diretório de modelos será criado se não existir"
-        mkdir -p "$(dirname "$MODEL_PATH")"
+    # Verificar se o pacote foi construído
+    if [ ! -d "./install/perception" ]; then
+        print_error "O pacote 'perception' não foi construído. Execute 'colcon build --packages-select perception'."
+        return 1
     fi
-fi
+    print_success "Pacote 'perception' construído"
 
-# Configurar permissões de execução para os scripts Python
-print_header "Configurando permissões para scripts Python"
+    # Configurar ambiente ROS
+    print_info "Configurando ambiente ROS 2..."
+    source ./install/setup.bash
+    print_success "Ambiente ROS 2 configurado"
 
-# Verificar e definir permissões para arquivos Python
-find_python_files() {
-    find "$1" -name "*.py" -type f
+    return 0
 }
 
-# Listar e configurar permissões para scripts Python
-PYTHON_FILES=$(find_python_files "./src/perception")
-if [ -n "$PYTHON_FILES" ]; then
-    for py_file in $PYTHON_FILES; do
-        if [ -f "$py_file" ]; then
-            print_info "Configurando permissão para: $py_file"
-            chmod +x "$py_file"
+# Função para verificar dependências modernas
+check_dependencies() {
+    print_header "📦 Verificando Dependências Modernas"
+
+    # Verificar PyTorch/Ultralytics (YOLOv8)
+    echo "🔍 Verificando YOLOv8/Ultralytics..."
+    if python3 -c "import ultralytics; from ultralytics import YOLO; print(f'Ultralytics versão: {ultralytics.__version__}')" 2>/dev/null; then
+        print_success "YOLOv8/Ultralytics funcionando"
+    else
+        print_warning "YOLOv8/Ultralytics não encontrado - detector YOLOv8 pode não funcionar"
+    fi
+
+    # Verificar OpenCV moderno
+    echo "🔍 Verificando OpenCV..."
+    if python3 -c "import cv2; print(f'OpenCV versão: {cv2.__version__}')" 2>/dev/null; then
+        print_success "OpenCV funcionando"
+        
+        # Verificar CUDA no OpenCV
+        if python3 -c "import cv2; print(f'CUDA suportado: {cv2.cuda.getCudaEnabledDeviceCount() > 0}')" 2>/dev/null; then
+            print_success "OpenCV com suporte CUDA"
+        else
+            print_warning "OpenCV sem suporte CUDA"
         fi
+    else
+        print_error "OpenCV não encontrado"
+        return 1
+    fi
+
+    # Verificar v4l-utils (para câmera USB)
+    if command -v v4l2-ctl &> /dev/null; then
+        print_success "v4l-utils disponível (suporte USB)"
+    else
+        print_warning "v4l-utils não instalado (necessário para câmera USB)"
+        print_info "Instale com: sudo apt install v4l-utils"
+    fi
+
+    return 0
+}
+
+# Função para verificar câmeras disponíveis
+check_cameras() {
+    print_header "🎥 Verificando Câmeras Disponíveis"
+
+    # Verificar CSI IMX219
+    echo "1️⃣ Verificando CSI IMX219:"
+    if dmesg | grep -q "imx219"; then
+        print_success "   CSI IMX219 detectada"
+    else
+        print_warning "   CSI IMX219 não detectada"
+        print_info "   Verifique a conexão do cabo CSI"
+    fi
+
+    # Verificar USB
+    echo "2️⃣ Verificando câmeras USB:"
+    if lsusb | grep -q "Logitech"; then
+        print_success "   Câmera Logitech detectada"
+        lsusb | grep Logitech | sed 's/^/      /'
+    else
+        print_warning "   Câmera Logitech não detectada"
+    fi
+
+    # Verificar dispositivos de vídeo
+    echo "3️⃣ Verificando dispositivos de vídeo:"
+    if ls /dev/video* &> /dev/null; then
+        print_success "   Dispositivos de vídeo encontrados:"
+        ls -la /dev/video* | sed 's/^/      /'
+    else
+        print_warning "   Nenhum dispositivo de vídeo encontrado"
+    fi
+
+    return 0
+}
+
+# Função para teste específico da câmera C930
+test_c930_camera() {
+    print_header "🧪 Teste Específico - Câmera USB Logitech C930"
+
+    # Verificação básica
+    if [ ! -c "$USB_DEVICE" ]; then
+        print_error "Dispositivo $USB_DEVICE não encontrado"
+        print_info "Verifique se a câmera USB C930 está conectada"
+        return 1
+    fi
+
+    if ! lsusb | grep -q "Logitech"; then
+        print_error "Câmera Logitech não detectada via lsusb"
+        print_info "Verifique se a C930 está conectada corretamente"
+        return 1
+    fi
+
+    print_success "Câmera C930 detectada"
+
+    # Verificar capacidades (se v4l2-ctl disponível)
+    if command -v v4l2-ctl &> /dev/null; then
+        print_info "Verificando capacidades da C930:"
+        v4l2-ctl --device=$USB_DEVICE --info | head -5 | sed 's/^/   /'
+        echo ""
+        print_info "Formatos suportados:"
+        v4l2-ctl --device=$USB_DEVICE --list-formats-ext | grep -E "(Index|Size|Interval)" | head -10 | sed 's/^/   /'
+    else
+        print_warning "v4l2-ctl não disponível - pulando verificação detalhada"
+    fi
+
+    # Teste OpenCV
+    print_info "Testando captura OpenCV..."
+    python3 << EOF
+import cv2
+import sys
+
+try:
+    print("   🔄 Tentando abrir câmera em $USB_DEVICE...")
+    cap = cv2.VideoCapture('$USB_DEVICE', cv2.CAP_V4L2)
+    
+    if not cap.isOpened():
+        print("   ❌ Falha ao abrir câmera")
+        sys.exit(1)
+    
+    # Configurar resolução C930
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+    
+    # Verificar configurações
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    
+    print(f"   📏 Resolução: {width}x{height}")
+    print(f"   🎬 FPS: {fps}")
+    
+    # Testar captura
+    ret, frame = cap.read()
+    if ret:
+        print(f"   ✅ Frame capturado: {frame.shape}")
+        print("   🎉 Teste OpenCV PASSOU!")
+    else:
+        print("   ❌ Falha na captura de frame")
+        sys.exit(1)
+    
+    cap.release()
+    
+except Exception as e:
+    print(f"   ❌ Erro: {e}")
+    sys.exit(1)
+EOF
+
+    if [ $? -eq 0 ]; then
+        print_success "Teste da câmera C930 PASSOU"
+        return 0
+    else
+        print_error "Teste da câmera C930 FALHOU"
+        return 1
+    fi
+}
+
+# Função para iniciar sistema com CSI
+start_perception_csi() {
+    print_header "🎥 Iniciando Sistema com Câmera CSI IMX219"
+    
+    # Configurar para CSI
+    if [ -f "$CONFIG_FILE" ]; then
+        sed -i 's/camera_type: ".*"/camera_type: "csi"/' "$CONFIG_FILE"
+        print_success "Configuração alterada para CSI"
+    else
+        print_error "Arquivo de configuração não encontrado: $CONFIG_FILE"
+        return 1
+    fi
+
+    print_camera "Configurações CSI:"
+    print_info "   📷 Câmera: CSI IMX219"
+    print_info "   📏 Resolução: 640x480@30fps"
+    print_info "   🎯 Detectores: YOLOv8 + Tradicionais"
+    print_info "   ⚡ Latência: Baixa (~50ms)"
+    echo ""
+
+    # Iniciar sistema
+    print_info "Iniciando sistema de percepção com CSI..."
+    ros2 launch perception dual_camera_perception.launch.py \
+        camera_type:=csi \
+        config_file:=$CONFIG_FILE \
+        debug:=true
+}
+
+# Função para iniciar sistema com USB
+start_perception_usb() {
+    print_header "🎥 Iniciando Sistema com Câmera USB Logitech C930"
+    
+    # Verificar C930 primeiro
+    if ! test_c930_camera; then
+        print_error "Teste da C930 falhou - não é possível iniciar sistema USB"
+        return 1
+    fi
+
+    # Configurar para USB
+    if [ -f "$CONFIG_FILE" ]; then
+        sed -i 's/camera_type: ".*"/camera_type: "usb"/' "$CONFIG_FILE"
+        print_success "Configuração alterada para USB"
+    else
+        print_error "Arquivo de configuração não encontrado: $CONFIG_FILE"
+        return 1
+    fi
+
+    print_camera "Configurações USB C930:"
+    print_info "   📷 Câmera: USB Logitech C930"
+    print_info "   📏 Resolução: 1280x720@30fps"
+    print_info "   🎯 Detectores: YOLOv8 + Tradicionais"
+    print_info "   🔍 Auto Focus: Ativo"
+    print_info "   📐 Campo de Visão: 90°"
+    echo ""
+
+    # Iniciar sistema
+    print_info "Iniciando sistema de percepção com USB C930..."
+    ros2 launch perception dual_camera_perception.launch.py \
+        camera_type:=usb \
+        config_file:=$CONFIG_FILE \
+        debug:=true
+}
+
+# Função para rebuildar workspace
+rebuild_workspace() {
+    print_header "🔧 Reconstruindo Workspace"
+    
+    print_info "Reconstruindo pacote perception..."
+    colcon build --packages-select perception
+
+    if [ $? -eq 0 ]; then
+        print_success "Workspace reconstruído com sucesso"
+        source ./install/setup.bash
+        return 0
+    else
+        print_error "Falha ao reconstruir workspace"
+        return 1
+    fi
+}
+
+# Função para informações do sistema
+show_system_info() {
+    print_header "📊 Informações e Status do Sistema"
+    
+    # Status ROS2
+    echo "🤖 Status do ROS 2:"
+    if ros2 node list &> /dev/null; then
+        ros2 node list | sed 's/^/   /'
+    else
+        echo "   Nenhum nó ROS em execução"
+    fi
+    echo ""
+
+    # Tópicos
+    echo "📡 Tópicos disponíveis:"
+    if ros2 topic list &> /dev/null; then
+        ros2 topic list | grep -E "(camera|perception|image)" | sed 's/^/   /' || echo "   Nenhum tópico de percepção ativo"
+    else
+        echo "   Nenhum tópico disponível"
+    fi
+    echo ""
+
+    # Configuração atual da câmera
+    echo "🎥 Configuração atual da câmera:"
+    if [ -f "$CONFIG_FILE" ]; then
+        current_camera=$(grep "camera_type:" "$CONFIG_FILE" | awk '{print $2}' | tr -d '"')
+        if [ "$current_camera" = "csi" ]; then
+            echo "   📷 CSI IMX219 (640x480@30fps)"
+        elif [ "$current_camera" = "usb" ]; then
+            echo "   📷 USB Logitech C930 (1280x720@30fps)"
+        else
+            echo "   ❓ Configuração desconhecida: $current_camera"
+        fi
+    else
+        echo "   ❌ Arquivo de configuração não encontrado"
+    fi
+    echo ""
+
+    # Versões
+    echo "📦 Versões instaladas:"
+    python3 -c "import cv2; print(f'   OpenCV: {cv2.__version__}')" 2>/dev/null || echo "   OpenCV: Não instalado"
+    python3 -c "import ultralytics; print(f'   Ultralytics: {ultralytics.__version__}')" 2>/dev/null || echo "   Ultralytics: Não instalado"
+    echo ""
+
+    # Hardware
+    echo "🖥️  Recursos de hardware:"
+    echo "   CPUs: $(nproc)"
+    echo "   Memória: $(free -h | grep -i 'mem' | awk '{print $2}')"
+    if command -v nvidia-smi &> /dev/null; then
+        echo "   GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader,nounits)"
+    else
+        echo "   GPU: Não disponível"
+    fi
+}
+
+# Menu principal
+show_menu() {
+    print_header "🚀 Sistema de Teste e Conveniência - Percepção RoboIME"
+    echo "Sistema Simplificado: YOLOv8 (6 classes otimizadas - estratégia + localização)"
+    echo "Suporte dual: CSI IMX219 e USB Logitech C930"
+    echo ""
+    echo "📋 MENU PRINCIPAL:"
+    echo ""
+    echo "🎥 CÂMERAS:"
+    echo "1. Iniciar sistema com CSI IMX219 (baixa latência)"
+    echo "2. Iniciar sistema com USB Logitech C930 (alta qualidade)"
+    echo "3. Testar câmera USB C930 (diagnóstico completo)"
+    echo ""
+    echo "🔧 SISTEMA:"
+    echo "4. Verificar ambiente e dependências"
+    echo "5. Verificar câmeras disponíveis"
+    echo "6. Reconstruir workspace"
+    echo "7. Informações e status do sistema"
+    echo ""
+    echo "🧪 TESTES AVANÇADOS:"
+    echo "8. Testar apenas detectores YOLOv8"
+    echo "9. Testar apenas detectores tradicionais"
+    echo "10. Benchmark de performance"
+    echo ""
+    echo "0. Sair"
+    echo ""
+}
+
+# Função principal
+main() {
+    # Verificação inicial rápida
+    if ! check_environment; then
+        print_error "Falha na verificação do ambiente"
+        exit 1
+    fi
+
+    while true; do
+        show_menu
+        read -p "Escolha uma opção: " option
+
+        case $option in
+            1)
+                start_perception_csi
+                ;;
+            2)
+                start_perception_usb
+                ;;
+            3)
+                test_c930_camera
+                ;;
+            4)
+                check_environment
+                check_dependencies
+                ;;
+            5)
+                check_cameras
+                ;;
+            6)
+                rebuild_workspace
+                ;;
+            7)
+                show_system_info
+                ;;
+            8)
+                print_header "🧪 Testando apenas detectores YOLOv8"
+                print_info "Iniciando sistema apenas com YOLOv8..."
+                ros2 launch perception dual_camera_perception.launch.py \
+                    config_file:=$CONFIG_FILE \
+                    debug:=true
+                ;;
+            9)
+                print_header "🧪 Testando apenas detectores tradicionais"
+                print_info "Este teste requer configuração manual no YAML"
+                print_info "Desative YOLOv8 no arquivo de configuração"
+                ;;
+            10)
+                print_header "📊 Benchmark de Performance"
+                print_info "Executando testes de benchmark..."
+                
+                echo "🔄 Teste 1: Sistema CSI (10 segundos)"
+                timeout 10 ros2 launch perception dual_camera_perception.launch.py \
+                    camera_type:=csi config_file:=$CONFIG_FILE debug:=false &
+                wait
+                
+                echo "🔄 Teste 2: Sistema USB (10 segundos)"
+                timeout 10 ros2 launch perception dual_camera_perception.launch.py \
+                    camera_type:=usb config_file:=$CONFIG_FILE debug:=false &
+                wait
+                
+                print_success "Benchmark concluído!"
+                ;;
+            0)
+                print_info "Saindo do sistema de teste..."
+                exit 0
+                ;;
+            *)
+                print_error "Opção inválida! Tente novamente."
+                sleep 2
+                ;;
+        esac
+
+        echo ""
+        read -p "Pressione ENTER para voltar ao menu..." 
     done
-    print_success "Permissões configuradas para scripts Python."
-else
-    print_info "Nenhum arquivo Python encontrado."
-fi
+}
 
-# Reconstruir o pacote para atualizar os entry points
-print_info "Reconstruindo o pacote perception para atualizar os entry points..."
-colcon build --packages-select perception
-
-# Verificar se o pacote foi construído corretamente
-if [ ! -d "./install/perception" ]; then
-    print_error "Falha ao construir o pacote perception."
-    exit 1
-fi
-print_success "Pacote perception reconstruído com sucesso."
-
-# Verificar entry points
-if [ -f "./install/perception/lib/perception/vision_pipeline" ]; then
-    print_success "Entry point vision_pipeline encontrado."
-else
-    print_error "Entry point vision_pipeline não encontrado. Verificando arquivos instalados:"
-    find ./install/perception -type f -name "*vision*" | while read file; do
-        print_info "Arquivo encontrado: $file"
-    done
-fi
-
-# Adicionar opção para debug de lançamento
-print_header "Verificando configuração"
-
-# Verificar entry points instalados
-print_info "Entry points instalados:"
-find /ros2_ws/install/perception/lib -type f -executable | while read file; do
-    echo "- $file"
-done
-
-# Verificar se os arquivos Python foram instalados
-print_info "Arquivos Python instalados:"
-find /ros2_ws/install/perception/lib/python* -name "*.py" 2>/dev/null | grep -v "__pycache__" | while read file; do
-    echo "- $file"
-done
-
-# Menu interativo
-print_header "Menu de Teste do Sistema de Percepção"
-echo "Selecione uma opção para testar:"
-echo ""
-echo "1. Iniciar sistema completo (YOLOv4-Tiny + detectores tradicionais)"
-echo "2. Iniciar apenas detector YOLOv4-Tiny"
-echo "3. Iniciar apenas detectores tradicionais"
-echo "4. Testar detecção de bola (YOLOv4-Tiny)"
-echo "5. Testar detecção de bola (tradicional)"
-echo "6. Testar detecção de gol"
-echo "7. Testar detecção de robôs"
-echo "8. Carregar webcam local"
-echo "9. Executar testes de benchmark"
-echo "10. Informações e status do sistema"
-echo ""
-echo "0. Sair"
-echo ""
-
-read -p "Escolha uma opção: " option
-
-case $option in
-    1)
-        print_header "Iniciando sistema completo (YOLOv4-Tiny + tradicional)"
-        ros2 launch perception perception.launch.py
-        ;;
-    2)
-        print_header "Iniciando apenas detector YOLOv4-Tiny"
-        ros2 launch perception perception.launch.py mode:=yolo
-        ;;
-    3)
-        print_header "Iniciando apenas detectores tradicionais"
-        ros2 launch perception perception.launch.py mode:=traditional
-        ;;
-    4)
-        print_header "Testando detecção de bola (YOLOv4-Tiny)"
-        ros2 launch perception perception.launch.py mode:=yolo detector_ball:=yolo
-        ;;
-    5)
-        print_header "Testando detecção de bola (tradicional)"
-        ros2 launch perception perception.launch.py mode:=traditional detector_ball:=traditional
-        ;;
-    6)
-        print_header "Testando detecção de gol"
-        echo "1. YOLOv4-Tiny"
-        echo "2. Tradicional"
-        read -p "Escolha: " goal_option
-        if [ "$goal_option" -eq 1 ]; then
-            ros2 launch perception perception.launch.py mode:=yolo detector_goal:=yolo
-        else
-            ros2 launch perception perception.launch.py mode:=traditional detector_goal:=traditional
-        fi
-        ;;
-    7)
-        print_header "Testando detecção de robôs"
-        echo "1. YOLOv4-Tiny"
-        echo "2. Tradicional"
-        read -p "Escolha: " robot_option
-        if [ "$robot_option" -eq 1 ]; then
-            ros2 launch perception perception.launch.py mode:=yolo detector_robot:=yolo
-        else
-            ros2 launch perception perception.launch.py mode:=traditional detector_robot:=traditional
-        fi
-        ;;
-    8)
-        print_header "Carregando webcam local"
-        ros2 launch perception perception.launch.py camera_src:=usb
-        ;;
-    9)
-        print_header "Executando testes de benchmark"
-        print_info "Teste 1: YOLOv4-Tiny não visualizado (5 segundos)"
-        timeout 5 ros2 launch perception perception.launch.py mode:=yolo debug_image:=false
-        
-        print_info "Teste 2: Apenas YOLOv4-Tiny (5 segundos)"
-        timeout 5 ros2 launch perception perception.launch.py mode:=yolo
-        
-        print_info "Teste 3: Apenas tradicional (5 segundos)"
-        timeout 5 ros2 launch perception perception.launch.py mode:=traditional
-        
-        print_info "Teste 4: Detecção de bola YOLOv4-Tiny (5 segundos)"
-        timeout 5 ros2 launch perception perception.launch.py mode:=yolo detector_ball:=yolo
-        
-        print_success "Testes concluídos!"
-        ;;
-    10)
-        print_header "Informações e status do sistema"
-        
-        # Verificar status do ROS
-        echo "Status do ROS 2:"
-        ros2 node list 2>/dev/null || echo "Nenhum nó ROS em execução"
-        
-        # Verificar status dos tópicos
-        echo -e "\nTópicos disponíveis:"
-        ros2 topic list 2>/dev/null || echo "Nenhum tópico disponível"
-        
-        # Verificar status dos modelos
-        echo -e "\nStatus dos modelos:"
-        if [ -f "$MODEL_PATH" ]; then
-            echo "YOLOv4-Tiny: Disponível ($(du -h "$MODEL_PATH" | cut -f1))"
-        else
-            echo "YOLOv4-Tiny: Não encontrado em $MODEL_PATH"
-        fi
-        
-        # Verificar versões
-        echo -e "\nVersões instaladas:"
-        python3 -c "import cv2; print(f'OpenCV: {cv2.__version__}')" 2>/dev/null || echo "OpenCV: Não instalado"
-        python3 -c "import tensorflow as tf; print(f'TensorFlow: {tf.__version__}')" 2>/dev/null || echo "TensorFlow: Não instalado"
-        
-        # Verificar recursos de hardware
-        echo -e "\nRecursos de hardware:"
-        python3 -c "import tensorflow as tf; print(f'GPUs disponíveis: {len(tf.config.list_physical_devices(\"GPU\"))}')" 2>/dev/null || echo "GPUs disponíveis: Desconhecido"
-        echo "CPUs: $(nproc)"
-        echo "Memória total: $(free -h | grep -i 'mem' | awk '{print $2}')"
-        ;;
-    0)
-        print_info "Saindo..."
-        exit 0
-        ;;
-    *)
-        print_error "Opção inválida!"
-        ;;
-esac
-
-# Opção para reiniciar o script
-echo ""
-read -p "Deseja executar o script novamente? (s/n): " run_again
-if [[ "$run_again" == "s" ]] || [[ "$run_again" == "S" ]]; then
-    exec "$0"
-fi
-
-print_info "Script finalizado." 
+# Executar função principal
+main 

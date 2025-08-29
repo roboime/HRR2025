@@ -1,0 +1,61 @@
+# Configuração de Dataset YOLOv8 para RoboCup Humanoid League
+# RoboIME HSL2025
+
+# Caminhos para o dataset
+path: ../datasets  # Caminho raiz do dataset
+train: train/images  # Imagens de treinamento
+val: val/images      # Imagens de validação
+test: test/images    # Imagens de teste (opcional)
+
+# Classes simplificadas (7 total)
+names:
+  0: ball          # Bola de futebol (estratégia)
+  1: robot         # Robôs sem distinção de cor (estratégia)
+  2: penalty_mark  # Marca do penalty (localização)
+  3: goal_post     # Postes de gol (localização)
+  4: center_circle # Círculo central (localização)
+  5: field_corner  # Cantos do campo (localização)
+  6: area_corner   # Cantos da área (localização)
+
+# Número de classes
+nc: 7
+
+# Informações do dataset
+info:
+  version: "2.0"
+  description: "Dataset RoboIME HSL2025 com classes simplificadas"
+  categories:
+    strategy: ["ball", "robot"]
+    localization: ["penalty_mark", "goal_post", "center_circle", "field_corner", "area_corner"]
+  
+  # Estatísticas esperadas (para referência)
+  expected_distribution:
+    ball: 0.30        # 30% das anotações
+    robot: 0.25       # 25% das anotações
+    penalty_mark: 0.10 # 10% das anotações
+    goal_post: 0.15   # 15% das anotações
+    center_circle: 0.08 # 8% das anotações
+    field_corner: 0.08  # 8% das anotações
+    area_corner: 0.04   # 4% das anotações
+
+# Configurações de augmentação para treinamento
+augmentation:
+  # Augmentações geométricas
+  degrees: 10.0       # Rotação (±10 graus)
+  translate: 0.1      # Translação (±10%)
+  scale: 0.2          # Escala (±20%)
+  shear: 2.0          # Cisalhamento (±2 graus)
+  perspective: 0.0002 # Perspectiva
+  
+  # Augmentações de cor
+  hsv_h: 0.02         # Matiz (±2%)
+  hsv_s: 0.5          # Saturação (±50%)
+  hsv_v: 0.2          # Valor/Brilho (±20%)
+  
+  # Flip
+  fliplr: 0.5         # Flip horizontal (50%)
+  flipud: 0.0         # Flip vertical (0%)
+  
+  # Mixup/Cutmix (experimentos)
+  mixup: 0.0          # Mixup (desabilitado)
+  cutmix: 0.0         # Cutmix (desabilitado) 

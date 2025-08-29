@@ -1,84 +1,84 @@
-# Base NVIDIA L4T image for JetPack 4.6 (L4T R32.6.1 - Ubuntu 18.04)
-FROM nvcr.io/nvidia/l4t-base:r32.6.1
+# Base NVIDIA L4T image for JetPack 6.2 (L4T R36.4 - Ubuntu 22.04)
+# Jetson Orin Nano Super Developer Kit
+FROM nvcr.io/nvidia/l4t-base:r36.4.0
 
 # Desabilita interações manuais no apt
 ENV DEBIAN_FRONTEND=noninteractive 
 
-# Define variáveis de ambiente ROS
-ENV ROS_DISTRO=eloquent
+# Define variáveis de ambiente ROS2 Humble (LTS)
+ENV ROS_DISTRO=humble
 ENV ROS_PYTHON_VERSION=3
 
 # Configurar DNS para melhorar a conectividade
 RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf && \
     echo "nameserver 8.8.4.4" >> /etc/resolv.conf
 
-# (Opcional) Atualiza locale para UTF-8, se necessário
+# Atualiza locale para UTF-8
 RUN apt-get update || true && apt-get install -y locales \
     && locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
 
-# Adiciona chave e repositório do ROS2 Eloquent (Ubuntu 18.04 Bionic)
+# Adiciona chave e repositório do ROS2 Humble (Ubuntu 22.04 Jammy)
 RUN apt-get update || true && apt-get install -y --no-install-recommends \
-    curl gnupg2 lsb-release ca-certificates && \
+    curl gnupg2 lsb-release ca-certificates software-properties-common && \
     update-ca-certificates
+
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
-    -o /usr/share/keyrings/ros-archive-keyring.gpg || true
+    -o /usr/share/keyrings/ros-archive-keyring.gpg
+
 RUN echo "deb [arch=arm64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
     http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" \
     > /etc/apt/sources.list.d/ros2.list
 
-# Adiciona repositórios do JetPack (para OpenCV e demais libs NVIDIA)
-RUN apt-key adv --fetch-keys https://repo.download.nvidia.com/jetson/jetson-ota-public.asc 
-RUN echo "deb https://repo.download.nvidia.com/jetson/common r32.6 main" \
-    > /etc/apt/sources.list.d/nvidia-l4t-common.list && \
-    echo "deb https://repo.download.nvidia.com/jetson/t210 r32.6 main" \
-    > /etc/apt/sources.list.d/nvidia-l4t-t210.list
-
-# Configurar permissões da câmera
+# Configurar permissões da câmera para Jetson Orin
 RUN usermod -a -G video root
 
-# Tentar instalar apenas o ROS2 básico primeiro
+# Instalar ROS2 Humble e dependências essenciais
 RUN for i in 1 2 3 4 5; do \
-        echo "Tentativa $i de instalar ROS2..." && \
+        echo "Tentativa $i de instalar ROS2 Humble..." && \
         apt-get update && \
         apt-get install -y --no-install-recommends \
-            ros-eloquent-ros-base \
-            ros-eloquent-image-transport \
-            ros-eloquent-vision-opencv \
-            ros-eloquent-vision-msgs \
-            ros-eloquent-tf2 \
-            ros-eloquent-tf2-ros \
-            ros-eloquent-tf2-geometry-msgs \
+            ros-humble-ros-base \
+            ros-humble-image-transport \
+            ros-humble-vision-opencv \
+            ros-humble-vision-msgs \
+            ros-humble-tf2 \
+            ros-humble-tf2-ros \
+            ros-humble-tf2-geometry-msgs \
+            ros-humble-cv-bridge \
             python3-colcon-common-extensions \
             python3-rosdep \
             python3-pip \
-            python3-opencv && \
+            python3-opencv \
+            python3-dev \
+            build-essential \
+            cmake && \
         break || \
         (echo "Falha na tentativa $i. Esperando..." && sleep 30); \
     done
 
-# Inicializa o rosdep sem falhar se não funcionar
+# Inicializa o rosdep
 RUN rosdep init || echo "rosdep já inicializado ou falhou" && \
     rosdep update || echo "rosdep update falhou, continuando mesmo assim"
 
 # Configura workspace ROS2
 RUN mkdir -p /ros2_ws/src
 
-# Configura variáveis de ambiente para ROS2
-RUN echo 'source /opt/ros/eloquent/setup.bash' >> /root/.bashrc
+# Configura variáveis de ambiente para ROS2 Humble
+RUN echo 'source /opt/ros/humble/setup.bash' >> /root/.bashrc
 
-# Configura variáveis de ambiente para CUDA
-ENV CUDA_HOME=/usr/local/cuda-10.2
-ENV LD_LIBRARY_PATH=/usr/local/cuda-10.2/targets/aarch64-linux/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
-ENV PATH=/usr/local/cuda-10.2/bin:${PATH}
+# Configura variáveis de ambiente para CUDA 12.2 (JetPack 6.2)
+ENV CUDA_HOME=/usr/local/cuda-12.2
+ENV LD_LIBRARY_PATH=/usr/local/cuda-12.2/targets/aarch64-linux/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
+ENV PATH=/usr/local/cuda-12.2/bin:${PATH}
 
-# Criar diretório para requirements e scripts
+# Criar diretório para scripts
 RUN mkdir -p /setup
 
-# Copia o arquivo de script de instalação para o container
+# Copia o arquivo de script de instalação atualizado para o container
 COPY docker/install_dependencies.sh /setup/
 RUN chmod +x /setup/install_dependencies.sh
 
-# Copia o script de entrypoint externo para o container
+# Copia o script de entrypoint para o container
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
@@ -88,5 +88,8 @@ WORKDIR /ros2_ws
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/bin/bash"]
 
-# Instrução para instalar pacotes adicionais após a criação do container:
-# docker exec -it [CONTAINER_ID] bash -c "apt-get update && apt-get install -y build-essential cmake python3-dev && pip3 install numpy matplotlib pyyaml tensorflow"
+# === Instruções para Jetson Orin Nano Super ===
+# Para habilitar Super Mode (67 TOPS): sudo nvpmodel -m 2
+# Para verificar performance: jtop
+# Para instalar dependências Python extras: /setup/install_dependencies.sh
+# Para build do projeto: colcon build --packages-select perception

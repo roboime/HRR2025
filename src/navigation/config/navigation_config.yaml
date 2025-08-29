@@ -1,0 +1,366 @@
+# Configuração do Sistema de Navegação - RoboIME HSL2025
+# Localização, Planejamento e Controle para Futebol Robótico
+
+#=======================================#
+# CONFIGURAÇÃO DO CAMPO
+#=======================================#
+field:
+  # Dimensões do campo RoboCup Humanoid League
+  length: 9.0                   # Comprimento do campo (m)
+  width: 6.0                    # Largura do campo (m)
+  
+  # Características do campo
+  center_circle_radius: 0.75    # Raio do círculo central (m)
+  goal_width: 2.6               # Largura do gol (m)
+  goal_depth: 0.6               # Profundidade do gol (m)
+  penalty_area_length: 1.65     # Profundidade da área penal (m)
+  penalty_area_width: 3.9       # Largura da área penal (m)
+  penalty_mark_distance: 1.5    # Distância da marca de penalty ao gol (m)
+  
+  # Margem de segurança
+  safety_margin: 0.3            # Margem de segurança das bordas (m)
+
+#=======================================#
+# LOCALIZAÇÃO
+#=======================================#
+localization:
+  # Posição inicial "ótima" (lado amigo fixo no x negativo, olhando para o centro)
+  optimal_start:
+    friend_side: "left"
+    pose:
+      x: -2.0
+      y: 0.0
+      theta: 0.0
+
+  # Pose inicial (centro do campo)
+  initial_pose:
+    x: 0.0
+    y: 0.0
+    theta: 0.0
+  
+  # Sistema de landmarks simplificado
+  landmarks:
+    use_landmarks: true                    # Usar sistema de landmarks
+    use_imu: true                         # Usar IMU para orientação
+    min_landmarks_for_localization: 2     # Mínimo de landmarks para localização
+    required_landmarks_for_navigation: 1  # Mínimo para permitir navegação
+    landmark_confidence_threshold: 0.5    # Confiança mínima para usar landmark
+    max_landmark_distance: 8.0            # Distância máxima válida para landmark (m)
+    
+    # Confiança da localização
+    min_localization_confidence: 0.3      # Confiança mínima para navegação
+    confidence_decay_rate: 0.95           # Taxa de decaimento da confiança
+    confidence_boost_per_landmark: 0.1    # Aumento de confiança por landmark
+    
+    # Tipos de landmarks e suas características
+    landmark_types:
+      penalty_mark:
+        priority: "high"                   # Prioridade alta (coordenadas precisas)
+        expected_accuracy: 0.05            # Precisão esperada (m)
+        confidence_weight: 1.0             # Peso na confiança total
+        coordinates:
+          - {x: 3.0, y: 0.0}              # Marca penalty direita
+          - {x: -3.0, y: 0.0}             # Marca penalty esquerda
+      
+      center_circle:
+        priority: "high"                   # Prioridade alta (referência central)
+        expected_accuracy: 0.1             # Precisão esperada (m)
+        confidence_weight: 1.2             # Peso maior na confiança
+        coordinates:
+          - {x: 0.0, y: 0.0}              # Centro do campo
+      
+      goal:
+        priority: "medium"                 # Prioridade média (boa orientação)
+        expected_accuracy: 0.15            # Precisão esperada (m)
+        confidence_weight: 0.8             # Peso na confiança
+        coordinates:
+          - {x: 4.5, y: 0.0}              # Gol direito (centro)
+          - {x: -4.5, y: 0.0}             # Gol esquerdo (centro)
+      
+      field_corner:
+        priority: "medium"                 # Prioridade média (landmarks de borda)
+        expected_accuracy: 0.2             # Precisão esperada (m)
+        confidence_weight: 0.6             # Peso menor na confiança
+        coordinates:
+          - {x: 4.5, y: 3.0}              # Canto superior direito
+          - {x: 4.5, y: -3.0}             # Canto inferior direito
+          - {x: -4.5, y: 3.0}             # Canto superior esquerdo
+          - {x: -4.5, y: -3.0}            # Canto inferior esquerdo
+      
+      area_corner:
+        priority: "medium"                 # Aumentado de "low" para "medium"
+        expected_accuracy: 0.25            # Precisão esperada (m)
+        confidence_weight: 0.6             # Aumentado de 0.4 para 0.6 (acima do threshold 0.5)
+        coordinates:
+          # Área direita
+          - {x: 2.85, y: 1.95}            # Superior direito área direita
+          - {x: 2.85, y: -1.95}           # Inferior direito área direita
+          - {x: 4.5, y: 1.95}             # Superior esquerdo área direita
+          - {x: 4.5, y: -1.95}            # Inferior esquerdo área direita
+          # Área esquerda
+          - {x: -2.85, y: 1.95}           # Superior direito área esquerda
+          - {x: -2.85, y: -1.95}          # Inferior direito área esquerda
+          - {x: -4.5, y: 1.95}            # Superior esquerdo área esquerda
+          - {x: -4.5, y: -1.95}           # Inferior esquerdo área esquerda
+  
+  # Algoritmo de triangulação
+  triangulation:
+    method: "least_squares"              # Método de triangulação
+    max_iterations: 100                  # Máximo de iterações
+    convergence_threshold: 0.01          # Threshold de convergência (m)
+    outlier_threshold: 0.5               # Threshold para rejeitar outliers (m)
+  
+  # Filtro de localização
+  filter:
+    type: "kalman"                       # Tipo de filtro (kalman, particle)
+    update_rate: 10.0                    # Taxa de atualização (Hz)
+    
+    # Ruído dos sensores
+    sensor_noise:
+      landmark_position: 0.1             # Ruído na detecção de landmarks (m)
+      landmark_bearing: 0.05             # Ruído no ângulo dos landmarks (rad)
+      imu_orientation: 0.02              # Ruído na orientação IMU (rad)
+    
+    # Covariâncias iniciais
+    initial_covariance:
+      position: 0.5                      # Incerteza inicial em posição (m)
+      orientation: 0.5                   # Incerteza inicial em orientação (rad)
+    
+    # Parâmetros do filtro
+    process_noise: 0.01                  # Ruído do processo
+    measurement_noise: 0.05              # Ruído das medições
+    
+  # Validação e limites
+  validation:
+    max_position_jump: 0.8               # Salto máximo de posição entre frames (m)
+    max_orientation_jump: 0.5            # Salto máximo de orientação entre frames (rad)
+    localization_timeout: 5.0            # Timeout sem atualizações (s)
+    min_triangulation_angle: 0.3         # Ângulo mínimo entre landmarks (rad)
+
+  # Critérios de convergência e recuperação
+  convergence:
+    target_confidence: 0.7              # Confiança alvo para considerar "convergido"
+    timeout_seconds: 10.0               # Tempo máximo para convergir antes de ação
+    publish_rate_hz: 5.0                # Taxa de publicação do progresso
+    global_fallback_on_timeout: true    # Fazer fallback para global se não convergir
+
+  auto_reinit:
+    enable: true                        # Re-inicializar automaticamente se perdido
+    lost_confidence_threshold: 0.2      # Abaixo desse valor, considera perdido
+    lost_timeout_seconds: 10.0          # Janela para confirmar perda
+
+  kidnapped_detection:
+    enable: true                        # Detectar se o robô foi deslocado
+    drop_threshold: 0.3                 # Queda brusca de confiança indica sequestro
+    window_seconds: 3.0                 # Janela temporal para detectar queda
+
+  # Postura e supressão de recuperação
+  fall_detection:
+    roll_deg: 45.0
+    pitch_deg: 45.0
+    debounce_s: 0.2
+  stand_stable:
+    roll_deg: 15.0
+    pitch_deg: 15.0
+    stable_s: 0.5
+  fall_grace_seconds: 3.0
+  recovery_stabilization_seconds: 2.0
+
+#=======================================#
+# PLANEJAMENTO DE TRAJETÓRIA
+#=======================================#
+path_planning:
+  # Algoritmo de planejamento
+  global_planner: "astar"               # Planejador global (astar, rrt, dijkstra)
+  local_planner: "potential_fields"     # Planejador local (potential_fields, dwa, teb)
+  
+  # Parâmetros A*
+  astar:
+    resolution: 0.15                    # Resolução da grade (m) - Aumentada para performance
+    heuristic_weight: 1.2               # Peso da heurística
+    max_iterations: 10000               # Máximo de iterações
+    
+  # Campos potenciais (otimizados para sistema simplificado)
+  potential_fields:
+    attractive_gain: 1.2                # Ganho da força atrativa (aumentado)
+    repulsive_gain: 2.5                 # Ganho da força repulsiva (aumentado)
+    obstacle_threshold: 1.2             # Distância de influência dos obstáculos (m)
+    max_force: 2.0                      # Força máxima (m/s²)
+    
+  # Tolerâncias
+  goal_tolerance:
+    position: 0.2                       # Tolerância de posição para objetivo (m)
+    orientation: 0.2                    # Tolerância de orientação para objetivo (rad)
+    
+  # Limites de replanejamento
+  replan_frequency: 3.0                 # Frequência de replanejamento (Hz) - Aumentada
+  max_planning_time: 0.8                # Tempo máximo de planejamento (s) - Reduzido
+  emergency_replan_distance: 0.3       # Distância para replanejamento de emergência (m)
+
+#=======================================#
+# CONTROLE DE MOVIMENTO
+#=======================================#
+motion_control:
+  # Limites de velocidade (conservadores para sistema simplificado)
+  max_linear_velocity: 0.4              # Velocidade linear máxima (m/s)
+  max_angular_velocity: 1.2             # Velocidade angular máxima (rad/s)
+  
+  # Acelerações máximas
+  max_linear_acceleration: 0.6          # Aceleração linear máxima (m/s²)
+  max_angular_acceleration: 2.5         # Aceleração angular máxima (rad/s²)
+  
+  # Parâmetros do controlador
+  controller_type: "pid"                # Tipo de controlador (pid, pure_pursuit, stanley)
+  
+  # PID para controle de posição (ajustado para landmarks)
+  pid_linear:
+    kp: 1.2                             # Proporcional (aumentado)
+    ki: 0.05                            # Integral (pequeno)
+    kd: 0.15                            # Derivativo (aumentado)
+    max_output: 0.4                     # Saída máxima (m/s)
+    
+  # PID para controle de orientação
+  pid_angular:
+    kp: 2.5                             # Proporcional (aumentado)
+    ki: 0.1                             # Integral (pequeno)
+    kd: 0.3                             # Derivativo (aumentado)
+    max_output: 1.2                     # Saída máxima (rad/s)
+    
+  # Filtros
+  velocity_filter: true                 # Filtrar comandos de velocidade
+  filter_time_constant: 0.08            # Constante de tempo do filtro (s) - Reduzida
+  
+  # Controle baseado em confiança da localização
+  confidence_control:
+    enable: true                        # Habilitar controle baseado em confiança
+    min_confidence_for_movement: 0.3    # Confiança mínima para movimento
+    speed_scaling_by_confidence: true   # Escalar velocidade pela confiança
+    max_speed_at_min_confidence: 0.1    # Velocidade máxima com confiança mínima
+
+#=======================================#
+# DETECÇÃO E DESVIO DE OBSTÁCULOS
+#=======================================#
+obstacle_avoidance:
+  # Habilitação
+  enable_obstacle_avoidance: true
+  
+  # Parâmetros de detecção (baseado em robôs detectados pela percepção)
+  obstacle_detection:
+    use_detected_robots: true           # Usar robôs detectados pela percepção
+    min_obstacle_size: 0.15             # Tamanho mínimo de obstáculo (m)
+    max_detection_range: 2.5            # Alcance máximo de detecção (m)
+    robot_obstacle_radius: 0.2          # Raio de robôs para cálculos (m)
+    
+  # Parâmetros de desvio
+  avoidance:
+    robot_radius: 0.18                  # Raio do próprio robô para cálculos (m)
+    safety_margin: 0.15                 # Margem de segurança adicional (m)
+    deceleration_distance: 0.8          # Distância para começar a desacelerar (m)
+    avoidance_force: 1.5                # Força de repulsão (m/s²)
+    
+  # Tipos de obstáculos
+  obstacle_types:
+    other_robots: true                  # Considerar outros robôs (da percepção)
+    static_objects: false               # Não considerar objetos estáticos
+    dynamic_obstacles: true             # Considerar obstáculos dinâmicos
+
+#=======================================#
+# SEGURANÇA APRIMORADA
+#=======================================#
+safety:
+  # Verificações de segurança
+  enable_safety_checks: true
+  
+  # Limites do campo com margem de segurança
+  field_margins:
+    x_margin: 0.3                       # Margem lateral (m) - Aumentada
+    y_margin: 0.3                       # Margem longitudinal (m) - Aumentada
+    
+  # Timeouts
+  timeouts:
+    localization: 5.0                   # Timeout para localização (s)
+    planning: 2.0                       # Timeout para planejamento (s)
+    navigation: 30.0                    # Timeout para navegação (s)
+    landmark_detection: 3.0             # Timeout sem detecção de landmarks (s)
+    
+  # Parada de emergência baseada em confiança
+  emergency_stop:
+    enable: true
+    max_linear_velocity: 0.5            # Velocidade que aciona parada (m/s)
+    max_angular_velocity: 2.0           # Velocidade angular que aciona parada (rad/s)
+    min_confidence_threshold: 0.1       # Confiança mínima para não parar
+    no_landmarks_timeout: 4.0           # Parar se sem landmarks por X segundos
+    
+  # Verificações específicas do sistema simplificado
+  landmark_safety:
+    min_landmarks_for_safe_navigation: 1 # Mínimo de landmarks para navegação segura
+    confidence_degradation_threshold: 0.2 # Threshold para degradação da confiança
+    recovery_mode_confidence: 0.15       # Confiança para entrar em modo de recuperação
+
+#=======================================#
+# INTERFACE COM COMPORTAMENTO
+#=======================================#
+behavior_interface:
+  # Tópicos de comunicação
+  topics:
+    navigation_request: "behavior/navigation_request"
+    navigation_status: "navigation/status"
+    cancel_navigation: "behavior/cancel_navigation"
+    emergency_stop: "navigation/emergency_stop"
+    localization_confidence: "navigation/localization_confidence"
+    
+  # Estados reportados
+  status_publishing_rate: 5.0           # Taxa de publicação de status (Hz)
+  
+  # Informações específicas do sistema simplificado
+  simplified_system:
+    report_landmark_count: true         # Reportar número de landmarks detectados
+    report_confidence_level: true       # Reportar nível de confiança
+    report_active_landmarks: true       # Reportar quais landmarks estão ativos
+
+#=======================================#
+# DEBUG E VISUALIZAÇÃO
+#=======================================#
+debug:
+  # Habilitação
+  enable_debug: true
+  publish_debug_info: true
+  
+  # Visualização específica do sistema simplificado
+  visualization:
+    publish_path: true                  # Publicar caminho planejado
+    publish_local_goal: true            # Publicar objetivo local
+    publish_obstacles: true             # Publicar obstáculos detectados
+    publish_field_model: true           # Publicar modelo do campo
+    publish_landmark_positions: true    # Publicar posições dos landmarks
+    publish_triangulation_lines: true   # Publicar linhas de triangulação
+    publish_confidence_zones: true      # Publicar zonas de confiança
+    
+  # Logs
+  logging:
+    level: "INFO"                       # Nível de log (DEBUG, INFO, WARN, ERROR)
+    log_performance: true               # Log de performance
+    performance_interval: 10.0          # Intervalo de log de performance (s)
+    log_landmark_detections: true       # Log de detecções de landmarks
+    log_triangulation_results: true     # Log de resultados de triangulação
+
+#=======================================#
+# PERFORMANCE OTIMIZADA
+#=======================================#
+performance:
+  # Frequências de execução (otimizadas para sistema simplificado)
+  localization_rate: 10.0              # Taxa de localização (Hz)
+  planning_rate: 5.0                   # Taxa de planejamento (Hz)
+  control_rate: 20.0                   # Taxa de controle (Hz)
+  landmark_processing_rate: 15.0       # Taxa de processamento de landmarks (Hz)
+  
+  # Otimizações
+  use_multi_threading: true            # Usar múltiplas threads
+  max_cpu_usage: 75.0                  # Uso máximo de CPU (%) - Reduzido
+  
+  # Otimizações específicas do sistema simplificado
+  simplified_optimizations:
+    cache_landmark_coordinates: true    # Cache das coordenadas dos landmarks
+    fast_triangulation: true           # Triangulação rápida
+    confidence_based_processing: true   # Processamento baseado em confiança
+    adaptive_update_rates: true        # Taxas de atualização adaptivas 

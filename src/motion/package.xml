@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>motion</name>
+  <version>0.1.0</version>
+  <description>RoboIME HSL2025 - Módulo de movimento (híbrido C++/Python). Contém controle de caminhada (Python) e ponte IMU STM/MPU-6050 (C++).</description>
+
+  <maintainer email="team@roboime.example">RoboIME</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
+

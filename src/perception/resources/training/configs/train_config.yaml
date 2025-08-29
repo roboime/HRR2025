@@ -1,0 +1,242 @@
+# Configuração de Treinamento YOLOv8 para RoboCup
+# Otimizado para Jetson Orin Nano Super
+
+#=======================================#
+# CONFIGURAÇÃO DO MODELO
+#=======================================#
+
+# Modelo base YOLOv8
+model:
+  architecture: "yolov8n"           # Nano para Jetson Orin Nano Super
+  input_size: 640                   # Resolução de entrada
+  num_classes: 7                    # 6 classes + background
+  
+  # Classes específicas
+  class_names: 
+    - "ball"          # 0 - Estratégia
+    - "robot"         # 1 - Estratégia  
+    - "penalty_mark"  # 2 - Localização
+    - "goal_post"     # 3 - Localização
+    - "center_circle" # 4 - Localização
+    - "field_corner"  # 5 - Localização
+    - "area_corner"   # 6 - Localização
+
+#=======================================#
+# CONFIGURAÇÃO DE TREINAMENTO
+#=======================================#
+
+training:
+  # Parâmetros principais
+  epochs: 100                       # Épocas de treinamento
+  batch_size: 16                    # Batch size otimizado para Jetson
+  workers: 4                        # Workers de data loading
+  
+  # Learning rate
+  lr0: 0.01                         # Learning rate inicial
+  lrf: 0.1                          # Learning rate final (fração do inicial)
+  momentum: 0.937                   # Momentum SGD
+  weight_decay: 0.0005              # Weight decay
+  
+  # Warmup
+  warmup_epochs: 3                  # Épocas de warmup
+  warmup_momentum: 0.8              # Momentum durante warmup
+  warmup_bias_lr: 0.1               # LR para bias durante warmup
+  
+  # Scheduler
+  scheduler: "linear"               # Scheduler: linear, cosine, polynomial
+  
+  # Mixed precision
+  amp: True                         # Automatic Mixed Precision
+  
+  # Regularização
+  dropout: 0.0                      # Dropout (0 = desabilitado)
+  label_smoothing: 0.1              # Label smoothing
+
+#=======================================#
+# AUGMENTAÇÃO DE DADOS
+#=======================================#
+
+augmentation:
+  # Augmentações geométricas (otimizadas para futebol robótico)
+  degrees: 15.0                     # Rotação ±15° (robô pode rotacionar)
+  translate: 0.1                    # Translação ±10%
+  scale: 0.3                        # Escala ±30% (diferentes distâncias)
+  shear: 5.0                        # Cisalhamento ±5°
+  perspective: 0.0003               # Perspectiva
+  
+  # Augmentações de cor (campo de futebol)
+  hsv_h: 0.015                      # Matiz ±1.5% (conservador para campo verde)
+  hsv_s: 0.7                        # Saturação ±70%
+  hsv_v: 0.4                        # Brilho ±40% (diferentes condições)
+  
+  # Flip
+  fliplr: 0.5                       # Flip horizontal 50%
+  flipud: 0.0                       # Sem flip vertical
+  
+  # Mosaic e MixUp
+  mosaic: 1.0                       # Mosaic augmentation
+  mixup: 0.1                        # MixUp com 10% de probabilidade
+  copy_paste: 0.0                   # Copy-paste desabilitado
+
+#=======================================#
+# LOSS E OTIMIZAÇÃO
+#=======================================#
+
+loss:
+  # Loss weights
+  box: 7.5                          # Box regression loss
+  cls: 0.5                          # Classification loss (reduzido - 6 classes)
+  dfl: 1.5                          # Distribution focal loss
+  
+  # Focal loss
+  fl_gamma: 1.5                     # Focal loss gamma
+  label_smoothing: 0.1              # Label smoothing
+  
+  # Anchor free
+  anchor_t: 4.0                     # Anchor threshold
+
+#=======================================#
+# CONFIGURAÇÃO DE HARDWARE
+#=======================================#
+
+hardware:
+  # Device
+  device: "cuda"                    # GPU CUDA
+  deterministic: False              # Performance over reproducibility
+  
+  # Memory
+  memory_efficient: True           # Economizar memória
+  gradient_checkpointing: False    # Checkpoint desabilitado (pequeno modelo)
+  
+  # Compilation
+  compile: False                   # PyTorch 2.0 compile (experimental)
+
+#=======================================#
+# VALIDAÇÃO E SALVAMENTO
+#=======================================#
+
+validation:
+  # Métricas
+  val_interval: 5                   # Validar a cada 5 épocas
+  save_json: True                   # Salvar resultados em JSON
+  
+  # Thresholds para validação
+  conf_t: 0.5                       # Confidence threshold
+  iou_t: 0.45                       # IoU threshold para NMS
+  max_det: 200                      # Máximo detecções por imagem
+  
+  # Métricas específicas
+  metrics: ["mAP50", "mAP50-95", "precision", "recall"]
+  
+  # Plots
+  plots: True                       # Gerar plots de validação
+  save_plots: True                  # Salvar plots
+
+#=======================================#
+# CHECKPOINT E LOGGING
+#=======================================#
+
+checkpoint:
+  # Salvamento
+  save_period: 10                   # Salvar a cada 10 épocas
+  save_best: True                   # Salvar melhor modelo
+  save_last: True                   # Salvar último modelo
+  
+  # Early stopping
+  patience: 30                      # Épocas sem melhoria para parar
+  
+  # Resumo
+  resume: ""                        # Caminho para resumir treinamento
+  
+logging:
+  # Verbosity
+  verbose: True                     # Log detalhado
+  
+  # TensorBoard
+  tensorboard: True                 # Habilitar TensorBoard
+  
+  # Weights & Biases (se disponível)
+  wandb: False                      # W&B desabilitado por padrão
+  
+  # Logging interval
+  log_interval: 50                  # Log a cada 50 batches
+
+#=======================================#
+# OTIMIZAÇÕES ESPECÍFICAS JETSON
+#=======================================#
+
+jetson_optimizations:
+  # TensorRT
+  export_tensorrt: True             # Exportar para TensorRT após treinamento
+  tensorrt_precision: "FP16"        # Precisão FP16
+  tensorrt_workspace: 1024          # Workspace TensorRT (MB)
+  
+  # Quantização
+  quantize: False                   # Quantização (experimental)
+  
+  # Pruning
+  pruning: False                    # Pruning (experimental)
+  
+  # Export formats
+  export_formats: ["onnx", "engine"] # Formatos de export
+
+#=======================================#
+# CONFIGURAÇÃO DE DATASET
+#=======================================#
+
+dataset:
+  # Caminhos
+  data_yaml: "robocup.yaml"         # Arquivo de configuração do dataset
+  
+  # Preprocessing
+  rect: False                       # Rectangular training (desabilitado)
+  single_cls: False                 # Single class training
+  
+  # Cache
+  cache: "ram"                      # Cache em RAM (se possível)
+  
+  # Dataset split
+  train_fraction: 0.8               # 80% para treinamento
+  val_fraction: 0.15                # 15% para validação
+  test_fraction: 0.05               # 5% para teste
+
+#=======================================#
+# CONFIGURAÇÃO DE EXPORT
+#=======================================#
+
+export:
+  # Formatos principais
+  formats: 
+    - "onnx"        # Para compatibilidade
+    - "engine"      # TensorRT para Jetson
+    - "torchscript" # PyTorch script
+  
+  # Otimizações
+  simplify: True                    # Simplificar ONNX
+  optimize_for_mobile: False        # Não otimizar para mobile
+  
+  # TensorRT específico
+  half: True                        # FP16 precision
+  int8: False                       # INT8 (experimental)
+  dynamic: False                    # Batch size dinâmico
+  workspace: 4                      # Workspace (GB)
+
+#=======================================#
+# CONFIGURAÇÃO DE PÓS-PROCESSAMENTO
+#=======================================#
+
+postprocess:
+  # NMS
+  conf_thres: 0.6                   # Confidence threshold
+  iou_thres: 0.45                   # IoU threshold
+  max_det: 200                      # Máximo detecções
+  
+  # Classes específicas (thresholds por classe)
+  class_thresholds:
+    ball: 0.7                       # Alta confiança para bola
+    robot: 0.6                      # Confiança média para robôs
+    penalty_mark: 0.5               # Confiança baixa para landmarks
+    goal_post: 0.6                  # Confiança média para postes
+    center_circle: 0.5              # Confiança baixa para landmarks
+    field_corner: 0.4               # Confiança baixa para cantos
+    area_corner: 0.6                # Confiança média para cantos (atualizado de 0.4) 

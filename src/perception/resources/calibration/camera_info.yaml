@@ -1,27 +1,146 @@
-image_width: 1280
-image_height: 720
-camera_name: imx219
-distortion_model: plumb_bob
-camera_matrix:
-  rows: 3
-  cols: 3
-  data: [640.0, 0.000000, 640.000000,
-         0.000000, 640.0, 360.000000, 
-         0.000000, 0.000000, 1.000000]
-distortion_coefficients:
-  rows: 1
-  cols: 5
-  data: [0.0, 0.0, 0.0, 0.0, 0.0]  # Será atualizado após calibração
-rectification_matrix:
-  rows: 3
-  cols: 3
-  data: [1.0, 0.0, 0.0,
-         0.0, 1.0, 0.0,
-         0.0, 0.0, 1.0]
-projection_matrix:
-  rows: 3
-  cols: 4
-  data: [640.0, 0.000000, 640.000000, 0.000000,
-         0.000000, 640.0, 360.000000, 0.000000,
-         0.000000, 0.000000, 1.000000, 0.000000]
-frame_id: camera_optical_frame 
+# Configuração de Calibração de Câmeras RoboIME HSL2025
+# Suporte para duas câmeras: IMX219 (CSI) e C930 (USB) 
+# Dados baseados em especificações reais dos fabricantes
+
+#=======================================#
+# SELEÇÃO DE CÂMERA
+#=======================================#
+
+# Câmera ativa: "imx219_csi" ou "c930_usb"
+active_camera: "imx219_csi"
+
+#=======================================#
+# CÂMERA 1: IMX219 CSI (Jetson/Raspberry Pi)
+#=======================================#
+
+imx219_csi:
+  # Identificação
+  camera_name: "imx219_csi_robocup"
+  camera_type: "csi"
+  description: "Sony IMX219 8MP CSI Camera - Jetson Orin Nano"
+  
+  # Resolução de trabalho
+  image_width: 1280
+  image_height: 720
+  
+  # Altura da câmera no robô (em metros)
+  camera_height: 0.58  # 58cm - altura típica para robô humanóide
+  
+  # Inclinação da câmera (em radianos)
+  camera_tilt_angle: 0.1745  # 10 graus para baixo
+  
+  # Modelo de distorção
+  distortion_model: "plumb_bob"
+  
+  # Matriz intrínseca da câmera
+  # Baseado em IMX219 real: sensor 1/4", focal 2.96mm, para 1280x720
+  camera_matrix:
+    rows: 3
+    cols: 3
+    data: [1058.0, 0.0, 640.0,
+           0.0, 1058.0, 360.0,
+           0.0, 0.0, 1.0]
+  
+  # Coeficientes de distorção 
+  # Valores típicos para IMX219 com lente wide-angle
+  distortion_coefficients:
+    rows: 1
+    cols: 5
+    data: [-0.32, 0.126, 0.0, 0.0, -0.016]
+  
+  # Matriz de retificação
+  rectification_matrix:
+    rows: 3
+    cols: 3
+    data: [1.0, 0.0, 0.0,
+           0.0, 1.0, 0.0,
+           0.0, 0.0, 1.0]
+  
+  # Matriz de projeção
+  projection_matrix:
+    rows: 3
+    cols: 4
+    data: [1058.0, 0.0, 640.0, 0.0,
+           0.0, 1058.0, 360.0, 0.0,
+           0.0, 0.0, 1.0, 0.0]
+  
+  # Frame de referência
+  frame_id: "imx219_optical_frame"
+  
+  # Campo de visão (FOV)
+  horizontal_fov: 1.22  # 70° horizontal
+  vertical_fov: 0.79    # 45° vertical
+  diagonal_fov: 1.36    # 78° diagonal
+
+#=======================================#  
+# CÂMERA 2: Logitech C930 USB
+#=======================================#
+
+c930_usb:
+  # Identificação
+  camera_name: "c930_usb_robocup"
+  camera_type: "usb"
+  description: "Logitech C930e Business Webcam - USB"
+  
+  # Resolução de trabalho
+  image_width: 1280
+  image_height: 720
+  
+  # Altura da câmera no robô (em metros)
+  camera_height: 0.58  # 58cm - mesma altura padrão
+  
+  # Inclinação da câmera (em radianos)
+  camera_tilt_angle: 0.1745  # 10 graus para baixo
+  
+  # Modelo de distorção
+  distortion_model: "plumb_bob"
+  
+  # Matriz intrínseca da câmera
+  # Baseado em C930 real: focal 3.67mm, 3MP sensor, FOV 90°
+  camera_matrix:
+    rows: 3
+    cols: 3
+    data: [885.0, 0.0, 640.0,
+           0.0, 885.0, 360.0,
+           0.0, 0.0, 1.0]
+  
+  # Coeficientes de distorção
+  # Valores típicos para C930 com correção óptica
+  distortion_coefficients:
+    rows: 1
+    cols: 5
+    data: [-0.15, 0.08, 0.0, 0.0, -0.01]
+  
+  # Matriz de retificação
+  rectification_matrix:
+    rows: 3
+    cols: 3
+    data: [1.0, 0.0, 0.0,
+           0.0, 1.0, 0.0,
+           0.0, 0.0, 1.0]
+  
+  # Matriz de projeção
+  projection_matrix:
+    rows: 3
+    cols: 4
+    data: [885.0, 0.0, 640.0, 0.0,
+           0.0, 885.0, 360.0, 0.0,
+           0.0, 0.0, 1.0, 0.0]
+  
+  # Frame de referência
+  frame_id: "c930_optical_frame"
+  
+  # Campo de visão (FOV) 
+  horizontal_fov: 1.23  # 70.42° horizontal (especificação C930)
+  vertical_fov: 0.76    # 43.3° vertical (especificação C930)
+  diagonal_fov: 1.57    # 90° diagonal (especificação C930)
+
+#=======================================#
+# PARÂMETROS DE DISTÂNCIAS DE TRABALHO
+#=======================================#
+
+# Distâncias comuns para ambas as câmeras
+working_distances:
+  min_detection_distance: 0.5   # Distância mínima confiável (metros)
+  max_detection_distance: 8.0   # Distância máxima do campo (metros)
+  optimal_distance_range: [1.0, 4.0]  # Faixa ótima de detecção 

@@ -1,0 +1,261 @@
+# Coordenadas dos Landmarks - Sistema de Navegação Simplificado RoboIME HSL2025
+# Sistema integrado com percepção YOLOv8 (6 classes)
+# Campo RoboCup Humanoid League: 9x6m
+
+#=======================================#
+# SISTEMA DE COORDENADAS
+#=======================================#
+coordinate_system:
+  # Sistema de coordenadas do campo
+  origin: "center_field"           # Origem no centro do campo
+  x_axis: "length_direction"       # Eixo X ao longo do comprimento (lateral a lateral)
+  y_axis: "width_direction"        # Eixo Y ao longo da largura (fundo a fundo)
+  units: "meters"                  # Unidades em metros
+  
+  # Limites do campo
+  field_bounds:
+    x_min: -4.5                    # Extremo esquerdo
+    x_max: 4.5                     # Extremo direito
+    y_min: -3.0                    # Extremo inferior
+    y_max: 3.0                     # Extremo superior
+
+#=======================================#
+# LANDMARKS PARA LOCALIZAÇÃO (5 TIPOS)
+#=======================================#
+
+# Tipo 1: PENALTY_MARK (Prioridade ALTA)
+# Coordenadas mais precisas para localização
+penalty_marks:
+  description: "Marcas de penalty - landmarks de alta precisão"
+  count: 2
+  priority: "high"
+  expected_accuracy: 0.05          # ±5cm
+  confidence_weight: 1.0
+  
+  coordinates:
+    penalty_mark_left:
+      x: -3.0                      # 1.5m do gol esquerdo
+      y: 0.0                       # Centro da largura
+      description: "Marca de penalty do lado esquerdo"
+      
+    penalty_mark_right:
+      x: 3.0                       # 1.5m do gol direito
+      y: 0.0                       # Centro da largura
+      description: "Marca de penalty do lado direito"
+
+# Tipo 2: CENTER_CIRCLE (Prioridade ALTA)
+# Referência central absoluta do campo
+center_circle:
+  description: "Círculo central - referência absoluta do campo"
+  count: 1
+  priority: "high"
+  expected_accuracy: 0.1           # ±10cm
+  confidence_weight: 1.2           # Peso maior por ser referência central
+  radius: 0.75                     # Raio do círculo central
+  
+  coordinates:
+    circle_center:
+      x: 0.0                       # Centro exato do campo
+      y: 0.0                       # Centro exato do campo
+      description: "Centro do círculo central"
+
+# Tipo 3: GOAL_POST (Prioridade MÉDIA)
+# Postes dos gols - 4 postes no total (2 por gol)
+goals:
+  description: "Postes de gol - landmarks verticais para orientação"
+  count: 4
+  priority: "medium"
+  expected_accuracy: 0.15          # ±15cm
+  confidence_weight: 0.8
+  post_spacing: 2.6                # Distância entre postes do mesmo gol
+  
+  # Coordenadas dos postes (assumindo largura do campo 6m e gol centrado em y=0)
+  coordinates:
+    - x: -4.5
+      y: 1.3
+      description: "Poste superior do gol esquerdo"
+      side: "left"
+      yolo_class_id: 3
+      landmark_type: "goal_post"
+    - x: -4.5
+      y: -1.3
+      description: "Poste inferior do gol esquerdo"
+      side: "left"
+      yolo_class_id: 3
+      landmark_type: "goal_post"
+    - x: 4.5
+      y: 1.3
+      description: "Poste superior do gol direito"
+      side: "right"
+      yolo_class_id: 3
+      landmark_type: "goal_post"
+    - x: 4.5
+      y: -1.3
+      description: "Poste inferior do gol direito"
+      side: "right"
+      yolo_class_id: 3
+      landmark_type: "goal_post"
+
+# Tipo 4: FIELD_CORNER (Prioridade MÉDIA)
+# Cantos do campo - landmarks de borda
+field_corners:
+  description: "Cantos do campo - landmarks de referência de borda"
+  count: 4
+  priority: "medium"
+  expected_accuracy: 0.2           # ±20cm
+  confidence_weight: 0.6
+  
+  coordinates:
+    corner_top_left:
+      x: -4.5                      # Extremo esquerdo
+      y: 3.0                       # Extremo superior
+      description: "Canto superior esquerdo do campo"
+      
+    corner_bottom_left:
+      x: -4.5                      # Extremo esquerdo
+      y: -3.0                      # Extremo inferior
+      description: "Canto inferior esquerdo do campo"
+      
+    corner_top_right:
+      x: 4.5                       # Extremo direito
+      y: 3.0                       # Extremo superior
+      description: "Canto superior direito do campo"
+      
+    corner_bottom_right:
+      x: 4.5                       # Extremo direito
+      y: -3.0                      # Extremo inferior
+      description: "Canto inferior direito do campo"
+
+# Tipo 5: AREA_CORNER (Prioridade MÉDIA)
+# Cantos das áreas de penalty - landmarks internos
+penalty_area_corners:
+  description: "Cantos das áreas de penalty - landmarks internos"
+  count: 8
+  priority: "medium"              # Aumentado de "low" para "medium"
+  expected_accuracy: 0.25          # ±25cm
+  confidence_weight: 0.6           # Aumentado de 0.4 para 0.6
+  penalty_area_length: 1.65        # Profundidade da área
+  penalty_area_width: 3.9          # Largura da área
+  
+  coordinates:
+    # Área esquerda (4 cantos)
+    left_area_top_inner:
+      x: -2.85                     # 4.5 - 1.65 = 2.85m do centro
+      y: 1.95                      # 3.9/2 = 1.95m do centro
+      description: "Canto superior interno da área esquerda"
+      
+    left_area_bottom_inner:
+      x: -2.85                     # 4.5 - 1.65 = 2.85m do centro
+      y: -1.95                     # -3.9/2 = -1.95m do centro
+      description: "Canto inferior interno da área esquerda"
+      
+    left_area_top_outer:
+      x: -4.5                      # Linha do gol
+      y: 1.95                      # 3.9/2 = 1.95m do centro
+      description: "Canto superior externo da área esquerda"
+      
+    left_area_bottom_outer:
+      x: -4.5                      # Linha do gol
+      y: -1.95                     # -3.9/2 = -1.95m do centro
+      description: "Canto inferior externo da área esquerda"
+    
+    # Área direita (4 cantos)
+    right_area_top_inner:
+      x: 2.85                      # 4.5 - 1.65 = 2.85m do centro
+      y: 1.95                      # 3.9/2 = 1.95m do centro
+      description: "Canto superior interno da área direita"
+      
+    right_area_bottom_inner:
+      x: 2.85                      # 4.5 - 1.65 = 2.85m do centro
+      y: -1.95                     # -3.9/2 = -1.95m do centro
+      description: "Canto inferior interno da área direita"
+      
+    right_area_top_outer:
+      x: 4.5                       # Linha do gol
+      y: 1.95                      # 3.9/2 = 1.95m do centro
+      description: "Canto superior externo da área direita"
+      
+    right_area_bottom_outer:
+      x: 4.5                       # Linha do gol
+      y: -1.95                     # -3.9/2 = -1.95m do centro
+      description: "Canto inferior externo da área direita"
+
+#=======================================#
+# CONFIGURAÇÕES DE TRIANGULAÇÃO
+#=======================================#
+triangulation:
+  # Parâmetros para algoritmos de triangulação
+  min_landmarks_required: 2        # Mínimo de landmarks para triangulação
+  max_distance_error: 0.5          # Erro máximo de distância aceito (m)
+  min_angle_between_landmarks: 0.3 # Ângulo mínimo entre landmarks (rad)
+  max_iterations: 100              # Máximo de iterações para convergência
+  convergence_threshold: 0.01      # Threshold de convergência (m)
+  
+  # Pesos por tipo de landmark na triangulação
+  landmark_weights:
+    penalty_mark: 1.0              # Peso máximo
+    center_circle: 1.2             # Peso aumentado (referência central)
+    goal_post: 0.8                 # Peso médio
+    field_corner: 0.6              # Peso reduzido
+    area_corner: 0.6               # Aumentado de 0.4 para 0.6
+
+#=======================================#
+# VALIDAÇÃO E SEGURANÇA
+#=======================================#
+validation:
+  # Limites de validação para detectar erros
+  max_valid_distance: 8.0          # Distância máxima válida para qualquer landmark (m)
+  min_confidence_threshold: 0.3    # Confiança mínima para usar landmark
+  outlier_detection_threshold: 2.0 # Threshold para detectar outliers (sigma)
+  
+  # Zonas de confiança por região do campo
+  confidence_zones:
+    center_zone:
+      bounds: {x: [-1.0, 1.0], y: [-1.0, 1.0]}
+      confidence_multiplier: 1.2    # Maior confiança na região central
+      
+    penalty_zones:
+      bounds: {x: [-4.5, -2.5], y: [-2.0, 2.0]}  # Área esquerda
+      confidence_multiplier: 1.1    # Boa confiança nas áreas
+      
+    corner_zones:
+      bounds: {x: [-4.5, -3.5], y: [2.0, 3.0]}   # Exemplo: canto superior esquerdo
+      confidence_multiplier: 0.8    # Menor confiança nos cantos
+
+#=======================================#
+# INTEGRAÇÃO COM PERCEPÇÃO
+#=======================================#
+perception_integration:
+  # Mapeamento entre classes YOLOv8 e tipos de landmarks
+  yolo_class_mapping:
+    2: "penalty_mark"              # Classe 2 -> penalty_mark
+    3: "goal_post"                # Classe 3 -> goal_post  
+    4: "center_circle"             # Classe 4 -> center_circle
+    5: "field_corner"              # Classe 5 -> field_corner
+    6: "area_corner"               # Classe 6 -> area_corner
+  
+  # Tolerâncias para associação de detecções com coordenadas conhecidas
+  association_tolerances:
+    penalty_mark: 0.3              # ±30cm para associar detecção com marca de penalty
+    center_circle: 0.5             # ±50cm para círculo central
+    goal_post: 0.8                 # ±80cm para postes de gol
+    field_corner: 1.0              # ±100cm para cantos do campo
+    area_corner: 0.6               # ±60cm para cantos das áreas
+
+#=======================================#
+# DEBUGGING E VISUALIZAÇÃO
+#=======================================#
+debug:
+  # Configurações para debugging e visualização
+  publish_landmark_markers: true   # Publicar markers visuais dos landmarks
+  publish_triangulation_lines: true # Publicar linhas de triangulação
+  publish_confidence_zones: true   # Publicar zonas de confiança
+  log_coordinate_associations: true # Log de associações detecção->coordenada
+  
+  # Cores para visualização (RGB 0-1)
+  landmark_colors:
+    penalty_mark: [1.0, 0.0, 0.0]   # Vermelho
+    center_circle: [0.0, 1.0, 0.0]  # Verde
+    goal_post: [0.0, 0.0, 1.0]      # Azul
+    field_corner: [1.0, 1.0, 0.0]   # Amarelo
+    area_corner: [1.0, 0.0, 1.0]    # Magenta 

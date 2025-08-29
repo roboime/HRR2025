@@ -1,152 +1,257 @@
-# Configuração Unificada do Sistema de Percepção da RoboIME
-# 
-# Este arquivo contém todos os parâmetros de configuração para o sistema de percepção,
-# incluindo configurações de câmera, detectores tradicionais e YOEO.
+# Configuração Sistema de Percepção RoboIME HSL2025 - YOLOv8 + Geometria 3D Avançada
+# Jetson Orin Nano Super - Sistema com 7 classes focadas em estratégia e localização
+# Arquitetura: Estratégia (ball, robot) + Localização (landmarks) + Pipeline 3D
 
 #=======================================#
 # CONFIGURAÇÃO GERAL
 #=======================================#
 
-# Configuração do pipeline
+# Pipeline YOLOv8 + 3D avançado
 pipeline:
-  processing_fps: 30.0          # Taxa de processamento de imagens (FPS) - reduzida
-  debug_image: true             # Publicar imagens de debug
-  
-  # Habilitar/desabilitar sistemas
-  use_yoeo: true                # Usar o detector YOEO
-  use_traditional: true         # Usar os detectores tradicionais
-  
-  # Escolha de detector para cada tipo de objeto (opções: 'yoeo' ou 'traditional')
-  detector_ball: "yoeo"         # Detector para a bola
-  detector_field: "traditional" # Detector para o campo
-  detector_lines: "traditional" # Detector para as linhas
-  detector_goals: "yoeo"        # Detector para os gols
-  detector_robots: "yoeo"       # Detector para os robôs
+  processing_fps: 30.0          # Taxa de processamento para Orin Nano Super
+  debug_image: true             # Publicar imagens de debug com informações 3D
+  debug_3d: true                # Ativar visualizações 3D avançadas
+  log_fps: true                 # Log de performance a cada 10 segundos
+  log_interval: 10.0            # Intervalo de log (segundos)
+  enable_3d_processing: true    # Ativar pipeline 3D completo
+  enable_tracking: true         # Ativar tracking temporal de objetos
+  enable_prediction: true       # Ativar predição de trajetórias
 
 #=======================================#
-# CONFIGURAÇÃO DA CÂMERA
+# CONFIGURAÇÃO GEOMETRIA 3D
 #=======================================#
+
+geometry_3d:
+  # Calibração da câmera
+  camera_info_path: "resources/calibration/camera_info.yaml"
+  
+  # Parâmetros de tracking
+  tracking:
+    max_objects: 20              # Máximo de objetos rastreados simultaneamente
+    distance_threshold: 0.5      # Threshold de associação (metros)
+    timeout_ball: 3.0           # Timeout para perder track da bola (segundos)
+    timeout_other: 5.0          # Timeout para outros objetos (segundos)
+    min_detections: 3           # Mínimo de detecções para criar track
+    
+  # Filtros temporais
+  filtering:
+    position_alpha: 0.7         # Suavização posicional (0-1)
+    velocity_alpha: 0.5         # Suavização de velocidade (0-1)
+    prediction_time: 0.5        # Tempo de predição (segundos)
+    
+  # Validação 3D
+  validation:
+    enable_size_validation: true # Validar tamanhos baseado em objetos conhecidos
+    enable_physics_validation: true # Validar física da bola
+    min_confidence_3d: 0.2      # Confiança mínima para aceitar detecção 3D
+    max_distance: 8.0           # Distância máxima confiável (metros)
+    min_distance: 0.3           # Distância mínima confiável (metros)
+    
+  # Análise de trajetória da bola
+  ball_physics:
+    gravity: 9.81               # Aceleração gravitacional (m/s²)
+    air_resistance: 0.1         # Coeficiente de resistência do ar
+    bounce_damping: 0.7         # Fator de amortecimento no quique
+    min_airborne_height: 0.05   # Altura mínima para considerar "no ar" (metros)
+    max_prediction_time: 10.0   # Tempo máximo de predição (segundos)
+
+  # Pareamento de postes de gol
+  goal_post_pairing:
+    enable_pairing: true        # Ativar pareamento inteligente de postes
+    goal_width_tolerance: 0.5   # Tolerância para largura do gol (2.6±0.5m)
+    goal_center_y_tolerance: 0.5 # Tolerância para centro Y (próximo de 0)
+    plate_x_tolerance: 0.5      # Tolerância para coordenada X da placa (±4.5±0.5)
+    post_y_tolerance: 0.5       # Tolerância para coordenada Y dos postes (±1.3±0.5)
+    min_pair_confidence: 0.4    # Confiança mínima para aceitar um par
+    single_post_confidence_penalty: 0.6 # Multiplicador de confiança para poste único
+
+#=======================================#
+# CONFIGURAÇÃO YOLOv8
+#=======================================#
+
+yolov8:
+  # Modelo simplificado (7 classes)
+  model_path: "resources/models/robocup_simplified_yolov8.pt"
+  fallback_model: "yolov8n.pt"  # Modelo padrão se customizado não encontrado
+  
+  # Parâmetros de detecção otimizados para 6 classes
+  confidence_threshold: 0.6     # Threshold de confiança
+  iou_threshold: 0.45           # Non-maximum suppression
+  max_detections: 200           # Máximo de detecções por frame (reduzido)
+  
+  # Performance
+  device: "cuda"                # GPU (Orin Nano Super)
+  half_precision: true          # FP16 para melhor performance
+  warmup_frames: 5              # Frames de aquecimento
+  
+  # Classes detectadas (6 classes total)
+  classes:
+    # Estratégia de jogo (2 classes)
+    ball: 0              # Bola de futebol
+    robot: 1             # Robôs (sem distinção de cor)
+    
+    # Landmarks para localização (5 classes)
+    penalty_mark: 2      # Marca do penalty
+    goal_post: 3         # Postes de gol (unificados)
+    center_circle: 4     # Círculo central
+    field_corner: 5      # Cantos do campo
+    area_corner: 6       # Cantos da área
+  
+  # Configurações específicas por classe (com validação 3D)
+  class_configs:
+    ball:
+      priority: "high"                    # Alta prioridade
+      confidence_weight: 1.0              # Peso de confiança máximo
+      enable_3d_tracking: true            # Ativar tracking 3D específico
+      enable_physics_prediction: true     # Ativar predição física
+      expected_size_range: [0.06, 0.07]   # Diâmetro esperado da bola (metros)
+      size_tolerance: 0.3                 # Tolerância de tamanho (30%)
+      
+    robot:
+      priority: "high"                    # Alta prioridade para estratégia
+      confidence_weight: 0.9              # Peso de confiança alto
+      enable_3d_tracking: true            # Ativar tracking 3D
+      expected_size_range: [0.8, 1.0]     # Altura esperada do robô (metros)
+      size_tolerance: 0.4                 # Tolerância maior para robôs
+      
+    penalty_mark:
+      priority: "medium"                  # Prioridade média para localização
+      confidence_weight: 0.8              # Peso de confiança bom
+      enable_3d_tracking: false           # Landmarks são estáticos
+      expected_size_range: [0.08, 0.12]   # Diâmetro esperado da marca (metros)
+      size_tolerance: 0.5                 # Tolerância alta para landmarks
+      
+    goal_post:
+      priority: "medium"                  # Prioridade média para localização
+      confidence_weight: 0.8              # Peso de confiança bom
+      enable_3d_tracking: false           # Postes são estáticos
+      expected_size_range: [0.08, 0.15]   # Largura/altura aparente do poste (metros)
+      size_tolerance: 0.3                 # Tolerância média
+      
+    center_circle:
+      priority: "medium"                  # Prioridade média para localização
+      confidence_weight: 0.7              # Peso de confiança moderado
+      enable_3d_tracking: false           # Landmarks são estáticos
+      expected_size_range: [1.4, 1.6]     # Diâmetro esperado do círculo (metros)
+      size_tolerance: 0.4                 # Tolerância alta
+      
+    field_corner:
+      priority: "medium"                  # Prioridade média para localização
+      confidence_weight: 0.6              # Peso de confiança moderado
+      enable_3d_tracking: false           # Landmarks são estáticos
+      expected_size_range: [0.1, 0.3]     # Tamanho estimado do canto (metros)
+      size_tolerance: 0.8                 # Tolerância muito alta para cantos
+      
+    area_corner:
+      priority: "medium"                  # Prioridade média para localização
+      confidence_weight: 0.6              # Peso de confiança moderado
+      enable_3d_tracking: false           # Landmarks são estáticos
+      expected_size_range: [0.1, 0.3]     # Tamanho estimado do canto (metros)
+      size_tolerance: 0.8                 # Tolerância muito alta para cantos
+
+#=======================================#
+# CONFIGURAÇÃO DE CÂMERA
+#=======================================#
+
 camera:
-  # Tópicos ROS
-  topic: "/camera/image_raw"    # Tópico da câmera para receber imagens
-  info_topic: "/camera/camera_info"  # Tópico de informações da câmera
+  # Tipo de câmera ativa - corresponde à configuração em camera_info.yaml
+  active_camera: "imx219_csi"    # "imx219_csi" ou "c930_usb"
   
-  # Configurações de imagem
-  width: 320                   # Resolução reduzida (320x240)
-  height: 240
-  fps: 30
+  # Configurações CSI (IMX219)
+  csi:
+    type: "csi"
+    device_id: 0                # Sensor ID para nvarguscamerasrc
+    width: 1280
+    height: 720
+    fps: 30
+    flip_method: 0              # 0=none, 1=counterclockwise, 2=rotate-180, 3=clockwise
+    
+    # GStreamer pipeline para CSI (Jetson)
+    gstreamer_pipeline: |
+      nvarguscamerasrc sensor-id={device_id} ! 
+      video/x-raw(memory:NVMM), width={width}, height={height}, format=NV12, framerate={fps}/1 ! 
+      nvvidconv flip-method={flip_method} ! 
+      video/x-raw, format=BGRx ! 
+      videoconvert ! 
+      video/x-raw, format=BGR ! 
+      appsink max-buffers=1 drop=True sync=False
   
-  # Configurações específicas para IMX219
-  camera_mode: 2                 # 0=3280x2464@21fps, 1=1920x1080@60fps, 2=1280x720@120fps
-  exposure_time: 13333          # Tempo de exposição em microssegundos (otimizado para indoor)
-  gain: 1.0                     # Ganho da câmera
-  awb_mode: 1                   # Auto white balance
-  brightness: 0                 # Brilho padrão
-  saturation: 1.2              # Saturação aumentada para melhor detecção de cores
-  enable_hdr: false            # HDR desabilitado por padrão
-  enable_cuda: true            # Processamento CUDA habilitado
-  enable_display: true        # Habilitar display
-  display_fps: 15            # FPS reduzido para display remoto
-  display_width: 640         # Resolução reduzida para display
-  display_height: 360        # para melhor performance via SSH
-  flip_method: 0              # Sem flip
+  # Configurações USB (C930)
+  usb:
+    type: "usb"
+    device_id: 0                # /dev/video0
+    width: 1280
+    height: 720
+    fps: 30
+    
+    # Configurações específicas USB
+    fourcc: "MJPG"              # Codec de vídeo (MJPG, YUYV)
+    buffer_size: 1              # Tamanho do buffer
+    autofocus: true             # Autofoco (se suportado)
+    auto_exposure: true         # Exposição automática
+    
+    # Configurações manuais (quando auto desabilitado)
+    manual_exposure: 156        # Valor de exposição manual
+    brightness: 128             # Brilho (0-255)
+    contrast: 128               # Contraste (0-255)
+    saturation: 128             # Saturação (0-255)
+    gain: 0                     # Ganho manual
   
-  # Otimizações de processamento
-  use_tensorrt: true          # Ativar TensorRT para H5
-  enable_edge_enhancement: true # Aprimoramento de bordas
-  enable_noise_reduction: true # Redução de ruído temporal
-  enable_isp: true           # Image Signal Processing otimizado
+  # Configurações comuns
+  common:
+    enable_undistort: true      # Ativar correção de distorção
+    enable_3d_projection: true  # Ativar projeção 3D avançada
+    warmup_frames: 10           # Frames para estabilizar câmera
 
 #=======================================#
-# CONFIGURAÇÃO DO YOEO
+# CONFIGURAÇÃO DE PERFORMANCE
 #=======================================#
-yoeo:
-  # Configurações do modelo
-  model_path: "./src/perception/resources/models/yolo.pt"  # Caminho para o modelo H5
-  input_width: 224              # Largura da entrada do modelo reduzida
-  input_height: 224             # Altura da entrada do modelo reduzida
+
+performance:
+  # Otimizações Jetson
+  enable_tensorrt: true         # TensorRT para YOLOv8 (se disponível)
+  enable_nvmm: true            # NVMM buffers para menor latência (CSI)
+  enable_gpu_preprocessing: true # Pré-processamento na GPU
   
-  # Parâmetros de detecção
-  confidence_threshold: 0.5     # Limiar de confiança para detecções
-  iou_threshold: 0.45           # Limiar de IoU para NMS
+  # Gerenciamento de memória
+  max_memory_usage: 4096       # MB máximo de uso de memória
+  gc_interval: 100             # Intervalo de garbage collection (frames)
   
-  # Otimização
-  use_tensorrt: true           # Usar TensorRT para aceleração (reativado)
-  
-  # Componentes habilitados (apenas detecção)
-  components:
-    ball: true                  # Habilitar detecção de bola
-    goals: true                 # Habilitar detecção de gols
-    robots: true                # Habilitar detecção de robôs
-    referee: false              # Habilitar detecção de árbitro
+  # Threading
+  enable_async_processing: true # Processamento assíncrono
+  max_worker_threads: 2        # Máximo de threads de processamento
 
 #=======================================#
-# CONFIGURAÇÃO DOS DETECTORES TRADICIONAIS
+# CONFIGURAÇÃO DE DEBUG E LOGS
 #=======================================#
-traditional:
-  # Detector de bola
-  ball:
-    enabled: false                      # Habilitar detector
-    color_lower: [0, 120, 70]          # HSV mínimo (laranja)
-    color_upper: [10, 255, 255]        # HSV máximo (laranja)
-    min_radius: 10                     # Raio mínimo em pixels
-    max_radius: 100                    # Raio máximo em pixels
-    
-  # Detector de campo
-  field:
-    enabled: true                      # Habilitar detector
-    color_lower: [35, 40, 40]          # HSV mínimo (verde)
-    color_upper: [85, 255, 255]        # HSV máximo (verde)
-    morphology_kernel_size: 5          # Tamanho do kernel morfológico
-    
-  # Detector de linhas
-  lines:
-    enabled: true                     # Habilitar detector
-    canny_threshold1: 50               # Limiar 1 para detector Canny
-    canny_threshold2: 150              # Limiar 2 para detector Canny
-    hough_rho: 1                       # Parâmetro rho para Hough
-    hough_theta: 0.01                  # Parâmetro theta para Hough
-    hough_threshold: 50                # Limiar para Hough
-    
-  # Detector de gols
-  goals:
-    enabled: false                     # Habilitar detector
-    color_lower: [20, 0, 180]          # HSV mínimo (amarelo ou azul)
-    color_upper: [30, 255, 255]        # HSV máximo (amarelo ou azul)
-    min_height: 30                     # Altura mínima em pixels
-    
-  # Detector de robôs (obstáculos)
-  robots:
-    enabled: false                     # Habilitar detector
-    color_lower: [0, 0, 0]             # HSV mínimo
-    color_upper: [180, 255, 40]        # HSV máximo
-    min_area: 100                      # Área mínima em pixels 
 
-# Configurações de detecção
-detection:
-  # Configurações da bola
-  ball:
-    min_confidence: 0.6
-    min_size: 10
-    max_size: 100
-    
-  # Configurações do campo
-  field:
-    color_threshold: 40
-    min_area: 1000
-    
-  # Configurações das linhas
-  lines:
-    canny_threshold1: 50
-    canny_threshold2: 150
-    min_line_length: 30
-    
-  # Configurações dos gols
-  goals:
-    min_confidence: 0.7
-    min_height: 30
-    
-  # Configurações dos robôs
-  robots:
-    min_confidence: 0.6
-    min_size: 20 
+debug:
+  # Visualizações
+  draw_bboxes: true            # Desenhar bounding boxes
+  draw_labels: true            # Desenhar labels
+  draw_3d_info: true           # Desenhar informações 3D
+  draw_trajectories: true      # Desenhar trajetórias previstas
+  draw_ground_projection: true # Desenhar projeção no chão
+  
+  # Informações textuais
+  show_distance: true          # Mostrar distância calculada
+  show_size: true              # Mostrar tamanho estimado
+  show_confidence: true        # Mostrar confiança total (2D + 3D)
+  show_camera_info: true       # Mostrar informações da câmera
+  
+  # Cores por classe (BGR)
+  colors:
+    ball: [0, 255, 0]          # Verde
+    robot: [255, 100, 100]     # Azul claro
+    penalty_mark: [0, 255, 255] # Amarelo
+    goal_post: [255, 0, 255]   # Magenta
+    center_circle: [255, 255, 0] # Ciano
+    field_corner: [128, 0, 255] # Roxo
+    area_corner: [255, 128, 0]  # Laranja
+
+# Configuração para logs estruturados
+logging:
+  level: "INFO"
+  log_3d_stats: true          # Log estatísticas 3D
+  log_tracking_stats: true    # Log estatísticas de tracking
+  log_performance: true       # Log métricas de performance 

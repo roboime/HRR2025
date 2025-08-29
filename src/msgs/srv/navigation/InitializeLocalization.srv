@@ -1,0 +1,37 @@
+# InitializeLocalization.srv
+# Serviço para inicializar/reinicializar a localização do robô
+
+# REQUEST
+# Posição inicial estimada (opcional - se fornecida, usa como ponto de partida)
+geometry_msgs/Pose2D initial_pose
+
+# Lado do time para resolver ambiguidade de simetria do campo
+string team_side              # "left" ou "right" - lado do time no início do jogo
+
+# Força reinicialização mesmo se localização atual estiver boa
+bool force_reset
+
+# Método de inicialização preferido
+string method                 # "landmarks", "manual", "auto"
+
+# Configurações específicas
+float32 uncertainty_radius    # Raio de incerteza inicial (metros)
+uint32 num_particles         # Número de partículas para filtro (0 = usar padrão)
+
+---
+
+# RESPONSE
+bool success                  # Se a inicialização foi bem-sucedida
+string message               # Mensagem descritiva do resultado
+
+# Pose inicial calculada após inicialização
+geometry_msgs/Pose2D final_pose
+
+# Confiança da localização inicial [0.0, 1.0]
+float32 confidence
+
+# Tempo estimado para convergência completa (segundos)
+float32 convergence_time
+
+# Landmarks usados na inicialização
+FieldLandmark[] landmarks_used 
