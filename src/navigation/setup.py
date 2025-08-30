@@ -23,13 +23,13 @@ setup(
     entry_points={
         'console_scripts': [
             # Nó principal de localização (usando linhas do campo)
-            'localization = roboime_navigation.localization_node:main',
+            'localization = navigation.localization_node:main',
             
             # Planejador de trajetória para futebol robótico
-            'path_planner = roboime_navigation.path_planner_node:main',
+            'path_planner = navigation.path_planner_node:main',
             
             # Coordenador principal de navegação
-            'navigation_manager = roboime_navigation.navigation_manager:main',
+            'navigation_manager = navigation.navigation_manager:main',
         ],
     },
 )

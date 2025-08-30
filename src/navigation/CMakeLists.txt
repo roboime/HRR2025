@@ -100,13 +100,13 @@ ament_target_dependencies(navigation_coordinator_node
 # =============================================================================
 
 # Install Python modules
-ament_python_install_package(${PROJECT_NAME})
+ament_python_install_package(navigation)
 
 # Install Python scripts
 install(PROGRAMS
+  navigation/localization_node.py
   navigation/path_planner_node.py
-  navigation/obstacle_avoidance_node.py
-  navigation/field_mapper_node.py
+  navigation/navigation_manager.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
