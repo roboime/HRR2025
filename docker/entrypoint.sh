@@ -64,8 +64,15 @@ export ROS_DOMAIN_ID=0
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 export PYTHONIOENCODING=utf-8
 
+# Caminhos de bibliotecas do JetPack (necessários para CUDA/cuDNN/TensorRT)
+export LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu/tegra:/usr/lib/aarch64-linux-gnu/nvidia:$LD_LIBRARY_PATH
+
 # Configuração CUDA se existir
-if [ -d "/usr/local/cuda-10.2" ]; then
+if [ -d "/usr/local/cuda-12.2" ]; then
+    export CUDA_HOME=/usr/local/cuda-12.2
+    export LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:$LD_LIBRARY_PATH
+    export PATH=/usr/local/cuda-12.2/bin:$PATH
+elif [ -d "/usr/local/cuda-10.2" ]; then
     export CUDA_HOME=/usr/local/cuda-10.2
     export LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda-10.2/targets/aarch64-linux/lib:$LD_LIBRARY_PATH
     export PATH=/usr/local/cuda-10.2/bin:$PATH
