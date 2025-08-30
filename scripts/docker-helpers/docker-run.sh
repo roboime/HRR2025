@@ -26,6 +26,20 @@ print_error() {
 CONTAINER_NAME="hsl-orin-super"
 CONTAINER_EXISTS=$(docker ps -a --filter "name=$CONTAINER_NAME" --format "{{.Names}}")
 
+# Opção: recriar container (usa: ./docker-run.sh --recreate)
+RECREATE=0
+for arg in "$@"; do
+    if [ "$arg" = "--recreate" ] || [ "$arg" = "-r" ]; then
+        RECREATE=1
+    fi
+done
+
+if [ $RECREATE -eq 1 ] && [ "$CONTAINER_EXISTS" = "$CONTAINER_NAME" ]; then
+    print_info "Recriando container existente: $CONTAINER_NAME"
+    docker rm -f $CONTAINER_NAME >/dev/null 2>&1 || true
+    CONTAINER_EXISTS=""
+fi
+
 # Configuração específica para Jetson Orin Nano Super
 JETSON_DEVICES=""
 if [ -d "/dev/nvhost-ctrl" ] || [ -d "/dev/nvhost-gpu" ] || [ -d "/dev/nvmap" ]; then
@@ -40,7 +54,7 @@ if [ "$CONTAINER_EXISTS" = "$CONTAINER_NAME" ]; then
     # Se o container já existe mas não está rodando, inicia novamente
     if [ "$(docker ps -q -f name=$CONTAINER_NAME)" = "" ]; then
         print_info "Reiniciando container existente: $CONTAINER_NAME"
-        docker start -i $CONTAINER_NAME
+        docker start -ai $CONTAINER_NAME
     else
         # Se já está rodando, apenas entra no container
         print_success "Conectando ao container em execução: $CONTAINER_NAME"
@@ -54,31 +68,49 @@ else
         exit 1
     fi
     
+    # Valida runtime NVIDIA (obrigatório na Jetson)
+    HAS_NVIDIA_RUNTIME=0
+    if docker info 2>/dev/null | grep -iq "Runtimes:.*nvidia"; then HAS_NVIDIA_RUNTIME=1; fi
+    if command -v nvidia-container-runtime >/dev/null 2>&1; then HAS_NVIDIA_RUNTIME=1; fi
+    if [ $HAS_NVIDIA_RUNTIME -eq 0 ]; then
+        print_error "Runtime NVIDIA ausente no Docker."
+        print_info "Execute no host: sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker"
+        exit 1
+    fi
+
+    # Args de GPU/Runtime
+    RUNTIME_ARGS="--runtime nvidia --gpus all -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all,compute,video,utility,graphics -e CUDA_VISIBLE_DEVICES=0"
+
+    # Dispositivos e montagens dinâmicas
+    VIDEO_DEVICES=""
+    for dev in /dev/video*; do
+        [ -e "$dev" ] && VIDEO_DEVICES="$VIDEO_DEVICES --device $dev"
+    done
+    ARGUS_MOUNT=""
+    [ -e "/tmp/argus_socket" ] && ARGUS_MOUNT="-v /tmp/argus_socket:/tmp/argus_socket"
+    CUDA_MOUNT=""
+    [ -d "/usr/local/cuda-12.2" ] && CUDA_MOUNT="-v /usr/local/cuda-12.2:/usr/local/cuda-12.2"
+
     # Cria um novo container com nome específico
     print_info "Criando novo container: $CONTAINER_NAME"
     print_info "Imagem: hsl:orin-super (JetPack 6.2 + ROS2 Humble)"
     
     docker run -it \
       --name $CONTAINER_NAME \
-      --runtime nvidia \
+      $RUNTIME_ARGS \
       --privileged \
-      --gpus all \
       --env="DISPLAY" \
       --env="QT_X11_NO_MITSHM=1" \
-      -e NVIDIA_VISIBLE_DEVICES=all \
-      -e NVIDIA_DRIVER_CAPABILITIES=all,compute,video,utility,graphics \
-      -e CUDA_VISIBLE_DEVICES=0 \
       -v /dev:/dev \
       --network host --ipc=host \
       -e DISPLAY=$DISPLAY \
       -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
       -v $HOME/.Xauthority:/root/.Xauthority:ro \
       --env="XAUTHORITY=/root/.Xauthority" \
-      -v /tmp/argus_socket:/tmp/argus_socket \
       -v $(pwd):/ros2_ws \
-      -v /usr/local/cuda-12.2:/usr/local/cuda-12.2 \
-      --device /dev/video0 \
-      --device /dev/video1 \
+      $ARGUS_MOUNT \
+      $CUDA_MOUNT \
+      $VIDEO_DEVICES \
       $JETSON_DEVICES \
       hsl:orin-super \
       /bin/bash || {

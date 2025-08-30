@@ -10,15 +10,15 @@ ENV ROS_DISTRO=humble
 ENV ROS_PYTHON_VERSION=3
 
 # Atualiza locale para UTF-8
-RUN apt-get update || true && apt-get install -y locales \
+RUN --network=host apt-get update || true && apt-get install -y locales \
     && locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
 
 # Adiciona chave e repositório do ROS2 Humble (Ubuntu 22.04 Jammy)
-RUN apt-get update || true && apt-get install -y --no-install-recommends \
+RUN --network=host apt-get update || true && apt-get install -y --no-install-recommends \
     curl gnupg2 lsb-release ca-certificates software-properties-common && \
     update-ca-certificates
 
-RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+RUN --network=host curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
     -o /usr/share/keyrings/ros-archive-keyring.gpg
 
 RUN echo "deb [arch=arm64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
@@ -29,7 +29,7 @@ RUN echo "deb [arch=arm64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg]
 RUN usermod -a -G video root
 
 # Instalar ROS2 Humble e dependências essenciais
-RUN for i in 1 2 3 4 5; do \
+RUN --network=host bash -lc 'for i in 1 2 3 4 5; do \
         echo "Tentativa $i de instalar ROS2 Humble..." && \
         apt-get update && \
         apt-get install -y --no-install-recommends \
@@ -50,10 +50,10 @@ RUN for i in 1 2 3 4 5; do \
             cmake && \
         break || \
         (echo "Falha na tentativa $i. Esperando..." && sleep 30); \
-    done
+    done'
 
 # Inicializa o rosdep
-RUN rosdep init || echo "rosdep já inicializado ou falhou" && \
+RUN --network=host rosdep init || echo "rosdep já inicializado ou falhou" && \
     rosdep update || echo "rosdep update falhou, continuando mesmo assim"
 
 # Configura workspace ROS2
