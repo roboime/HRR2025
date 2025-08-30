@@ -45,7 +45,7 @@ public:
     ekf_->update_noise_parameters(Q, meas_noise, imu_noise);
     
     // Publishers
-    pose_pub_ = this->create_publisher<geometry_msgs::msg::Pose2D>(
+    pose_pub_ = this->create_publisher<roboime_msgs::msg::RobotPose2D>(
       "ekf/pose", 10
     );
     
@@ -117,7 +117,7 @@ private:
   tf2_ros::TransformBroadcaster tf_broadcaster_;
   
   // Publishers
-  rclcpp::Publisher<geometry_msgs::msg::Pose2D>::SharedPtr pose_pub_;
+  rclcpp::Publisher<roboime_msgs::msg::RobotPose2D>::SharedPtr pose_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_cov_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr confidence_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
@@ -389,7 +389,7 @@ private:
     }
   }
   
-  void publish_tf_transform(const geometry_msgs::msg::Pose2D& pose)
+  void publish_tf_transform(const roboime_msgs::msg::RobotPose2D& pose)
   {
     geometry_msgs::msg::TransformStamped transform;
     

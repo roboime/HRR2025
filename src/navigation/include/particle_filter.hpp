@@ -281,6 +281,9 @@ private:
    * @brief Normaliza ângulo para intervalo [-π, π]
    */
   double normalize_angle(double angle) const;
+
+  // Inicializa landmarks padrão (declaração faltante)
+  void initialize_default_field_landmarks();
 };
 
 }  // namespace roboime_navigation

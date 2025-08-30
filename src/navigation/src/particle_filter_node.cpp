@@ -220,7 +220,21 @@ private:
     std::vector<roboime_navigation::Landmark> landmarks;
     
     for (const auto& landmark_msg : msg->landmarks) {
-      roboime_navigation::Landmark::Type type = convert_landmark_type(landmark_msg.type);
+      // Converter enumerado do msg para nosso tipo interno
+      roboime_navigation::Landmark::Type type;
+      switch (landmark_msg.type) {
+        case roboime_msgs::msg::FieldLandmark::CENTER_CIRCLE:
+          type = roboime_navigation::Landmark::CENTER_CIRCLE; break;
+        case roboime_msgs::msg::FieldLandmark::PENALTY_MARK:
+          type = roboime_navigation::Landmark::PENALTY_MARK; break;
+        case roboime_msgs::msg::FieldLandmark::GOAL_POST:
+          type = roboime_navigation::Landmark::GOAL_POST; break;
+        case roboime_msgs::msg::FieldLandmark::GOAL_AREA_CORNER:
+          type = roboime_navigation::Landmark::GOAL_AREA_CORNER; break;
+        case roboime_msgs::msg::FieldLandmark::FIELD_CORNER:
+        default:
+          type = roboime_navigation::Landmark::FIELD_CORNER; break;
+      }
       
       double distance = std::sqrt(
         landmark_msg.position_relative.x * landmark_msg.position_relative.x +

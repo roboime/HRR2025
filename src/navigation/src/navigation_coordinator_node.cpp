@@ -103,14 +103,15 @@ public:
     
     // Subscribers - Comunicação entre robôs (se habilitado)
     if (this->get_parameter("enable_team_communication").as_bool()) {
-      team_comm_sub_ = this->create_subscription<roboime_msgs::msg::TeamRobotInfo>(
-        "team/robot_info", 10,
-        std::bind(&NavigationCoordinatorNode::team_communication_callback, this, std::placeholders::_1)
-      );
+      // Comentado até existir a mensagem TeamRobotInfo no roboime_msgs
+      // team_comm_sub_ = this->create_subscription<roboime_msgs::msg::TeamRobotInfo>(
+      //   "team/robot_info", 10,
+      //   std::bind(&NavigationCoordinatorNode::team_communication_callback, this, std::placeholders::_1)
+      // );
       
-      team_broadcast_pub_ = this->create_publisher<roboime_msgs::msg::TeamRobotInfo>(
-        "team/broadcast", 5
-      );
+      // team_broadcast_pub_ = this->create_publisher<roboime_msgs::msg::TeamRobotInfo>(
+      //   "team/broadcast", 5
+      // );
     }
     
     // Subscribers - Estado do jogo
@@ -201,7 +202,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::Pose2D>::SharedPtr ekf_pose_pub_;
   
   // Publishers de comunicação
-  rclcpp::Publisher<roboime_msgs::msg::TeamRobotInfo>::SharedPtr team_broadcast_pub_;
+  // rclcpp::Publisher<roboime_msgs::msg::TeamRobotInfo>::SharedPtr team_broadcast_pub_;
   
   // Subscribers
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_sub_;
@@ -209,7 +210,7 @@ private:
   rclcpp::Subscription<roboime_msgs::msg::LandmarkArray>::SharedPtr landmarks_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Pose2D>::SharedPtr mcl_pose_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Pose2D>::SharedPtr ekf_pose_sub_;
-  rclcpp::Subscription<roboime_msgs::msg::TeamRobotInfo>::SharedPtr team_comm_sub_;
+  // rclcpp::Subscription<roboime_msgs::msg::TeamRobotInfo>::SharedPtr team_comm_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr game_state_sub_;
   
   // Serviços
@@ -353,21 +354,15 @@ private:
     ekf_pose_pub_->publish(*msg);  // Republish para debug
   }
   
-  void team_communication_callback(const roboime_msgs::msg::TeamRobotInfo::SharedPtr msg)
-  {
-    // Processar informação de outro robô do time
-    roboime_navigation::TeamRobotInfo team_info(msg->robot_id);
-    team_info.pose = msg->pose;
-    team_info.confidence = msg->confidence;
-    team_info.last_update = std::chrono::steady_clock::now();
-    team_info.status = msg->status;
-    
-    coordinator_->process_team_robot_info(team_info);
-    
-    RCLCPP_DEBUG(this->get_logger(), 
-      "Recebida info do robô %d: confiança %.2f", 
-      msg->robot_id, msg->confidence);
-  }
+  // void team_communication_callback(const roboime_msgs::msg::TeamRobotInfo::SharedPtr msg)
+  // {
+  //   roboime_navigation::TeamRobotInfo team_info(msg->robot_id);
+  //   team_info.pose = msg->pose;
+  //   team_info.confidence = msg->confidence;
+  //   team_info.last_update = std::chrono::steady_clock::now();
+  //   team_info.status = msg->status;
+  //   coordinator_->process_team_robot_info(team_info);
+  // }
   
   void game_state_callback(const std_msgs::msg::String::SharedPtr msg)
   {
@@ -561,7 +556,8 @@ private:
   
   void broadcast_team_info()
   {
-    if (!is_initialized_ || !team_broadcast_pub_) {
+    // Desativado até a mensagem existir
+    if (!is_initialized_) {
       return;
     }
     
@@ -571,15 +567,7 @@ private:
       // Estimar progresso de convergência: normalizar confiança para [0,1]
       double progress = std::min(1.0, std::max(0.0, (confidence - 0.1) / (0.7 - 0.1)));
       
-      roboime_msgs::msg::TeamRobotInfo team_info;
-      team_info.robot_id = this->get_parameter("robot_id").as_int();
-      team_info.pose = pose;
-      team_info.confidence = confidence;
-      team_info.status = coordinator_->is_well_localized() ? "active" : "uncertain";
-      // Aproveitar campo livre de extensão (se existir) para progresso
-      team_info.extra_info = "convergence_progress:" + std::to_string(progress);
-      
-      team_broadcast_pub_->publish(team_info);
+      // publicar quando TeamRobotInfo estiver disponível
       
     } catch (const std::exception& e) {
       RCLCPP_ERROR(this->get_logger(), "Erro no broadcast: %s", e.what());

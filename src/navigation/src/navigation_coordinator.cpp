@@ -66,7 +66,9 @@ void NavigationCoordinator::update_with_odometry(
   double dt)
 {
   // Atualizar ambos os algoritmos
-  particle_filter_->predict(odometry_delta, dt);
+  // Passar IMU neutro até termos IMU real aqui
+  sensor_msgs::msg::Imu dummy_imu;
+  particle_filter_->predict(odometry_delta, dummy_imu, dt);
   ekf_localization_->predict_with_odometry(odometry_delta, dt);
   
   // Verificar se precisa mudar modo
@@ -334,9 +336,9 @@ roboime_msgs::msg::RobotPose2D NavigationCoordinator::fuse_pose_estimates() cons
   
   // Adicionar ao histórico
   if (pose_history_.size() >= MAX_HISTORY_SIZE) {
-    pose_history_.erase(pose_history_.begin());
+    const_cast<std::vector<roboime_msgs::msg::RobotPose2D>&>(pose_history_).erase(pose_history_.begin());
   }
-  pose_history_.push_back(fused_pose);
+  const_cast<std::vector<roboime_msgs::msg::RobotPose2D>&>(pose_history_).push_back(fused_pose);
   
   return fused_pose;
 }

@@ -338,6 +338,9 @@ private:
     const Eigen::Vector2d& innovation,
     const Eigen::Matrix2d& covariance
   ) const;
+
+  // Inicializa landmarks padrão do campo (declaração faltante)
+  void initialize_default_field_landmarks();
 };
 
 }  // namespace roboime_navigation
