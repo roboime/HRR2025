@@ -105,10 +105,6 @@ else
     XAUTH_MOUNT=""
     [ -f "$HOME/.Xauthority" ] && XAUTH_MOUNT="-v $HOME/.Xauthority:/root/.Xauthority:ro --env=\"XAUTHORITY=/root/.Xauthority\""
 
-    # Montar entrypoint atualizado do workspace (garante detecção de GPU)
-    ENTRYPOINT_MOUNT=""
-    [ -f "docker/entrypoint.sh" ] && ENTRYPOINT_MOUNT="-v $(pwd)/docker/entrypoint.sh:/entrypoint.sh:ro"
-
     # Montar tegrastats do host (se existir)
     TEGRASTATS_MOUNT=""
     [ -x "/usr/bin/tegrastats" ] && TEGRASTATS_MOUNT="-v /usr/bin/tegrastats:/usr/bin/tegrastats:ro"
@@ -125,7 +121,6 @@ else
       -e DISPLAY=$DISPLAY \
       -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
       $XAUTH_MOUNT \
-      $ENTRYPOINT_MOUNT \
       $TEGRASTATS_MOUNT \
       -v $(pwd):/ros2_ws \
       $ARGUS_MOUNT \
