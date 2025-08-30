@@ -181,5 +181,9 @@ exibir_comando "python3 -c \"import tensorflow as tf; print('TensorFlow:', tf.__
 
 echo -e "${AZUL}============================================================${SEM_COR}"
 
-# Executa o comando passado como argumento ou inicia um shell
-exec "$@" || exec /bin/bash
+# Executa o comando passado como argumento ou inicia um shell interativo
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+else
+    exec /bin/bash -l
+fi
