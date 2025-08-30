@@ -45,10 +45,12 @@ def create_camera_nodes(context, *args, **kwargs):
         # Nó da câmera USB C930
         usb_camera_node = Node(
             package='perception',
-            executable='usb_camera_node',
-            name='usb_camera_node',
+            executable='usb_camera',
+            name='usb_camera',
             output='screen',
-            parameters=[config_file, common_params],
+            parameters=[config_file, common_params, {
+                'device_path': LaunchConfiguration('device_path')
+            }],
             remappings=[
                 ('/camera/image_raw', LaunchConfiguration('camera_topic')),
                 ('/camera/camera_info', LaunchConfiguration('camera_info_topic'))
@@ -101,6 +103,12 @@ def generate_launch_description():
         'camera_type',
         default_value='csi',
         description='Tipo de câmera: "csi" para IMX219 ou "usb" para C930'
+    )
+
+    declare_device_path = DeclareLaunchArgument(
+        'device_path',
+        default_value='/dev/video0',
+        description='Caminho do dispositivo da câmera USB (ex: /dev/video0 ou índice)'
     )
     
     declare_use_debug = DeclareLaunchArgument(
@@ -199,6 +207,7 @@ def generate_launch_description():
         # Argumentos
         declare_config_file,
         declare_camera_type,
+        declare_device_path,
         declare_use_debug,
         declare_camera_topic,
         declare_camera_info_topic,

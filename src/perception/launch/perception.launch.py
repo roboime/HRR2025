@@ -32,6 +32,13 @@ def generate_launch_description():
         ]),
         description='Arquivo de configuração YAML'
     )
+
+    # Permitir especificar device_path quando camera_type=usb
+    device_path_arg = DeclareLaunchArgument(
+        'device_path',
+        default_value='/dev/video0',
+        description='Caminho do dispositivo da câmera USB (ex: /dev/video0 ou índice)'
+    )
     
     debug_arg = DeclareLaunchArgument(
         'debug',
@@ -64,7 +71,7 @@ def generate_launch_description():
                 name='usb_camera',
                 output='screen',
                 parameters=[{
-                    'device_path': '/dev/video0',
+                    'device_path': LaunchConfiguration('device_path'),
                     'width': 1280,
                     'height': 720,
                     'fps': 30.0,
@@ -132,6 +139,7 @@ def generate_launch_description():
         # Argumentos
         camera_type_arg,
         config_file_arg,
+        device_path_arg,
         debug_arg,
         model_path_arg,
         confidence_arg,
