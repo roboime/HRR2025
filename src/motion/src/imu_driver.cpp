@@ -267,6 +267,7 @@ private:
     double _2q1my = 2.0*q1*my;
     double _2q1mz = 2.0*q1*mz;
     double _2q2mx = 2.0*q2*mx;
+    const double _2 = 2.0; // constante auxiliar para manter notação compacta
     double hx = mx*q1*q1 - _2q1my*q4 + _2q1mz*q3 + mx*q2*q2 + _2*q2*my*q3 + _2*q2*mz*q4 - mx*q3*q3 - mx*q4*q4;
     double hy = _2q1mx*q4 + my*q1*q1 - _2q1mz*q2 + _2*q2*mx*q3 - my*q2*q2 + my*q3*q3 + _2*q3*mz*q4 - my*q4*q4;
     double _2bx = std::sqrt(hx*hx + hy*hy);
