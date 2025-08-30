@@ -34,37 +34,18 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/navigation/FieldLandmark.msg"           # ATUALIZADA: 5 landmarks específicos
   "msg/navigation/LandmarkArray.msg"           # Array de landmarks detectados
   "msg/navigation/LocalizationStatus.msg"      # Status da localização
-  "msg/navigation/PathPlan.msg"                # Planejamento de trajetória
-  "msg/navigation/NavigationCommand.msg"       # Comandos de navegação
-  "msg/navigation/ObstacleInfo.msg"            # Informações de obstáculos
   
   # ===== BEHAVIOR MESSAGES =====
   "msg/behavior/GameState.msg"                 # Estado oficial do jogo
-  "msg/behavior/RobotRole.msg"                 # Papel do robô
-  "msg/behavior/BehaviorStatus.msg"            # Status do comportamento
-  "msg/behavior/Strategy.msg"                  # Estratégia da equipe
-  "msg/behavior/ActionCommand.msg"             # Comandos de ação
   
   # ===== MOTION MESSAGES =====
   "msg/motion/WalkCommand.msg"                 # Comandos de caminhada
-  "msg/motion/JointCommand.msg"                # Controle de joints
-  "msg/motion/MotionStatus.msg"                # Status do movimento
-  "msg/motion/GaitParameters.msg"              # Parâmetros de gait
-  "msg/motion/Balance.msg"                     # Dados de equilíbrio
   
   # ===== COMMUNICATION MESSAGES =====
   "msg/communication/TeamData.msg"             # Dados compartilhados entre robôs
-  "msg/communication/RobotStatus.msg"          # Status individual do robô
-  "msg/communication/FieldInfo.msg"            # Informações do campo
-  "msg/communication/GameInfo.msg"             # Informações da partida
   
   # ===== SERVICES =====
   "srv/navigation/InitializeLocalization.srv" # Inicializar localização
-  "srv/navigation/SetGoal.srv"                 # Definir objetivo de navegação
-  "srv/behavior/ChangeRole.srv"                # Mudar papel do robô
-  "srv/behavior/SetStrategy.srv"               # Definir estratégia
-  "srv/motion/ConfigureGait.srv"               # Configurar gait
-  "srv/communication/UpdateTeamData.srv"       # Atualizar dados do time
   
   DEPENDENCIES
     std_msgs
