@@ -22,8 +22,10 @@ print_error() {
     echo -e "${RED}✗ $1${NC}"
 }
 
-# Verifica se já existe um container com o nome hsl-cuda
-CONTAINER_NAME="hsl-cuda"
+# Verifica se já existe um container com o nome hrr
+-cuda
+CONTAINER_NAME="hrr
+-cuda"
 CONTAINER_EXISTS=$(docker ps -a --filter "name=$CONTAINER_NAME" --format "{{.Names}}")
 
 # Opção: recriar container (usa: ./docker-run.sh --recreate)
@@ -65,8 +67,10 @@ if [ "$CONTAINER_EXISTS" = "$CONTAINER_NAME" ]; then
     fi
 else
     # Verificar se a imagem existe com formato confiável
-    if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^hsl:cuda$'; then
-        print_error "Imagem hsl:cuda não encontrada!"
+    if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^hrr
+    :cuda$'; then
+        print_error "Imagem hrr
+        :cuda não encontrada!"
         print_info "Execute primeiro: ./scripts/docker-helpers/docker-build.sh"
         exit 1
     fi
@@ -99,7 +103,8 @@ else
 
     # Cria um novo container com nome específico
     print_info "Criando novo container: $CONTAINER_NAME"
-    print_info "Imagem: hsl:cuda (JetPack 6.2 + ROS2 Humble)"
+    print_info "Imagem: hrr
+    :cuda (JetPack 6.2 + ROS2 Humble)"
     
     # Montagem Xauthority apenas se existir no host, para evitar erro de bind
     XAUTH_MOUNT=""
@@ -128,6 +133,7 @@ else
       $VIDEO_DEVICES \
       $JETSON_DEVICES \
       --workdir /ros2_ws \
-      hsl:cuda \
+      hrr
+      :cuda \
       /bin/bash -i
 fi
