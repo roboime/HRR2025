@@ -9,10 +9,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV ROS_DISTRO=humble
 ENV ROS_PYTHON_VERSION=3
 
-# Configurar DNS para melhorar a conectividade
-RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf && \
-    echo "nameserver 8.8.4.4" >> /etc/resolv.conf
-
 # Atualiza locale para UTF-8
 RUN apt-get update || true && apt-get install -y locales \
     && locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
@@ -68,7 +64,7 @@ RUN echo 'source /opt/ros/humble/setup.bash' >> /root/.bashrc
 
 # Configura variáveis de ambiente para CUDA 12.2 (JetPack 6.2)
 ENV CUDA_HOME=/usr/local/cuda-12.2
-ENV LD_LIBRARY_PATH=/usr/local/cuda-12.2/targets/aarch64-linux/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
+ENV LD_LIBRARY_PATH=/usr/local/cuda-12.2/targets/aarch64-linux/lib:/usr/local/cuda/lib64
 ENV PATH=/usr/local/cuda-12.2/bin:${PATH}
 
 # Criar diretório para scripts
