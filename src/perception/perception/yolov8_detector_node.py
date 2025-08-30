@@ -99,6 +99,9 @@ class YOLOv8UnifiedDetector(Node):
                 6: 'robot',
             }
         
+        # Carregar configurações (inclui device/half_precision)
+        # Importante: carregar ANTES de inicializar o modelo para respeitar device
+        self._load_perception_config()
         # Inicializar modelo YOLOv8
         self._init_model()
         
@@ -125,9 +128,6 @@ class YOLOv8UnifiedDetector(Node):
         # Estado atual do robô
         self.current_robot_pose = None
         self.pose_timestamp = None
-        
-        # Carregar configurações de percepção
-        self._load_perception_config()
         
         # Carregar landmarks conhecidos para correspondência
         self._load_landmark_coordinates()
@@ -182,6 +182,7 @@ class YOLOv8UnifiedDetector(Node):
             self.confidence_threshold = yolo_config['confidence_threshold']
             self.iou_threshold = yolo_config['iou_threshold']
             self.device = yolo_config.get('device', 'cuda')
+            self.half_precision = bool(yolo_config.get('half_precision', True))
             
             # Parâmetros para pareamento de postes de gol (compatível com geometry_3d/goal_post_pairing)
             geom_cfg = config.get('geometry_3d', config.get('detection_3d', {}))
@@ -230,7 +231,15 @@ class YOLOv8UnifiedDetector(Node):
             # Configurar device
             if torch.cuda.is_available() and self.device == 'cuda':
                 self.model.to('cuda')
-                self.get_logger().info('Modelo carregado na GPU (CUDA)')
+                # Ativar FP16 se configurado
+                try:
+                    if getattr(self, 'half_precision', True):
+                        # Converter backbone para half se suportado
+                        if hasattr(self.model, 'model'):
+                            self.model.model.half()
+                    self.get_logger().info('Modelo carregado na GPU (CUDA)')
+                except Exception as e:
+                    self.get_logger().warn(f'Não foi possível ativar half precision: {e}')
             else:
                 self.get_logger().warn('Usando CPU - performance reduzida')
                 
@@ -287,13 +296,18 @@ class YOLOv8UnifiedDetector(Node):
         
         try:
             # Executar inferência com configurações otimizadas
-            results = self.model(
-                image, 
-                conf=self.confidence_threshold,
-                iou=self.iou_threshold,
-                max_det=self.max_detections,
-                verbose=False
-            )
+            # Converter imagem para FP16/GPU se disponível para maximizar throughput
+            run_kwargs = dict(conf=self.confidence_threshold,
+                              iou=self.iou_threshold,
+                              max_det=self.max_detections,
+                              verbose=False)
+            if torch.cuda.is_available() and self.device == 'cuda' and getattr(self, 'half_precision', True):
+                try:
+                    # YOLOv8 aceita numpy BGR; conversão para half ocorre internamente via model.half()
+                    pass
+                except Exception:
+                    pass
+            results = self.model(image, **run_kwargs)
             
             # Processar resultados
             for result in results:

@@ -247,7 +247,7 @@ class USB_C930_CameraNode(Node):
                     
                     if ret and frame is not None:
                         # Aplicar aceleração GPU se habilitada
-                        if self.get_parameter('enable_cuda').value:
+                        if self.get_parameter('enable_cuda').value and cv2.cuda.getCudaEnabledDeviceCount() > 0:
                             frame = self._apply_gpu_processing(frame)
                         
                         # Atualizar frame atual thread-safe
