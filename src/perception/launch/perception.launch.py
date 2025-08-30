@@ -8,9 +8,10 @@ YOLOv8 Unificado - Jetson Orin Nano Super
 
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument, LogInfo
+from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
+from launch.conditions import IfCondition
 
 def generate_launch_description():
     """Gera descrição do launch para percepção YOLOv8 unificada"""
@@ -53,38 +54,40 @@ def generate_launch_description():
         description='Threshold de confiança para detecções (0.0-1.0)'
     )
     
-    # Nó da câmera CSI (IMX219)
-    csi_camera_node = Node(
-        package='perception',
-        executable='csi_camera_node',
-        name='csi_camera_node',
-        output='screen',
-        parameters=[{
-            'camera_id': 0,
-            'width': 1280,
-            'height': 720,
-            'fps': 30,
-            'flip_method': 2,  # Rotação 180 graus se necessário
-            'config_file': LaunchConfiguration('config_file')
-        }],
-        condition=lambda context: LaunchConfiguration('camera_type').perform(context) == 'csi'
-    )
-    
-    # Nó da câmera USB (C930)
-    usb_camera_node = Node(
-        package='perception',
-        executable='usb_camera_node',
-        name='usb_camera_node',
-        output='screen',
-        parameters=[{
-            'device_id': 0,
-            'width': 1280,
-            'height': 720,
-            'fps': 30,
-            'config_file': LaunchConfiguration('config_file')
-        }],
-        condition=lambda context: LaunchConfiguration('camera_type').perform(context) == 'usb'
-    )
+    def create_camera_nodes(context):
+        cam = LaunchConfiguration('camera_type').perform(context)
+        nodes = []
+        if cam == 'usb':
+            nodes.append(Node(
+                package='perception',
+                executable='usb_camera_node',
+                name='usb_camera_node',
+                output='screen',
+                parameters=[{
+                    'device_id': 0,
+                    'width': 1280,
+                    'height': 720,
+                    'fps': 30,
+                    'config_file': LaunchConfiguration('config_file')
+                }]
+            ))
+        else:
+            nodes.append(Node(
+                package='perception',
+                executable='csi_camera_node',
+                name='csi_camera_node',
+                output='screen',
+                parameters=[{
+                    'camera_id': 0,
+                    'width': 1280,
+                    'height': 720,
+                    'fps': 30,
+                    'flip_method': 2,
+                    'config_file': LaunchConfiguration('config_file')
+                }]
+            ))
+        return nodes
+    camera_nodes = OpaqueFunction(function=create_camera_nodes)
     
     # Nó YOLOv8 Unificado (principal)
     yolov8_detector_node = Node(
@@ -126,9 +129,8 @@ def generate_launch_description():
         # Log
         startup_log,
         
-        # Nós de câmera (condicionais)
-        csi_camera_node,
-        usb_camera_node,
+        # Nós de câmera (criados dinamicamente)
+        camera_nodes,
         
         # Detector principal
         yolov8_detector_node,
