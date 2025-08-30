@@ -112,8 +112,8 @@ class YOLOv8UnifiedDetector(Node):
         self.landmarks_pub = self.create_publisher(FieldDetection, 'localization_landmarks', 10)
         self.unified_pub = self.create_publisher(SimplifiedDetections, 'unified_detections', 10)
         
-        # Publisher para debug com informações 3D (tópico privado do nó)
-        self.debug_image_pub = self.create_publisher(Image, '~debug_image_3d', 10)
+        # Publisher para debug com informações 3D (tópico absoluto)
+        self.debug_image_pub = self.create_publisher(Image, '/yolov8_detector/debug_image_3d', 10)
         
         # Subscriber para imagens
         self.image_sub = self.create_subscription(
