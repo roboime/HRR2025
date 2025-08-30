@@ -123,5 +123,6 @@ else
       $VIDEO_DEVICES \
       $JETSON_DEVICES \
       --workdir /ros2_ws \
-      hsl:latest
+      hsl:latest \
+      /bin/bash -i
 fi
