@@ -22,8 +22,8 @@ print_error() {
     echo -e "${RED}✗ $1${NC}"
 }
 
-# Verifica se já existe um container com o nome hsl-orin-super
-CONTAINER_NAME="hsl-orin-super"
+# Verifica se já existe um container com o nome hsl-latest
+CONTAINER_NAME="hsl-latest"
 CONTAINER_EXISTS=$(docker ps -a --filter "name=$CONTAINER_NAME" --format "{{.Names}}")
 
 # Opção: recriar container (usa: ./docker-run.sh --recreate)
@@ -65,8 +65,8 @@ if [ "$CONTAINER_EXISTS" = "$CONTAINER_NAME" ]; then
     fi
 else
     # Verificar se a imagem existe
-    if ! docker images | grep -q "hsl.*orin-super"; then
-        print_error "Imagem hsl:orin-super não encontrada!"
+    if ! docker images | grep -q "hsl.latest"; then
+        print_error "Imagem hsl:latest não encontrada!"
         print_info "Execute primeiro: ./scripts/docker-helpers/docker-build.sh"
         exit 1
     fi
@@ -99,7 +99,7 @@ else
 
     # Cria um novo container com nome específico
     print_info "Criando novo container: $CONTAINER_NAME"
-    print_info "Imagem: hsl:orin-super (JetPack 6.2 + ROS2 Humble)"
+    print_info "Imagem: hsl:latest (JetPack 6.2 + ROS2 Humble)"
     
     # Montagem Xauthority apenas se existir no host, para evitar erro de bind
     XAUTH_MOUNT=""
@@ -109,7 +109,7 @@ else
       --name $CONTAINER_NAME \
       $RUNTIME_ARGS \
       --privileged \
-      --entrypoint /bin/bash \
+      --entrypoint \
       --env="DISPLAY" \
       --env="QT_X11_NO_MITSHM=1" \
       -v /dev:/dev \
@@ -123,5 +123,5 @@ else
       $VIDEO_DEVICES \
       $JETSON_DEVICES \
       --workdir /ros2_ws \
-      hsl:orin-super
+      hsl:latest
 fi
