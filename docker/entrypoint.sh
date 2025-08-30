@@ -108,15 +108,15 @@ done
 
 # Verifica GPU NVIDIA (robusto)
 echo ""
-if command -v tegrastats &> /dev/null; then
-    verificar_disponibilidade "Status da GPU Jetson" \
-        "tegrastats --interval 1 --count 1" \
-        "GPU Jetson não detectada ou drivers não instalados."
+echo -e "${CIANO}Status da GPU Jetson:${SEM_COR}"
+if [ -e "/dev/nvhost-gpu" ] || [ -e "/dev/nvhost-as-gpu" ] || [ -e "/dev/nvhost-ctrl-gpu" ] || [ -e "/dev/nvmap" ]; then
+    echo -e "  ${VERDE}✓${SEM_COR} GPU Jetson detectada"
+    ls -1 /dev/nvhost* /dev/nvmap 2>/dev/null | sed 's/^/    - /'
 else
-    echo -e "${CIANO}Status da GPU Jetson:${SEM_COR}"
-    if [ -e "/dev/nvhost-gpu" ] || [ -e "/dev/nvhost-as-gpu" ] || [ -e "/dev/nvhost-ctrl-gpu" ] || [ -e "/dev/nvmap" ]; then
-        echo -e "  ${VERDE}✓${SEM_COR} Dispositivos NV detectados"
-        ls -1 /dev/nvhost* /dev/nvmap 2>/dev/null | sed 's/^/    - /'
+    if command -v tegrastats &> /dev/null; then
+        verificar_disponibilidade "Status da GPU Jetson" \
+            "tegrastats --interval 1 --count 1" \
+            "GPU Jetson não detectada ou drivers não instalados."
     else
         echo -e "  ${VERMELHO}GPU Jetson não detectada${SEM_COR}"
     fi
