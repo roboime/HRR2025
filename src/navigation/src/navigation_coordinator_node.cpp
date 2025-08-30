@@ -141,12 +141,6 @@ public:
                 std::placeholders::_1, std::placeholders::_2)
     );
     
-    mode_service_ = this->create_service<roboime_msgs::srv::SetLocalizationMode>(
-      "localization/set_mode",
-      std::bind(&NavigationCoordinatorNode::set_mode_callback, this,
-                std::placeholders::_1, std::placeholders::_2)
-    );
-    
     // Timer para publicação e atualização
     double publish_rate = this->get_parameter("publish_rate").as_double();
     main_timer_ = this->create_wall_timer(
@@ -218,7 +212,6 @@ private:
   // Serviços
   rclcpp::Service<std_srvs::srv::Empty>::SharedPtr reset_service_;
   rclcpp::Service<roboime_msgs::srv::InitializeLocalization>::SharedPtr init_service_;
-  rclcpp::Service<roboime_msgs::srv::SetLocalizationMode>::SharedPtr mode_service_;
   
   // Timers
   rclcpp::TimerBase::SharedPtr main_timer_;
@@ -422,39 +415,7 @@ private:
     }
   }
   
-  void set_mode_callback(
-    const std::shared_ptr<roboime_msgs::srv::SetLocalizationMode::Request> request,
-    std::shared_ptr<roboime_msgs::srv::SetLocalizationMode::Response> response)
-  {
-    try {
-      roboime_navigation::LocalizationMode mode;
-      
-      if (request->mode == "particle_filter") {
-        mode = roboime_navigation::LocalizationMode::PARTICLE_FILTER_ONLY;
-      } else if (request->mode == "ekf") {
-        mode = roboime_navigation::LocalizationMode::EKF_ONLY;
-      } else if (request->mode == "hybrid") {
-        mode = roboime_navigation::LocalizationMode::HYBRID_FUSION;
-      } else if (request->mode == "team_consensus") {
-        mode = roboime_navigation::LocalizationMode::TEAM_CONSENSUS;
-      } else {
-        throw std::invalid_argument("Modo inválido: " + request->mode);
-      }
-      
-      coordinator_->set_localization_mode(mode);
-      mode_switches_++;
-      
-      response->success = true;
-      response->message = "Modo alterado para: " + request->mode;
-      
-      RCLCPP_INFO(this->get_logger(), "Modo alterado para: %s", request->mode.c_str());
-      
-    } catch (const std::exception& e) {
-      response->success = false;
-      response->message = std::string("Erro ao alterar modo: ") + e.what();
-      RCLCPP_ERROR(this->get_logger(), "%s", response->message.c_str());
-    }
-  }
+  // set_mode_callback removido (serviço inexistente no roboime_msgs)
   
   // =============================================================================
   // CICLO PRINCIPAL

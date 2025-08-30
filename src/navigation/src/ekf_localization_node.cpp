@@ -307,15 +307,9 @@ private:
       request->initial_pose.theta * 180.0 / M_PI);
     
     try {
-      // Matriz de covariância da requisição
-      Eigen::Matrix3d cov = Eigen::Matrix3d::Identity() * 0.5;
-      if (request->covariance.size() >= 9) {
-        for (int i = 0; i < 3; ++i) {
-          for (int j = 0; j < 3; ++j) {
-            cov(i, j) = request->covariance[i * 3 + j];
-          }
-        }
-      }
+      Eigen::Matrix3d cov = Eigen::Matrix3d::Identity();
+      double r = request->uncertainty_radius > 0 ? request->uncertainty_radius : 0.5;
+      cov(0,0) = r * r; cov(1,1) = r * r; cov(2,2) = 0.3 * 0.3;
       
       ekf_->initialize(request->initial_pose, cov);
       is_initialized_ = true;

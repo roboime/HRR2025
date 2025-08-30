@@ -231,7 +231,7 @@ private:
           type = roboime_navigation::Landmark::PENALTY_MARK; break;
         case roboime_msgs::msg::FieldLandmark::GOAL_POST:
           type = roboime_navigation::Landmark::GOAL_POST; break;
-        case roboime_msgs::msg::FieldLandmark::GOAL_AREA_CORNER:
+        case roboime_msgs::msg::FieldLandmark::AREA_CORNER:
           type = roboime_navigation::Landmark::GOAL_AREA_CORNER; break;
         case roboime_msgs::msg::FieldLandmark::FIELD_CORNER:
         default:
@@ -291,15 +291,20 @@ private:
       "Inicializando localização em (%.2f, %.2f, %.2f)",
       request->initial_pose.x, request->initial_pose.y, request->initial_pose.theta);
     
-    if (request->use_team_side) {
-      particle_filter_->initialize_with_team_side(team_side_, request->initial_pose);
-    } else {
-      Eigen::Matrix3d covariance = Eigen::Matrix3d::Identity();
-      covariance(0, 0) = request->covariance[0];   // x variance
-      covariance(1, 1) = request->covariance[4];   // y variance  
-      covariance(2, 2) = request->covariance[8];   // theta variance
-      
-      particle_filter_->initialize_global_localization(&request->initial_pose, covariance);
+    // Escolher método conforme serviço simplificado
+    if (request->method == "manual") {
+      // Inicializa próximo da pose fornecida com incerteza aproximada pelo raio
+      Eigen::Matrix3d cov = Eigen::Matrix3d::Identity();
+      double r = request->uncertainty_radius > 0 ? request->uncertainty_radius : 0.5;
+      cov(0,0) = r * r; cov(1,1) = r * r; cov(2,2) = 0.3 * 0.3;
+      particle_filter_->initialize_global_localization(&request->initial_pose, cov);
+    } else if (request->method == "landmarks") {
+      // Usa lado do time para restringir busca
+      std::string side = request->team_side.empty() ? team_side_ : request->team_side;
+      roboime_msgs::msg::RobotPose2D pose_hint = request->initial_pose;
+      particle_filter_->initialize_with_team_side(side, pose_hint);
+    } else { // "auto" ou outro
+      particle_filter_->initialize_global_localization();
     }
     
     is_initialized_ = true;
