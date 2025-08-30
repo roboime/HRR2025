@@ -1,6 +1,6 @@
 # Base NVIDIA L4T image for JetPack 6.2 (L4T R36.4 - Ubuntu 22.04)
 # Jetson Orin Nano Super Developer Kit
-FROM nvcr.io/nvidia/l4t-base:r36.4.0
+FROM nvcr.io/nvidia/l4t-base:r36.2.0
 
 # Desabilita interações manuais no apt
 ENV DEBIAN_FRONTEND=noninteractive 

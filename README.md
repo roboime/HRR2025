@@ -37,22 +37,22 @@
 O **RoboIME HSL2025** é um sistema completo de robô humanóide para futebol desenvolvido para a **Humanoid Soccer League 2025**. 
 
 ### 🎯 **Principais Características:**
-- **🧠 Sistema de Percepção YOLOv8 Simplificado**: Detecção de 6 classes essenciais focadas em estratégia e localização
+- **🧠 Sistema de Percepção YOLOv8 Simplificado**: Detecção de 7 classes essenciais focadas em estratégia e localização
 - **🤖 Arquitetura Modular ROS2**: Comportamento, navegação, movimento e percepção independentes
 - **⚡ Otimização NVIDIA**: Aceleração CUDA no Jetson Orin Nano Super
 - **🐳 Deploy com Docker**: Ambiente consistente e reproduzível
 - **📡 Comunicação Customizada**: Sistema roboime_msgs para alta performance
 
 ### 🧠 **Sistema de Percepção Inteligente:**
-Utiliza **YOLOv8 com 6 classes essenciais** divididas em dois propósitos:
+Utiliza **YOLOv8 com 7 classes essenciais** divididas em dois propósitos:
 
 #### **⚽ Estratégia de Jogo (2 classes):**
 - 🏐 **Ball** - Bola de futebol (elemento principal)
 - 🤖 **Robot** - Robôs (sem distinção de cor - unificado)
 
-#### **🧭 Localização no Campo (4 classes):**
+#### **🧭 Localização no Campo (5 classes):**
 - 📍 **Penalty Mark** - Marca do penalty (landmark preciso)
-- 🥅 **Goal** - Gols (estruturas unificadas)
+- 🥅 **Goal Post** - Postes do gol (unificados)
 - ⭕ **Center Circle** - Círculo central (referência central)
 - 📐 **Field Corner** - Cantos do campo (landmarks de borda)
 - 🔲 **Area Corner** - Cantos da área (landmarks internos)
@@ -62,7 +62,7 @@ Utiliza **YOLOv8 com 6 classes essenciais** divididas em dois propósitos:
 ```
 RoboIME HSL2025/
 ├── 📡 roboime_msgs          # Sistema de comunicação customizada
-├── 👁️ perception            # YOLOv8 simplificado (6 classes)
+├── 👁️ perception            # YOLOv8 simplificado (7 classes)
 │   ├── ⚽ Estratégia        # Ball + Robot detection
 │   └── 🧭 Localização      # Landmarks para navegação
 ├── 🧭 navigation            # Localização usando landmarks + planejamento
@@ -165,12 +165,8 @@ pip3 install ultralytics>=8.0.0
 pip3 install opencv-python>=4.8.0 numpy>=1.24.0 pyyaml>=6.0
 ```
 
-#### **3. Instalar roboime_msgs**
-```bash
-# Clonar e instalar mensagens customizadas
-cd src/msgs
-pip3 install -e .
-```
+#### **3. Mensagens roboime_msgs**
+As mensagens `roboime_msgs` são construídas automaticamente pelo `colcon build`. Não é necessário instalar via pip.
 
 ### 📦 Configuração do Ambiente
 
@@ -233,39 +229,39 @@ ros2 launch perception perception.launch.py camera_type:=usb
 # Múltiplas câmeras
 ros2 launch perception dual_camera.launch.py
 
-# Com modelo customizado (6 classes)
+# Com modelo customizado (7 classes)
 ros2 launch perception perception.launch.py \
-  model_path:=/path/to/robocup_simplified_yolov8.pt \
+  model_path:=/path/to/robocup_yolov8.pt \
   confidence_threshold:=0.6
 ```
 
 #### **Verificar Detecções**
 ```bash
 # Ver todas as detecções
-ros2 topic echo /perception/unified_detections
+ros2 topic echo /unified_detections
 
 # Detecções estratégicas
-ros2 topic echo /perception/ball_detection      # Bola
-ros2 topic echo /perception/robot_detections    # Robôs
+ros2 topic echo /ball_detection      # Bola
+ros2 topic echo /robot_detections    # Robôs
 
 # Detecções para localização
-ros2 topic echo /perception/goal_detections         # Gols
-ros2 topic echo /perception/localization_landmarks  # Landmarks
+ros2 topic echo /goal_detections         # Gols
+ros2 topic echo /localization_landmarks  # Landmarks
 
 # Visualização
-ros2 run rqt_image_view rqt_image_view /perception/debug_image
+ros2 run rqt_image_view rqt_image_view /debug_image_3d
 ```
 
 #### **Outros Módulos**
 ```bash
 # Sistema de comportamento
-ros2 run behavior behavior_node
+ros2 run roboime_behavior behavior_node
 
 # Controlador de movimento
-ros2 run motion walking_controller
+ros2 run motion walking_controller.py
 
 # Sistema de navegação (quando implementado)
-ros2 run navigation localization_node
+ros2 run roboime_navigation localization
 ```
 
 ## 🔄 Desenvolvimento
@@ -302,8 +298,8 @@ chmod +x src/perception/test_perception.sh
 ./src/perception/test_perception.sh
 
 # Testes individuais
-ros2 run perception csi_camera_node
-ros2 run perception yolov8_unified_detector
+ros2 run perception csi_camera
+ros2 run perception yolov8_detector
 ```
 
 ## 📡 Sincronização com Jetson
@@ -348,8 +344,8 @@ pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu12
 
 #### **Modelo YOLOv8 não encontrado**
 ```bash
-# Verificar modelo de 6 classes
-ls -la src/perception/resources/models/robocup_simplified_yolov8.pt
+# Verificar modelo de 7 classes
+ls -la src/perception/resources/models/robocup_yolov8.pt
 
 # Baixar modelo base (temporário - REQUER RETREINAMENTO!)
 cd src/perception/resources/models/
@@ -394,13 +390,13 @@ jtop  # Jetson específico
 nvidia-smi
 watch -n 1 nvidia-smi
 
-# FPS do sistema (deve estar melhor com 6 classes)
+# FPS do sistema (melhor com 7 classes)
 ros2 topic hz /camera/image_raw
-ros2 topic hz /perception/debug_image
+ros2 topic hz /debug_image_3d
 ```
 
-### **🎯 Performance Esperada (6 Classes vs 11 Classes)**
-| Métrica | 11 Classes | 6 Classes | Melhoria |
+### **🎯 Performance Esperada (7 Classes vs 11 Classes)**
+| Métrica | 11 Classes | 7 Classes | Melhoria |
 |---------|------------|-----------|----------|
 | **FPS** | 15-20 | 20-25 | **+25-30%** |
 | **Latência** | 15-20ms | 10-15ms | **-25-33%** |
@@ -416,6 +412,6 @@ Este projeto é licenciado sob a **Licença MIT** - veja o arquivo [LICENSE](LIC
 <div align="center">
   <p><strong>🤖 Desenvolvido pela Equipe RoboIME</strong></p>
   <p>📍 <em>Instituto Militar de Engenharia (IME) - Rio de Janeiro, Brasil</em></p>
-  <p>🎯 <em>YOLOv8 Simplificado • 6 Classes Essenciais • Estratégia + Localização</em></p>
+  <p>🎯 <em>YOLOv8 Simplificado • 7 Classes Essenciais • Estratégia + Localização</em></p>
   <p>🏆 <em>Humanoid Soccer League 2025</em></p>
 </div>
