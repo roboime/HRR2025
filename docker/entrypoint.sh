@@ -99,7 +99,7 @@ ldconfig -p | grep -E "libcuda|libcudart|libcublas" | while read -r lib; do
     echo -e "  ${VERDE}✓${SEM_COR} $lib"
 done
 
-# Verifica GPU NVIDIA
+# Verifica GPU NVIDIA (robusto)
 echo ""
 if command -v tegrastats &> /dev/null; then
     verificar_disponibilidade "Status da GPU Jetson" \
@@ -107,8 +107,9 @@ if command -v tegrastats &> /dev/null; then
         "GPU Jetson não detectada ou drivers não instalados."
 else
     echo -e "${CIANO}Status da GPU Jetson:${SEM_COR}"
-    if [ -e "/dev/nvhost-ctrl" ]; then
-        echo -e "  ${VERDE}✓${SEM_COR} GPU Jetson detectada (/dev/nvhost-ctrl)"
+    if [ -e "/dev/nvhost-gpu" ] || [ -e "/dev/nvhost-as-gpu" ] || [ -e "/dev/nvhost-ctrl-gpu" ] || [ -e "/dev/nvmap" ]; then
+        echo -e "  ${VERDE}✓${SEM_COR} Dispositivos NV detectados"
+        ls -1 /dev/nvhost* /dev/nvmap 2>/dev/null | sed 's/^/    - /'
     else
         echo -e "  ${VERMELHO}GPU Jetson não detectada${SEM_COR}"
     fi
