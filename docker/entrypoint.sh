@@ -1,5 +1,6 @@
 #!/bin/bash
-set -e
+# Não encerrar o container se algum check falhar
+set +e
 
 # Cores para melhorar a visualização
 VERDE='\033[0;32m'
