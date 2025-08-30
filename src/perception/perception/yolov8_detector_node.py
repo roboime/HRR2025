@@ -17,6 +17,7 @@ import time
 import os
 import yaml
 from typing import List, Tuple, Optional
+from ament_index_python.packages import get_package_share_directory
 
 # Importar módulo de geometria 3D
 from .camera_geometry_3d import CameraGeometry3D, Object3D
@@ -53,6 +54,27 @@ class YOLOv8UnifiedDetector(Node):
         
         # Bridge OpenCV-ROS2
         self.bridge = CvBridge()
+        # Parâmetros padrão e declaração
+        try:
+            share_dir = get_package_share_directory('perception')
+        except Exception:
+            share_dir = os.path.join(os.path.dirname(__file__), '..')
+        self.declare_parameters(
+            namespace='',
+            parameters=[
+                ('model_path', os.path.join(share_dir, 'resources', 'models', 'robocup_yolov8.pt')),
+                ('confidence_threshold', 0.6),
+                ('iou_threshold', 0.45),
+                ('publish_debug', True),
+                ('max_detections', 300),
+                ('landmark_config_path', os.path.join(share_dir, 'resources', 'calibration', 'camera_info.yaml')),
+            ]
+        )
+        # Carregar parâmetros em variáveis da instância
+        self.confidence_threshold = float(self.get_parameter('confidence_threshold').value)
+        self.iou_threshold = float(self.get_parameter('iou_threshold').value)
+        self.publish_debug = bool(self.get_parameter('publish_debug').value)
+        self.max_detections = int(self.get_parameter('max_detections').value)
         
         # Sistema de geometria 3D
         self._init_3d_geometry()
@@ -117,11 +139,7 @@ class YOLOv8UnifiedDetector(Node):
         """Inicializa sistema de geometria 3D com calibração da câmera"""
         try:
             # Caminho para arquivo de calibração
-            config_path = self.get_package_share_directory('perception')
-            config_path = os.path.join(
-                self.get_package_share_directory('perception'),
-                'resources', 'calibration', 'camera_info.yaml'
-            )
+            config_path = self.get_parameter('landmark_config_path').value
             
             # Alternativa se o pacote não for encontrado
             if not os.path.exists(config_path):
@@ -185,9 +203,11 @@ class YOLOv8UnifiedDetector(Node):
         """Inicializa o modelo YOLOv8"""
         try:
             model_path = self.get_parameter('model_path').value
+            if not isinstance(model_path, str):
+                model_path = ''
             
             # Verificar se existe modelo customizado treinado para 7 classes
-            if os.path.exists(model_path):
+            if model_path and os.path.exists(model_path):
                 self.get_logger().info(f'Carregando modelo simplificado: {model_path}')
                 self.model = YOLO(model_path)
             else:
