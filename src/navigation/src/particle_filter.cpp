@@ -27,7 +27,7 @@ ParticleFilter::ParticleFilter(size_t num_particles, double field_length, double
 }
 
 void ParticleFilter::initialize_global_localization(
-  const geometry_msgs::msg::Pose2D* initial_pose,
+  const roboime_msgs::msg::RobotPose2D* initial_pose,
   const Eigen::Matrix3d& covariance)
 {
   particles_.clear();
@@ -69,7 +69,7 @@ void ParticleFilter::initialize_global_localization(
 
 void ParticleFilter::initialize_with_team_side(
   const std::string& team_side,
-  const geometry_msgs::msg::Pose2D& initial_pose)
+  const roboime_msgs::msg::RobotPose2D& initial_pose)
 {
   particles_.clear();
   particles_.reserve(num_particles_);
@@ -105,7 +105,7 @@ void ParticleFilter::initialize_with_team_side(
 }
 
 void ParticleFilter::predict(
-  const geometry_msgs::msg::Pose2D& odometry_delta,
+  const roboime_msgs::msg::RobotPose2D& odometry_delta,
   const sensor_msgs::msg::Imu& imu_data,
   double dt)
 {
@@ -123,7 +123,7 @@ void ParticleFilter::predict(
 
 void ParticleFilter::apply_motion_model(
   Particle& particle,
-  const geometry_msgs::msg::Pose2D& odometry_delta,
+  const roboime_msgs::msg::RobotPose2D& odometry_delta,
   double dt)
 {
   // Modelo de movimento com ruído
@@ -281,9 +281,9 @@ void ParticleFilter::resample()
   particles_ = std::move(new_particles);
 }
 
-geometry_msgs::msg::Pose2D ParticleFilter::get_estimated_pose() const
+roboime_msgs::msg::RobotPose2D ParticleFilter::get_estimated_pose() const
 {
-  geometry_msgs::msg::Pose2D pose;
+  roboime_msgs::msg::RobotPose2D pose;
   
   if (particles_.empty()) {
     return pose;
@@ -327,11 +327,11 @@ double ParticleFilter::get_localization_confidence() const
   double total_weight = 0.0;
   
   for (const auto& particle : particles_) {
-    double distance = pose_distance(estimated_pose, 
-      geometry_msgs::msg::Pose2D().x = particle.x,
-      geometry_msgs::msg::Pose2D().y = particle.y,
-      geometry_msgs::msg::Pose2D().theta = particle.theta);
-    
+    roboime_msgs::msg::RobotPose2D particle_pose;
+    particle_pose.x = particle.x;
+    particle_pose.y = particle.y;
+    particle_pose.theta = particle.theta;
+    double distance = pose_distance(estimated_pose, particle_pose);
     variance_sum += particle.weight * distance * distance;
     total_weight += particle.weight;
   }
@@ -453,8 +453,8 @@ bool ParticleFilter::is_pose_valid(const Particle& particle) const
 }
 
 double ParticleFilter::pose_distance(
-  const geometry_msgs::msg::Pose2D& pose1,
-  const geometry_msgs::msg::Pose2D& pose2) const
+  const roboime_msgs::msg::RobotPose2D& pose1,
+  const roboime_msgs::msg::RobotPose2D& pose2) const
 {
   double dx = pose1.x - pose2.x;
   double dy = pose1.y - pose2.y;
@@ -505,7 +505,7 @@ void ParticleFilter::initialize_default_field_landmarks()
   
   // 5. Cantos da área de penalty (8 landmarks - landmarks internos)
   // Área esquerda (4 pontos)
-  field_landmarks_[Landmark::AREA_CORNER] = {
+  field_landmarks_[Landmark::GOAL_AREA_CORNER] = {
     // Área esquerda
     Eigen::Vector2d(-2.85, -1.95),  // Inferior direito área esquerda
     Eigen::Vector2d(-2.85, 1.95),   // Superior direito área esquerda

@@ -5,6 +5,7 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/float64.hpp>
+#include <std_srvs/srv/empty.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -44,7 +45,7 @@ public:
     );
     
     // Publishers - Pose final fusionada
-    pose_pub_ = this->create_publisher<geometry_msgs::msg::Pose2D>(
+    pose_pub_ = this->create_publisher<roboime_msgs::msg::RobotPose2D>(
       "robot_pose", 10
     );
     
@@ -189,7 +190,7 @@ private:
   tf2_ros::TransformBroadcaster tf_broadcaster_;
   
   // Publishers principais
-  rclcpp::Publisher<geometry_msgs::msg::Pose2D>::SharedPtr pose_pub_;
+  rclcpp::Publisher<roboime_msgs::msg::RobotPose2D>::SharedPtr pose_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_cov_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr confidence_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;

@@ -4,6 +4,8 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/float64.hpp>
+#include <std_srvs/srv/empty.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -39,7 +41,7 @@ public:
     );
     
     // Publishers
-    pose_pub_ = this->create_publisher<geometry_msgs::msg::Pose2D>(
+    pose_pub_ = this->create_publisher<roboime_msgs::msg::RobotPose2D>(
       "localization/pose", 10
     );
     
@@ -118,7 +120,7 @@ private:
   tf2_ros::TransformBroadcaster tf_broadcaster_;
   
   // Publishers
-  rclcpp::Publisher<geometry_msgs::msg::Pose2D>::SharedPtr pose_pub_;
+  rclcpp::Publisher<roboime_msgs::msg::RobotPose2D>::SharedPtr pose_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_cov_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr confidence_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr convergence_progress_pub_;
@@ -164,7 +166,7 @@ private:
     
     if (previous_odometry_) {
       // Calcular delta da odometria
-      geometry_msgs::msg::Pose2D odometry_delta;
+      roboime_msgs::msg::RobotPose2D odometry_delta;
       calculate_odometry_delta(*previous_odometry_, *msg, odometry_delta);
       
       // Calcular dt
@@ -344,7 +346,7 @@ private:
     }
   }
   
-  void publish_tf_transform(const geometry_msgs::msg::Pose2D& pose)
+  void publish_tf_transform(const roboime_msgs::msg::RobotPose2D& pose)
   {
     geometry_msgs::msg::TransformStamped transform;
     
@@ -371,7 +373,7 @@ private:
   {
     RCLCPP_INFO(this->get_logger(), "Auto-inicializando localização na posição ótima do lado amigo (left)");
 
-    geometry_msgs::msg::Pose2D initial_pose;
+    roboime_msgs::msg::RobotPose2D initial_pose;
     // Força padrão: lado amigo = left (x negativo), frente para o centro
     initial_pose.x = -2.0;
     initial_pose.y = 0.0;
@@ -388,7 +390,7 @@ private:
   void calculate_odometry_delta(
     const nav_msgs::msg::Odometry& prev,
     const nav_msgs::msg::Odometry& curr,
-    geometry_msgs::msg::Pose2D& delta)
+    roboime_msgs::msg::RobotPose2D& delta)
   {
     // Delta em posição
     delta.x = curr.pose.pose.position.x - prev.pose.pose.position.x;

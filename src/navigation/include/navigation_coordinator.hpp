@@ -390,6 +390,16 @@ private:
     const std::chrono::steady_clock::time_point& timestamp,
     std::chrono::seconds max_age = std::chrono::seconds(5)
   ) const;
+
+  // Métodos adicionais (implementados no .cpp) que estavam faltando nas declarações
+  void evaluate_localization_mode();
+  void evaluate_localization_quality();
+  roboime_msgs::msg::RobotPose2D get_team_consensus_pose() const;
+  double calculate_fused_confidence() const;
+  double calculate_team_consensus_confidence() const;
+  void update_with_team_consensus();
+  void initialize_default_field_landmarks();
+  roboime_msgs::msg::RobotPose2D fuse_pose_estimates() const;
 };
 
 }  // namespace roboime_navigation
