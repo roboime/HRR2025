@@ -121,5 +121,6 @@ else
       $CUDA_MOUNT \
       $VIDEO_DEVICES \
       $JETSON_DEVICES \
+      --workdir /ros2_ws \
       hsl:orin-super
 fi

@@ -185,5 +185,6 @@ echo -e "${AZUL}============================================================${SE
 if [ "$#" -gt 0 ]; then
     exec "$@"
 else
-    exec /bin/bash -l
+    # Força um shell interativo que não encerra
+    exec /bin/bash -i
 fi
