@@ -2,15 +2,9 @@
 # Se seu host é r36.4.3, esta tag funciona; se for outra r36.4.x, ajuste a tag.
 FROM dustynv/l4t-pytorch:r36.4.0
 
-# Evitar prompts do apt
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Locale
-RUN --network=host apt-get update && apt-get install -y locales && \
+ENV DEBIAN_FRONTEND=noninteractive LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+RUN apt-get update && apt-get install -y locales && \
     locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
-ENV LANG=en_US.UTF-8 \
-    LC_ALL=en_US.UTF-8 \
-    TZ=Etc/UTC
 
 # ROS 2 Humble (Jammy)
 RUN --network=host apt-get update && apt-get install -y --no-install-recommends \
