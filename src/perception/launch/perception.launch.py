@@ -60,28 +60,28 @@ def generate_launch_description():
         if cam == 'usb':
             nodes.append(Node(
                 package='perception',
-                executable='usb_camera_node',
-                name='usb_camera_node',
+                executable='usb_camera',
+                name='usb_camera',
                 output='screen',
                 parameters=[{
-                    'device_id': 0,
+                    'device_path': '/dev/video0',
                     'width': 1280,
                     'height': 720,
-                    'fps': 30,
+                    'fps': 30.0,
                     'config_file': LaunchConfiguration('config_file')
                 }]
             ))
         else:
             nodes.append(Node(
                 package='perception',
-                executable='csi_camera_node',
-                name='csi_camera_node',
+                executable='csi_camera',
+                name='csi_camera',
                 output='screen',
                 parameters=[{
-                    'camera_id': 0,
+                    'device_id': 0,
                     'width': 1280,
                     'height': 720,
-                    'fps': 30,
+                    'framerate': 30.0,
                     'flip_method': 2,
                     'config_file': LaunchConfiguration('config_file')
                 }]
@@ -92,8 +92,8 @@ def generate_launch_description():
     # Nó YOLOv8 Unificado (principal)
     yolov8_detector_node = Node(
         package='perception',
-        executable='yolov8_unified_detector',
-        name='yolov8_unified_detector',
+        executable='yolov8_detector',
+        name='yolov8_detector',
         output='screen',
         parameters=[{
             'confidence_threshold': LaunchConfiguration('confidence_threshold'),
