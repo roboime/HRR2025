@@ -4,6 +4,27 @@ from glob import glob
 
 package_name = 'perception'
 
+def _gather_resources(package_name: str):
+    data = []
+    # Launch files
+    data.append((os.path.join('share', package_name, 'launch'), glob('launch/*.py')))
+    # Config files
+    data.append((os.path.join('share', package_name, 'config'), glob('config/*.yaml')))
+    # Resources (preserva subpastas)
+    for root, _, files in os.walk('resources'):
+        file_paths = [os.path.join(root, f) for f in files]
+        if file_paths:
+            data.append((os.path.join('share', package_name, root), file_paths))
+    # Scripts auxiliares (não executáveis do ROS)
+    script_py = glob('scripts/*.py')
+    if script_py:
+        data.append((os.path.join('share', package_name, 'scripts'), script_py))
+    script_sh = glob('scripts/*.sh')
+    if script_sh:
+        data.append((os.path.join('share', package_name, 'scripts'), script_sh))
+    return data
+
+
 setup(
     name=package_name,
     version='3.0.0',  # Versão 3.0 - Sistema YOLOv8 + Geometria 3D Avançada
@@ -12,16 +33,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        # Launch files
-        (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
-        # Config files
-        (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
-        # Resource files (models, calibration, etc.)
-        (os.path.join('share', package_name, 'resources'), glob('resources/**/*', recursive=True)),
-        # Scripts
-        (os.path.join('share', package_name, 'scripts'), glob('scripts/*.py')),
-        (os.path.join('share', package_name, 'scripts'), glob('scripts/*.sh')),
-    ],
+    ] + _gather_resources(package_name),
     install_requires=[
         'setuptools',
         # ROS2 Humble core packages
