@@ -6,6 +6,8 @@
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <std_srvs/srv/empty.hpp>
+#include <roboime_msgs/msg/robot_pose2_d.hpp>
+#include <roboime_msgs/srv/initialize_localization.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -415,8 +417,10 @@ private:
     tf2::fromMsg(prev.pose.pose.orientation, q_prev);
     tf2::fromMsg(curr.pose.pose.orientation, q_curr);
     
-    double prev_yaw = tf2::getYaw(q_prev);
-    double curr_yaw = tf2::getYaw(q_curr);
+    double prev_yaw, prev_pitch, prev_roll;
+    tf2::Matrix3x3(q_prev).getRPY(prev_roll, prev_pitch, prev_yaw);
+    double curr_yaw, curr_pitch, curr_roll;
+    tf2::Matrix3x3(q_curr).getRPY(curr_roll, curr_pitch, curr_yaw);
     
     delta.theta = normalize_angle(curr_yaw - prev_yaw);
   }

@@ -6,6 +6,8 @@
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <std_srvs/srv/empty.hpp>
+#include <roboime_msgs/msg/robot_pose2_d.hpp>
+#include <roboime_msgs/srv/initialize_localization.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -196,8 +198,10 @@ private:
           tf2::fromMsg(msg->pose.pose.orientation, q1);
           tf2::fromMsg(previous_odometry_->pose.pose.orientation, q2);
           
-          double yaw1 = tf2::getYaw(q1);
-          double yaw2 = tf2::getYaw(q2);
+          double roll1, pitch1, yaw1;
+          tf2::Matrix3x3(q1).getRPY(roll1, pitch1, yaw1);
+          double roll2, pitch2, yaw2;
+          tf2::Matrix3x3(q2).getRPY(roll2, pitch2, yaw2);
           delta.theta = normalize_angle(yaw1 - yaw2);
           
           ekf_->predict_with_odometry(delta, dt);
