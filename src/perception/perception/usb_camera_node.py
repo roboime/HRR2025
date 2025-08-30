@@ -321,9 +321,14 @@ class USB_C930_CameraNode(Node):
             camera_info.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             
             # Matriz de calibração básica (substituir por calibração real se disponível)
+            fx = float(camera_info.width)
+            fy = float(camera_info.width)  # placeholder simples; idealmente usar fx/fy reais
+            cx = float(camera_info.width) / 2.0
+            cy = float(camera_info.height) / 2.0
+
             camera_info.k = [
-                camera_info.width, 0.0, camera_info.width/2.0,
-                0.0, camera_info.width, camera_info.height/2.0,
+                fx, 0.0, cx,
+                0.0, fy, cy,
                 0.0, 0.0, 1.0
             ]
             
