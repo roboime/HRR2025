@@ -56,9 +56,9 @@ ENV NVIDIA_VISIBLE_DEVICES=all \
 RUN mkdir -p /ros2_ws/src
 WORKDIR /ros2_ws
 
-# Copie seus scripts (ajuste os caminhos locais conforme seu projeto)
-COPY docker/install_dependencies.sh /setup/install_dependencies.sh
-COPY docker/entrypoint.sh /entrypoint.sh
+# Copie seus scripts (assumindo que o build context é a pasta 'docker/')
+COPY install_dependencies.sh /setup/install_dependencies.sh
+COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /setup/install_dependencies.sh /entrypoint.sh
 
 # Fonte do ROS no shell interativo
