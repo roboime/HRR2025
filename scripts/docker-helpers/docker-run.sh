@@ -65,7 +65,7 @@ if [ "$CONTAINER_EXISTS" = "$CONTAINER_NAME" ]; then
     fi
 else
     # Verificar se a imagem existe
-    if ! docker images | grep -q "hsl.latest"; then
+    if ! docker images | grep -q "hsl:latest"; then
         print_error "Imagem hsl:latest não encontrada!"
         print_info "Execute primeiro: ./scripts/docker-helpers/docker-build.sh"
         exit 1
