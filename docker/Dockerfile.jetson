@@ -2,18 +2,17 @@
 # Se seu host é r36.4.3, esta tag funciona; se for outra r36.4.x, ajuste a tag.
 FROM dustynv/l4t-pytorch:r36.4.0
 
-# Evitar prompts do apt
+# Evitar prompts do apt e configurar locale
 ENV DEBIAN_FRONTEND=noninteractive
-
-# Locale
-RUN --network=host apt-get update && apt-get install -y locales && \
-    locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
+RUN apt-get update && apt-get install -y locales && \
+    locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8 && \
+    rm -rf /var/lib/apt/lists/*
 ENV LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8 \
     TZ=Etc/UTC
 
-# ROS 2 Humble (Jammy)
-RUN --network=host apt-get update && apt-get install -y --no-install-recommends \
+# ROS 2 Humble (Jammy) + utilitários e GStreamer com aceleração
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl gnupg2 lsb-release ca-certificates software-properties-common && \
     curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
       -o /usr/share/keyrings/ros-archive-keyring.gpg && \
@@ -29,22 +28,19 @@ RUN --network=host apt-get update && apt-get install -y --no-install-recommends 
       ros-humble-tf2 ros-humble-tf2-ros ros-humble-tf2-geometry-msgs \
       python3-colcon-common-extensions python3-rosdep \
       python3-pip python3-dev build-essential cmake \
-      # I/O de câmera e vídeo com aceleração
       v4l-utils gstreamer1.0-tools \
       gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
       gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
       libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-      # utilidades
       git wget && \
     rm -rf /var/lib/apt/lists/*
 
 # Inicializa rosdep (ignora erros se rodar offline)
-RUN --network=host rosdep init || true && rosdep update || true
+RUN rosdep init || true && rosdep update || true
 
 # Versões do ROS/CUDA/PyTorch no ambiente
 ENV ROS_DISTRO=humble \
     ROS_PYTHON_VERSION=3 \
-    # Em JP 6.2 o symlink /usr/local/cuda aponta para 12.6
     CUDA_HOME=/usr/local/cuda \
     PATH=/usr/local/cuda/bin:${PATH} \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/targets/aarch64-linux/lib:${LD_LIBRARY_PATH}
@@ -60,8 +56,7 @@ ENV NVIDIA_VISIBLE_DEVICES=all \
 RUN mkdir -p /ros2_ws/src
 WORKDIR /ros2_ws
 
-# Copie seus scripts (mantive os mesmos caminhos que você usa)
-# -> ajuste os caminhos locais conforme seu projeto
+# Copie seus scripts (ajuste os caminhos locais conforme seu projeto)
 COPY docker/install_dependencies.sh /setup/install_dependencies.sh
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /setup/install_dependencies.sh /entrypoint.sh
@@ -69,6 +64,6 @@ RUN chmod +x /setup/install_dependencies.sh /entrypoint.sh
 # Fonte do ROS no shell interativo
 RUN echo 'source /opt/ros/humble/setup.bash' >> /root/.bashrc
 
-# EntryPoint padrão (inicializa ambiente e fica no bash)
+# Entrypoint padrão (inicializa ambiente e fica no bash)
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/bin/bash"]
