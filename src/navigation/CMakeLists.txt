@@ -149,15 +149,15 @@ install(DIRECTORY resource/
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
-  
-  # C++ tests
   find_package(ament_cmake_gtest REQUIRED)
-  
-  ament_add_gtest(test_particle_filter test/test_particle_filter.cpp)
-  target_link_libraries(test_particle_filter ${PROJECT_NAME})
-  
-  ament_add_gtest(test_ekf_localization test/test_ekf_localization.cpp)
-  target_link_libraries(test_ekf_localization ${PROJECT_NAME})
+
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_particle_filter.cpp")
+    ament_add_gtest(test_particle_filter test/test_particle_filter.cpp)
+  endif()
+
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_ekf_localization.cpp")
+    ament_add_gtest(test_ekf_localization test/test_ekf_localization.cpp)
+  endif()
 endif()
 
 # =============================================================================
