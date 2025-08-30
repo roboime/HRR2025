@@ -27,6 +27,7 @@ from roboime_msgs.msg import (
     BallDetection, RobotDetection, GoalDetection, 
     FieldDetection, SimplifiedDetections, FieldLandmark
 )
+from vision_msgs.msg import BoundingBox2D
 
 class YOLOv8UnifiedDetector(Node):
     """
@@ -68,6 +69,9 @@ class YOLOv8UnifiedDetector(Node):
                 ('publish_debug', True),
                 ('max_detections', 300),
                 ('landmark_config_path', os.path.join(share_dir, 'resources', 'calibration', 'camera_info.yaml')),
+                ('imgsz', 640),                # tamanho da imagem para YOLO
+                ('turbo_mode', False),          # ativa modo turbo
+                ('turbo_imgsz', 512),           # 512 ou 384
             ]
         )
         # Carregar parâmetros em variáveis da instância
@@ -75,6 +79,9 @@ class YOLOv8UnifiedDetector(Node):
         self.iou_threshold = float(self.get_parameter('iou_threshold').value)
         self.publish_debug = bool(self.get_parameter('publish_debug').value)
         self.max_detections = int(self.get_parameter('max_detections').value)
+        self.imgsz = int(self.get_parameter('imgsz').value)
+        self.turbo_mode = bool(self.get_parameter('turbo_mode').value)
+        self.turbo_imgsz = int(self.get_parameter('turbo_imgsz').value)
         
         # Sistema de geometria 3D
         self._init_3d_geometry()
@@ -228,18 +235,20 @@ class YOLOv8UnifiedDetector(Node):
                 self.get_logger().warn('Para detecção correta, treine modelo com 7 classes de futebol robótico')
                 self.model = YOLO('yolov8n.pt')
             
-            # Configurar device
+            # Configurar device (evitar half para prevenir dtype mismatch)
             if torch.cuda.is_available() and self.device == 'cuda':
                 self.model.to('cuda')
-                # Ativar FP16 se configurado
                 try:
-                    if getattr(self, 'half_precision', True):
-                        # Converter backbone para half se suportado
-                        if hasattr(self.model, 'model'):
-                            self.model.model.half()
-                    self.get_logger().info('Modelo carregado na GPU (CUDA)')
-                except Exception as e:
-                    self.get_logger().warn(f'Não foi possível ativar half precision: {e}')
+                    if hasattr(self.model, 'fuse'):
+                        self.model.fuse()
+                except Exception:
+                    pass
+                # Melhorar desempenho em matmul (TF32 quando disponível)
+                try:
+                    torch.set_float32_matmul_precision('high')
+                except Exception:
+                    pass
+                self.get_logger().info('Modelo YOLOv8 carregado na GPU (CUDA) em float32')
             else:
                 self.get_logger().warn('Usando CPU - performance reduzida')
                 
@@ -297,16 +306,16 @@ class YOLOv8UnifiedDetector(Node):
         try:
             # Executar inferência com configurações otimizadas
             # Converter imagem para FP16/GPU se disponível para maximizar throughput
+            # Selecionar imgsz (turbo substitui)
+            imgsz = self.turbo_imgsz if self.turbo_mode else self.imgsz
             run_kwargs = dict(conf=self.confidence_threshold,
                               iou=self.iou_threshold,
                               max_det=self.max_detections,
+                              imgsz=imgsz,
                               verbose=False)
             if torch.cuda.is_available() and self.device == 'cuda' and getattr(self, 'half_precision', True):
-                try:
-                    # YOLOv8 aceita numpy BGR; conversão para half ocorre internamente via model.half()
-                    pass
-                except Exception:
-                    pass
+                # Desabilitar half explicitamente para evitar dtype mismatch
+                run_kwargs.pop('half', None)
             results = self.model(image, **run_kwargs)
             
             # Processar resultados
@@ -409,33 +418,42 @@ class YOLOv8UnifiedDetector(Node):
         
         # Bola (estratégia)
         if organized['balls']:
+            best_ball = max(organized['balls'], key=lambda x: x['confidence'])
             ball_msg = BallDetection()
             ball_msg.header = header
             ball_msg.detected = True
-            
-            # Usar a bola com maior confiança
-            best_ball = max(organized['balls'], key=lambda x: x['confidence'])
-            ball_msg.center_x = best_ball['center_x']
-            ball_msg.center_y = best_ball['center_y']
-            ball_msg.confidence = best_ball['confidence']
-            ball_msg.distance = best_ball['distance']
-            
+            ball_msg.confidence = float(best_ball.get('confidence', 0.0))
+            ball_msg.detection_method = "yolov8"
+            # BBox
+            bbox = BoundingBox2D()
+            bbox.center.x = float(best_ball['center_x'])
+            bbox.center.y = float(best_ball['center_y'])
+            bbox.size_x = float(best_ball['width'])
+            bbox.size_y = float(best_ball['height'])
+            ball_msg.bbox = bbox
+            # Distância/bearing (garantir float)
+            ball_msg.distance = float(best_ball.get('distance') or 0.0)
+            ball_msg.bearing = float(self._calculate_bearing(best_ball['center_x'], best_ball['center_y']))
             self.ball_pub.publish(ball_msg)
         
         # Robôs (estratégia - sem distinção de cor)
         if organized['robots']:
-            robot_msg = RobotDetection()
-            robot_msg.header = header
-            robot_msg.detected = True
-            robot_msg.num_robots = len(organized['robots'])
-            
-            for robot in organized['robots']:
-                robot_msg.center_x.append(robot['center_x'])
-                robot_msg.center_y.append(robot['center_y'])
-                robot_msg.confidence.append(robot['confidence'])
-                robot_msg.distance.append(robot['distance'])
-            
-            self.robots_pub.publish(robot_msg)
+            # Publicar cada robô como mensagem individual (compatível com definição)
+            for rob in organized['robots']:
+                robot_msg = RobotDetection()
+                robot_msg.header = header
+                robot_msg.detected = True
+                robot_msg.confidence = float(rob.get('confidence', 0.0))
+                robot_msg.detection_method = "yolov8"
+                robot_msg.robot_classification = "robot"
+                robot_msg.distance = float(rob.get('distance') or 0.0)
+                robot_msg.bearing = float(self._calculate_bearing(rob['center_x'], rob['center_y']))
+                # BBox
+                robot_msg.bbox.center.x = float(rob['center_x'])
+                robot_msg.bbox.center.y = float(rob['center_y'])
+                robot_msg.bbox.size_x = float(rob['width'])
+                robot_msg.bbox.size_y = float(rob['height'])
+                self.robots_pub.publish(robot_msg)
         
         # Landmarks para localização
         if organized['landmarks']:
@@ -459,13 +477,6 @@ class YOLOv8UnifiedDetector(Node):
                 goal_msg.header = header
                 goal_msg.detected = True
                 goal_msg.detection_method = "yolov8"
-                goal_msg.num_posts = len(goals)
-                
-                for g in goals:
-                    goal_msg.goal_center_x.append(g['center_x'])
-                    goal_msg.goal_center_y.append(g['center_y'])
-                    goal_msg.goal_confidence.append(g['confidence'])
-                
                 # Pareamento e cálculo do centro/orientação do gol quando possível
                 enriched = self._compute_goal_from_posts(goals)
                 if enriched is not None:
@@ -512,26 +523,33 @@ class YOLOv8UnifiedDetector(Node):
             ball_msg = BallDetection()
             ball_msg.header = header
             ball_msg.detected = True
-            ball_msg.center_x = best_ball['center_x']
-            ball_msg.center_y = best_ball['center_y']
-            ball_msg.confidence = best_ball['confidence']
-            ball_msg.distance = best_ball['distance']
+            ball_msg.confidence = float(best_ball.get('confidence', 0.0))
+            ball_msg.detection_method = "yolov8"
+            bbox = BoundingBox2D()
+            bbox.center.x = float(best_ball['center_x'])
+            bbox.center.y = float(best_ball['center_y'])
+            bbox.size_x = float(best_ball['width'])
+            bbox.size_y = float(best_ball['height'])
+            ball_msg.bbox = bbox
+            ball_msg.distance = float(best_ball.get('distance') or 0.0)
+            ball_msg.bearing = float(self._calculate_bearing(best_ball['center_x'], best_ball['center_y']))
             unified_msg.ball = ball_msg
         
         # Robôs (converter para array)
         robot_detections = []
-        for robot in organized['robots']:
+        for rob in organized['robots']:
             robot_msg = RobotDetection()
             robot_msg.header = header
             robot_msg.detected = True
-            robot_msg.confidence = robot['confidence']
+            robot_msg.confidence = float(rob.get('confidence', 0.0))
+            robot_msg.detection_method = "yolov8"
             robot_msg.robot_classification = "robot"
-            robot_msg.distance = robot['distance']
-            # Adicionar bbox
-            robot_msg.bbox.center.x = robot['center_x']
-            robot_msg.bbox.center.y = robot['center_y']
-            robot_msg.bbox.size_x = robot['width']
-            robot_msg.bbox.size_y = robot['height']
+            robot_msg.distance = float(rob.get('distance') or 0.0)
+            robot_msg.bearing = float(self._calculate_bearing(rob['center_x'], rob['center_y']))
+            robot_msg.bbox.center.x = float(rob['center_x'])
+            robot_msg.bbox.center.y = float(rob['center_y'])
+            robot_msg.bbox.size_x = float(rob['width'])
+            robot_msg.bbox.size_y = float(rob['height'])
             robot_detections.append(robot_msg)
         
         unified_msg.robots = robot_detections
@@ -552,8 +570,8 @@ class YOLOv8UnifiedDetector(Node):
             field_landmark.yolo_confidence = landmark['confidence']
             field_landmark.source_detection_method = "yolov8"
             field_landmark.observation_quality = min(landmark['confidence'], 1.0)
-            field_landmark.distance = landmark['distance']
-            field_landmark.bearing = self._calculate_bearing(landmark['center_x'], landmark['center_y'])
+            field_landmark.distance = float(landmark.get('distance') or 0.0)
+            field_landmark.bearing = float(self._calculate_bearing(landmark['center_x'], landmark['center_y']))
             
             # Posição relativa (estimada)
             field_landmark.position_relative.x = field_landmark.distance * np.cos(field_landmark.bearing)
@@ -609,10 +627,11 @@ class YOLOv8UnifiedDetector(Node):
                 goal_det = GoalDetection()
                 goal_det.header = header
                 goal_det.detected = True
-                goal_det.num_posts = 1
-                goal_det.goal_center_x = [landmark['center_x']]
-                goal_det.goal_center_y = [landmark['center_y']]
-                goal_det.goal_confidence = [landmark['confidence']]
+                goal_det.detection_method = "yolov8"
+                goal_det.confidence = float(landmark['confidence'])
+                # Preencher bbox com posição do poste
+                goal_det.bearing = float(self._calculate_bearing(landmark['center_x'], landmark['center_y']))
+                goal_det.distance = float(landmark.get('distance') or 0.0)
                 goal_detections.append(goal_det)
                 
             elif class_name == 'center_circle':

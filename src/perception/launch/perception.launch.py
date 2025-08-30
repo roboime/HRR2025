@@ -60,6 +60,24 @@ def generate_launch_description():
         default_value='0.6',
         description='Threshold de confiança para detecções (0.0-1.0)'
     )
+
+    imgsz_arg = DeclareLaunchArgument(
+        'imgsz',
+        default_value='640',
+        description='Tamanho de entrada da imagem para o YOLOv8'
+    )
+
+    turbo_mode_arg = DeclareLaunchArgument(
+        'turbo_mode',
+        default_value='false',
+        description='Ativa modo turbo (usa turbo_imgsz)'
+    )
+
+    turbo_imgsz_arg = DeclareLaunchArgument(
+        'turbo_imgsz',
+        default_value='512',
+        description='Tamanho de imagem quando turbo_mode=true (ex: 512 ou 384)'
+    )
     
     def create_camera_nodes(context):
         cam = LaunchConfiguration('camera_type').perform(context)
@@ -72,9 +90,11 @@ def generate_launch_description():
                 output='screen',
                 parameters=[{
                     'device_path': LaunchConfiguration('device_path'),
-                    'width': 1280,
-                    'height': 720,
+                    'width': 640,
+                    'height': 480,
                     'fps': 30.0,
+                    'fourcc': 'MJPG',
+                    'zoom': 100,
                     'config_file': LaunchConfiguration('config_file')
                 }]
             ))
@@ -108,7 +128,10 @@ def generate_launch_description():
             'device': 'cuda',
             'publish_debug': LaunchConfiguration('debug'),
             'iou_threshold': 0.45,
-            'max_detections': 300
+            'max_detections': 300,
+            'imgsz': LaunchConfiguration('imgsz'),
+            'turbo_mode': LaunchConfiguration('turbo_mode'),
+            'turbo_imgsz': LaunchConfiguration('turbo_imgsz')
         }],
         remappings=[
             ('camera/image_raw', '/camera/image_raw'),
@@ -143,6 +166,9 @@ def generate_launch_description():
         debug_arg,
         model_path_arg,
         confidence_arg,
+        imgsz_arg,
+        turbo_mode_arg,
+        turbo_imgsz_arg,
         
         # Log
         startup_log,

@@ -68,6 +68,7 @@ class USB_C930_CameraNode(Node):
                 ('camera_name', 'logitech_c930'),
                 ('display', False),
                 ('enable_cuda', True),
+                ('gpu_filter', False),               # Desabilita filtro GPU pesado por padrão
                 
                 # Resolução e FPS (C930 otimizada)
                 ('width', 1280),                    # C930 sweet spot
@@ -142,6 +143,12 @@ class USB_C930_CameraNode(Node):
             
             # Configurações específicas da C930
             self._configure_c930_settings()
+
+            # Garantir que o zoom = 100 (sem zoom) para evitar "imagem ampliada"
+            try:
+                self.cap.set(cv2.CAP_PROP_ZOOM, int(self.get_parameter('zoom').value))
+            except Exception:
+                pass
             
             # Verificar configurações aplicadas
             actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -328,8 +335,10 @@ class USB_C930_CameraNode(Node):
                     ret, frame = self.cap.read()
                     
                     if ret and frame is not None:
-                        # Aplicar aceleração GPU se habilitada
-                        if self.get_parameter('enable_cuda').value and cv2.cuda.getCudaEnabledDeviceCount() > 0:
+                        # Evitar filtro GPU pesado por padrão (custoso na C930)
+                        if self.get_parameter('gpu_filter').value and \
+                           self.get_parameter('enable_cuda').value and \
+                           cv2.cuda.getCudaEnabledDeviceCount() > 0:
                             frame = self._apply_gpu_processing(frame)
                         
                         # Atualizar frame atual thread-safe
