@@ -43,11 +43,13 @@ include_directories(
 # Install Python modules
 ament_python_install_package(${PROJECT_NAME})
 
-# Install Python scripts
-install(PROGRAMS
-  scripts/yoeo_visualizer_node.py
-  DESTINATION lib/${PROJECT_NAME}
-)
+# Install Python scripts (only if they exist)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/yoeo_visualizer_node.py")
+  install(PROGRAMS
+    scripts/yoeo_visualizer_node.py
+    DESTINATION lib/${PROJECT_NAME}
+  )
+endif()
 
 # Install launch files
 install(DIRECTORY
