@@ -185,6 +185,16 @@ echo -e "${AZUL}============================================================${SE
 if [ "$#" -gt 0 ]; then
     exec "$@"
 else
-    # Garante um shell interativo que permanece ativo
-    exec /bin/bash --login
+    # Força um shell que fica ativo - solução definitiva
+    echo -e "${VERDE}Shell interativo iniciado. Digite 'exit' para sair.${SEM_COR}"
+    cd /ros2_ws
+    export PS1="\[\033[1;32m\]root@hsl-container\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]# "
+    
+    # Garante que stdin está conectado e força modo interativo
+    if [ -t 0 ]; then
+        exec /bin/bash
+    else
+        # Fallback para quando stdin não é um TTY
+        exec /bin/bash < /dev/tty
+    fi
 fi
