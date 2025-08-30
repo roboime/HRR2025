@@ -64,8 +64,8 @@ if [ "$CONTAINER_EXISTS" = "$CONTAINER_NAME" ]; then
         docker exec -it $CONTAINER_NAME bash
     fi
 else
-    # Verificar se a imagem existe
-    if ! docker images | grep -q "hsl:latest"; then
+    # Verificar se a imagem existe com formato confiável
+    if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^hsl:latest$'; then
         print_error "Imagem hsl:latest não encontrada!"
         print_info "Execute primeiro: ./scripts/docker-helpers/docker-build.sh"
         exit 1
@@ -109,7 +109,6 @@ else
       --name $CONTAINER_NAME \
       $RUNTIME_ARGS \
       --privileged \
-      --entrypoint \
       --env="DISPLAY" \
       --env="QT_X11_NO_MITSHM=1" \
       -v /dev:/dev \
