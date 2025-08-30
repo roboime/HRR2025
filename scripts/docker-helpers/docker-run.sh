@@ -42,7 +42,8 @@ fi
 
 # Configuração específica para Jetson Orin Nano Super
 JETSON_DEVICES=""
-if [ -d "/dev/nvhost-ctrl" ] || [ -d "/dev/nvhost-gpu" ] || [ -d "/dev/nvmap" ]; then
+if [ -e "/dev/nvhost-ctrl" ] || [ -e "/dev/nvhost-gpu" ] || [ -e "/dev/nvmap" ] || \
+   ( [ -f "/proc/device-tree/model" ] && grep -qi "jetson" /proc/device-tree/model ); then
     print_info "Detectando dispositivos Jetson Orin..."
     JETSON_DEVICES="--device /dev/nvhost-ctrl --device /dev/nvhost-ctrl-gpu --device /dev/nvhost-prof-gpu --device /dev/nvmap --device /dev/nvhost-gpu --device /dev/nvhost-as-gpu --device /dev/nvhost-vic --device /dev/tegra_dc_ctrl"
     print_success "Dispositivos Jetson Orin configurados"
@@ -113,12 +114,5 @@ else
       $VIDEO_DEVICES \
       $JETSON_DEVICES \
       hsl:orin-super \
-      /bin/bash || {
-        print_error "Falha ao criar container!"
-        print_info "Verifique se:"
-        print_info "1. Docker está rodando"
-        print_info "2. NVIDIA Container Runtime está instalado"
-        print_info "3. Imagem hsl:orin-super foi construída"
-        exit 1
-      }
+      /bin/bash
 fi
