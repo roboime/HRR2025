@@ -36,12 +36,7 @@ def generate_launch_description():
     debug_arg = DeclareLaunchArgument(
         'debug',
         default_value='true',
-        description='Habilitar visualizações de debug'
-    )
-    show_debug_view_arg = DeclareLaunchArgument(
-        'show_debug_view',
-        default_value='true',
-        description='Abrir visualização da imagem de debug'
+        description='Habilitar visualizações de debug (publica /yolov8_detector/debug_image_3d)'
     )
     
     model_path_arg = DeclareLaunchArgument(
@@ -122,21 +117,13 @@ def generate_launch_description():
             'Modelo: ', LaunchConfiguration('model_path')
         ]
     )
-    debug_view = Node(
-        package='image_view',
-        executable='image_view',
-        name='debug_view',
-        output='screen',
-        remappings=[('image', '/yolov8_detector/debug_image_3d')],
-        condition=IfCondition(LaunchConfiguration('show_debug_view'))
-    )
+    # Viewer removido: quando debug=true, apenas publica a imagem em /yolov8_detector/debug_image_3d
     
     return LaunchDescription([
         # Argumentos
         camera_type_arg,
         config_file_arg,
         debug_arg,
-        show_debug_view_arg,
         model_path_arg,
         confidence_arg,
         
@@ -148,5 +135,4 @@ def generate_launch_description():
         
         # Detector principal
         yolov8_detector_node,
-        debug_view,
     ]) 

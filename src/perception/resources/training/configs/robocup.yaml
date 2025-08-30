@@ -9,13 +9,13 @@ test: test/images    # Imagens de teste (opcional)
 
 # Classes simplificadas (7 total)
 names:
-  0: ball          # Bola de futebol (estratégia)
-  1: robot         # Robôs sem distinção de cor (estratégia)
-  2: penalty_mark  # Marca do penalty (localização)
-  3: goal_post     # Postes de gol (localização)
-  4: center_circle # Círculo central (localização)
-  5: field_corner  # Cantos do campo (localização)
-  6: area_corner   # Cantos da área (localização)
+  0: area_corner   # Cantos da área (localização)
+  1: ball          # Bola de futebol (estratégia)
+  2: center_circle # Círculo central (localização)
+  3: field_corner  # Cantos do campo (localização)
+  4: goal_post     # Postes de gol (localização)
+  5: penalty_mark  # Marca do penalty (localização)
+  6: robot         # Robôs sem distinção de cor (estratégia)
 
 # Número de classes
 nc: 7

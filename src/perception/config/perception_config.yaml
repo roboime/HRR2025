@@ -84,18 +84,15 @@ yolov8:
   half_precision: true          # FP16 para melhor performance
   warmup_frames: 5              # Frames de aquecimento
   
-  # Classes detectadas (6 classes total)
+  # Classes detectadas (7 classes total) em ordem alfabética
   classes:
-    # Estratégia de jogo (2 classes)
-    ball: 0              # Bola de futebol
-    robot: 1             # Robôs (sem distinção de cor)
-    
-    # Landmarks para localização (5 classes)
-    penalty_mark: 2      # Marca do penalty
-    goal_post: 3         # Postes de gol (unificados)
-    center_circle: 4     # Círculo central
-    field_corner: 5      # Cantos do campo
-    area_corner: 6       # Cantos da área
+    area_corner: 0       # Cantos da área
+    ball: 1              # Bola de futebol
+    center_circle: 2     # Círculo central
+    field_corner: 3      # Cantos do campo
+    goal_post: 4         # Postes de gol (unificados)
+    penalty_mark: 5      # Marca do penalty
+    robot: 6             # Robôs (sem distinção de cor)
   
   # Configurações específicas por classe (com validação 3D)
   class_configs:

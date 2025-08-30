@@ -79,19 +79,25 @@ class YOLOv8UnifiedDetector(Node):
         # Sistema de geometria 3D
         self._init_3d_geometry()
         
-        # Mapeamento completo de classes para futebol robótico
-        self.class_names = {
-            # Estratégia de jogo
-            0: 'ball',           # Bola de futebol
-            1: 'robot',          # Robôs (sem distinção de cor)
-            
-            # Landmarks para localização
-            2: 'penalty_mark',   # Marca do penalty
-            3: 'goal_post',      # Postes de gol (unificados)
-            4: 'center_circle',  # Círculo central
-            5: 'field_corner',   # Cantos do campo
-            6: 'area_corner'     # Cantos da área
-        }
+        # Mapeamento de classes carregado do YAML (ordem alfabética) com fallback
+        try:
+            config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'perception_config.yaml')
+            with open(config_path, 'r') as f:
+                cfg = yaml.safe_load(f)
+            classes_cfg = cfg.get('yolov8', {}).get('classes', {})
+            # Inverter mapping nome->id para id->nome
+            self.class_names = {int(idx): name for name, idx in classes_cfg.items()}
+        except Exception:
+            # Fallback para ordem alfabética fixa
+            self.class_names = {
+                0: 'area_corner',
+                1: 'ball',
+                2: 'center_circle',
+                3: 'field_corner',
+                4: 'goal_post',
+                5: 'penalty_mark',
+                6: 'robot',
+            }
         
         # Inicializar modelo YOLOv8
         self._init_model()
@@ -566,7 +572,7 @@ class YOLOv8UnifiedDetector(Node):
             
             if class_name == 'penalty_mark':
                 field_landmark.type = FieldLandmark.PENALTY_MARK
-                field_landmark.yolo_class_id = 2
+                field_landmark.yolo_class_id = next((cid for cid, cname in self.class_names.items() if cname == 'penalty_mark'), 5)
                 field_landmark.localization_priority = FieldLandmark.PRIORITY_HIGH
                 field_landmark.description = "penalty_mark"
                 field_landmark.uniqueness_score = 0.9
@@ -575,7 +581,7 @@ class YOLOv8UnifiedDetector(Node):
                 
             elif class_name == 'goal_post':
                 field_landmark.type = FieldLandmark.GOAL_POST
-                field_landmark.yolo_class_id = 3
+                field_landmark.yolo_class_id = next((cid for cid, cname in self.class_names.items() if cname == 'goal_post'), 4)
                 field_landmark.localization_priority = FieldLandmark.PRIORITY_MEDIUM
                 field_landmark.description = "goal_post"
                 field_landmark.uniqueness_score = 0.8
@@ -593,7 +599,7 @@ class YOLOv8UnifiedDetector(Node):
                 
             elif class_name == 'center_circle':
                 field_landmark.type = FieldLandmark.CENTER_CIRCLE
-                field_landmark.yolo_class_id = 4
+                field_landmark.yolo_class_id = next((cid for cid, cname in self.class_names.items() if cname == 'center_circle'), 2)
                 field_landmark.localization_priority = FieldLandmark.PRIORITY_HIGH
                 field_landmark.description = "center_circle"
                 field_landmark.uniqueness_score = 1.0
@@ -602,7 +608,7 @@ class YOLOv8UnifiedDetector(Node):
                 
             elif class_name == 'field_corner':
                 field_landmark.type = FieldLandmark.FIELD_CORNER
-                field_landmark.yolo_class_id = 5
+                field_landmark.yolo_class_id = next((cid for cid, cname in self.class_names.items() if cname == 'field_corner'), 3)
                 field_landmark.localization_priority = FieldLandmark.PRIORITY_MEDIUM
                 field_landmark.description = "field_corner"
                 field_landmark.uniqueness_score = 0.5
@@ -610,7 +616,7 @@ class YOLOv8UnifiedDetector(Node):
                 
             elif class_name == 'area_corner':
                 field_landmark.type = FieldLandmark.AREA_CORNER
-                field_landmark.yolo_class_id = 6
+                field_landmark.yolo_class_id = next((cid for cid, cname in self.class_names.items() if cname == 'area_corner'), 0)
                 field_landmark.localization_priority = FieldLandmark.PRIORITY_MEDIUM  # Corrigido de PRIORITY_LOW
                 field_landmark.description = "area_corner"
                 field_landmark.uniqueness_score = 0.5  # Aumentado de 0.3 para 0.5
