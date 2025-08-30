@@ -115,7 +115,7 @@ if [ -e "/dev/nvhost-gpu" ] || [ -e "/dev/nvhost-as-gpu" ] || [ -e "/dev/nvhost-
 else
     if command -v tegrastats &> /dev/null; then
         verificar_disponibilidade "Status da GPU Jetson" \
-            "tegrastats --interval 1 --count 1" \
+            "timeout 2s tegrastats --interval 1000 | head -n 1" \
             "GPU Jetson não detectada ou drivers não instalados."
     else
         echo -e "  ${VERMELHO}GPU Jetson não detectada${SEM_COR}"
