@@ -136,6 +136,10 @@ class YOLOv8UnifiedDetector(Node):
         self.detection_count = 0
         self.processing_times = []
         self.publish_debug = True
+        # Contadores de performance
+        self.frame_count = 0
+        self.total_detections = 0
+        self.last_stats_time = time.time()
         
         self.get_logger().info('🎯 YOLOv8 Detector com Geometria 3D inicializado!')
         self.get_logger().info(f'📏 Sistema 3D: Altura câmera = {self.geometry_3d.geometry.height:.2f}m')
