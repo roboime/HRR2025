@@ -124,7 +124,7 @@ class YOLOv8UnifiedDetector(Node):
         self._load_perception_config()
         
         # Carregar landmarks conhecidos para correspondência
-        self._load_known_landmarks()
+        self._load_landmark_coordinates()
         
         # Estatísticas e debug
         self.detection_count = 0
@@ -173,15 +173,16 @@ class YOLOv8UnifiedDetector(Node):
             self.iou_threshold = yolo_config['iou_threshold']
             self.device = yolo_config.get('device', 'cuda')
             
-            # Parâmetros para pareamento de postes de gol
-            goal_config = config['detection_3d']['goal_post_pairing']
-            self.goal_pairing_enabled = goal_config['enable_pairing']
-            self.goal_width_tolerance = goal_config['goal_width_tolerance']
-            self.goal_center_y_tolerance = goal_config['goal_center_y_tolerance']
-            self.plate_x_tolerance = goal_config['plate_x_tolerance']
-            self.post_y_tolerance = goal_config['post_y_tolerance']
-            self.min_pair_confidence = goal_config['min_pair_confidence']
-            self.single_post_confidence_penalty = goal_config['single_post_confidence_penalty']
+            # Parâmetros para pareamento de postes de gol (compatível com geometry_3d/goal_post_pairing)
+            geom_cfg = config.get('geometry_3d', config.get('detection_3d', {}))
+            goal_config = geom_cfg.get('goal_post_pairing', {})
+            self.goal_pairing_enabled = bool(goal_config.get('enable_pairing', True))
+            self.goal_width_tolerance = float(goal_config.get('goal_width_tolerance', 0.5))
+            self.goal_center_y_tolerance = float(goal_config.get('goal_center_y_tolerance', 0.5))
+            self.plate_x_tolerance = float(goal_config.get('plate_x_tolerance', 0.5))
+            self.post_y_tolerance = float(goal_config.get('post_y_tolerance', 0.5))
+            self.min_pair_confidence = float(goal_config.get('min_pair_confidence', 0.4))
+            self.single_post_confidence_penalty = float(goal_config.get('single_post_confidence_penalty', 0.6))
             
             self.get_logger().info(f'✅ Configurações carregadas: confidence={self.confidence_threshold}, pareamento_postes={self.goal_pairing_enabled}')
             

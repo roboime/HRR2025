@@ -202,9 +202,7 @@ class USB_C930_CameraNode(Node):
             self.cap.set(cv2.CAP_PROP_PAN, self.get_parameter('pan').value)
             self.cap.set(cv2.CAP_PROP_TILT, self.get_parameter('tilt').value)
             
-            # Power line frequency (para evitar flicker)
-            power_freq = self.get_parameter('power_line_frequency').value
-            self.cap.set(cv2.CAP_PROP_FPS, power_freq)  # Pode variar por driver
+            # Power line frequency: não ajustar FPS aqui; tratar em backend específico se suportado
             
             # Backlight compensation
             backlight = self.get_parameter('backlight_compensation').value
