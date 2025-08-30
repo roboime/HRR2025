@@ -109,6 +109,7 @@ else
       --name $CONTAINER_NAME \
       $RUNTIME_ARGS \
       --privileged \
+      --entrypoint /entrypoint.sh \
       --env="DISPLAY" \
       --env="QT_X11_NO_MITSHM=1" \
       -v /dev:/dev \
