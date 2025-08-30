@@ -1,5 +1,4 @@
 #!/bin/bash
-# Não encerrar o container se algum check falhar
 set +e
 
 # Cores para melhorar a visualização
