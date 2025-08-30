@@ -42,7 +42,13 @@ fi
 
 # Configuração específica para Jetson Orin Nano Super
 JETSON_DEVICES=""
-if [ -d "/dev/nvhost-ctrl" ] || [ -d "/dev/nvhost-gpu" ] || [ -d "/dev/nvmap" ]; then
+IS_JETSON=0
+if [ -e "/dev/nvhost-ctrl" ] || [ -e "/dev/nvhost-gpu" ] || [ -e "/dev/nvmap" ] || \
+   ( [ -f "/proc/device-tree/model" ] && grep -qi "jetson" /proc/device-tree/model ); then
+    IS_JETSON=1
+fi
+
+if [ $IS_JETSON -eq 1 ]; then
     print_info "Detectando dispositivos Jetson Orin..."
     JETSON_DEVICES="--device /dev/nvhost-ctrl --device /dev/nvhost-ctrl-gpu --device /dev/nvhost-prof-gpu --device /dev/nvmap --device /dev/nvhost-gpu --device /dev/nvhost-as-gpu --device /dev/nvhost-vic --device /dev/tegra_dc_ctrl"
     print_success "Dispositivos Jetson Orin configurados"
@@ -71,7 +77,7 @@ else
     # Valida runtime NVIDIA (obrigatório na Jetson)
     HAS_NVIDIA_RUNTIME=0
     if docker info 2>/dev/null | grep -iq "Runtimes:.*nvidia"; then HAS_NVIDIA_RUNTIME=1; fi
-    if command -v nvidia-container-runtime >/dev/null 2>&1; then HAS_NVIDIA_RUNTIME=1; fi
+    if docker info 2>/dev/null | grep -iq "Default Runtime: nvidia"; then HAS_NVIDIA_RUNTIME=1; fi
     if [ $HAS_NVIDIA_RUNTIME -eq 0 ]; then
         print_error "Runtime NVIDIA ausente no Docker."
         print_info "Execute no host: sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker"
