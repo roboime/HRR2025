@@ -97,25 +97,6 @@ else
     CUDA_MOUNT=""
     [ -d "/usr/local/cuda-12.2" ] && CUDA_MOUNT="-v /usr/local/cuda-12.2:/usr/local/cuda-12.2"
 
-    # Montagens para TensorRT (libs) e Python dist-packages do host
-    TRT_LIBS_MOUNT=""
-    if ls /usr/lib/aarch64-linux-gnu/libnvinfer.so* >/dev/null 2>&1; then
-        print_success "TensorRT (libnvinfer) detectado no host. Montando libs no container (ro)."
-        TRT_LIBS_MOUNT="-v /usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu:ro"
-    else
-        print_info "TensorRT (libnvinfer) não detectado no host. Prosseguindo sem montagem."
-    fi
-
-    PY_DIST_MOUNT=""
-    if [ -d "/usr/lib/python3/dist-packages" ]; then
-        if ls /usr/lib/python3/dist-packages/tensorrt* >/dev/null 2>&1; then
-            print_success "Pacotes Python TensorRT detectados no host. Montando dist-packages (ro)."
-        else
-            print_info "Montando dist-packages do host (ro) para compatibilidade (pode não conter TensorRT)."
-        fi
-        PY_DIST_MOUNT="-v /usr/lib/python3/dist-packages:/usr/lib/python3/dist-packages:ro"
-    fi
-
     # Variáveis de ambiente úteis dentro do container
     CUDA_HOME_ENV="-e CUDA_HOME=/usr/local/cuda"
     LD_EXTRA="/usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu/tegra:/usr/lib/aarch64-linux-gnu/nvidia:/usr/local/cuda/lib64:/usr/local/cuda/targets/aarch64-linux/lib"
@@ -149,8 +130,6 @@ else
       -v $(pwd):/ros2_ws \
       $ARGUS_MOUNT \
       $CUDA_MOUNT \
-      $TRT_LIBS_MOUNT \
-      $PY_DIST_MOUNT \
       $CUDA_HOME_ENV \
       $LD_PATH_ENV \
       $VIDEO_DEVICES \

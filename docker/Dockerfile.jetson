@@ -8,6 +8,11 @@ RUN apt-get update && apt-get install -y locales && \
 ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 TZ=Etc/UTC
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
+# Habilitar repositório universe (necessário para alguns pacotes, ex: spdlog)
+RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common && \
+    add-apt-repository -y universe && \
+    rm -rf /var/lib/apt/lists/*
+
 # ROS 2 Humble (Jammy) + utilitários essenciais
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl gnupg2 lsb-release ca-certificates software-properties-common \
@@ -52,6 +57,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Headers do spdlog (para builds C++)
 RUN apt-get update && apt-get install -y --no-install-recommends libspdlog-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Forçar instalação do runtime do spdlog e atualizar cache do linker
+RUN apt-get update && apt-get install -y --no-install-recommends libspdlog1 && \
+    ldconfig -v | grep -i spdlog || true && \
+    rm -rf /var/lib/apt/lists/*
 
 # NÃO instalar opencv via pip aqui. A base já inclui o OpenCV do JetPack (otimizado).
 # Importante: evite instalar "libopencv-dev" do Ubuntu para não misturar com a versão da NVIDIA.
