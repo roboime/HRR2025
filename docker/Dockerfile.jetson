@@ -34,6 +34,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       git wget libspdlog1 \
  && rm -rf /var/lib/apt/lists/*
 
+# Garantir que libspdlog.so.1 esteja resolvível (algumas bases têm versão específica)
+RUN bash -lc 'set -e; LIB=/usr/lib/aarch64-linux-gnu; \
+    if [ ! -e "$LIB/libspdlog.so.1" ]; then \
+      CAND=$(ls "$LIB"/libspdlog.so.* 2>/dev/null | head -n1 || true); \
+      if [ -n "$CAND" ]; then \
+        ln -s "$(basename "$CAND")" "$LIB/libspdlog.so.1"; \
+      fi; \
+    fi; ldconfig'
+
 # Plugins GStreamer de runtime úteis (jpegdec, v4l2src, mpeg, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
       gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
