@@ -1,26 +1,22 @@
-# Base alinhada ao JetPack 6.2 (L4T r36.4.x, Ubuntu 22.04)
-# Se seu host é r36.4.3, esta tag funciona; se for outra r36.4.x, ajuste a tag.
-FROM dustynv/l4t-pytorch:r36.4.0
+# Base oficial JetPack SDK Container (JetPack 6.2 / L4T r36.4, Ubuntu 22.04)
+# Inclui CUDA 12.6, cuDNN, TensorRT, OpenCV otimizado, GStreamer, VPI, Multimedia
+FROM nvcr.io/nvidia/l4t-jetpack:r36.4.0
 
-# Evitar prompts do apt e configurar locale
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y locales && \
-    locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8 && \
-    rm -rf /var/lib/apt/lists/*
-ENV LANG=en_US.UTF-8 \
-    LC_ALL=en_US.UTF-8 \
-    TZ=Etc/UTC
+    locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
+ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 TZ=Etc/UTC
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# ROS 2 Humble (Jammy) + utilitários e GStreamer com aceleração
+# ROS 2 Humble (Jammy) + utilitários essenciais
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl gnupg2 lsb-release ca-certificates software-properties-common && \
-    curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
-      -o /usr/share/keyrings/ros-archive-keyring.gpg && \
-    bash -lc 'echo "deb [arch=arm64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+    curl gnupg2 lsb-release ca-certificates software-properties-common \
+ && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+      -o /usr/share/keyrings/ros-archive-keyring.gpg \
+ && bash -lc 'echo "deb [arch=arm64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
       http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" \
-      > /etc/apt/sources.list.d/ros2.list' && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
+      > /etc/apt/sources.list.d/ros2.list' \
+ && apt-get update && apt-get install -y --no-install-recommends \
       ros-humble-ros-base \
       ros-humble-vision-msgs \
       ros-humble-image-transport \
@@ -28,42 +24,48 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-humble-tf2 ros-humble-tf2-ros ros-humble-tf2-geometry-msgs \
       python3-colcon-common-extensions python3-rosdep \
       python3-pip python3-dev build-essential cmake \
+      # vídeo/câmera e GStreamer (a base já traz plugins, mas reforçamos ferramentas)
       v4l-utils gstreamer1.0-tools \
-      gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-      gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
       libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-      git wget && \
-    rm -rf /var/lib/apt/lists/*
+      # utilidades
+      git wget libspdlog1 \
+ && rm -rf /var/lib/apt/lists/*
 
-# Inicializa rosdep (ignora erros se rodar offline)
+# Plugins GStreamer de runtime úteis (jpegdec, v4l2src, mpeg, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+      gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+    && rm -rf /var/lib/apt/lists/*
+
+# Headers do spdlog (para builds C++)
+RUN apt-get update && apt-get install -y --no-install-recommends libspdlog-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# NÃO instalar opencv via pip aqui. A base já inclui o OpenCV do JetPack (otimizado).
+# Importante: evite instalar "libopencv-dev" do Ubuntu para não misturar com a versão da NVIDIA.
+
+# Inicializa rosdep (ignorar erros se offline)
 RUN rosdep init || true && rosdep update || true
 
-# Versões do ROS/CUDA/PyTorch no ambiente
-ENV ROS_DISTRO=humble \
-    ROS_PYTHON_VERSION=3 \
-    CUDA_HOME=/usr/local/cuda \
-    PATH=/usr/local/cuda/bin:${PATH} \
-    LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/targets/aarch64-linux/lib:${LD_LIBRARY_PATH}
+# CUDA (JP 6.2 aponta /usr/local/cuda -> 12.6)
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH=/usr/local/cuda/bin:${PATH}
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/targets/aarch64-linux/lib:${LD_LIBRARY_PATH}
 
-# Garantir acesso a dispositivos de vídeo e renderização
+# Habilitar runtime NVIDIA e acesso a vídeo/render/input
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=all
+ENV QT_X11_NO_MITSHM=1
 RUN usermod -a -G video,render,input root || true
 
-# Variáveis que ajudam no runtime NVIDIA dentro do container
-ENV NVIDIA_VISIBLE_DEVICES=all \
-    NVIDIA_DRIVER_CAPABILITIES=all
-
-# Workspace ROS 2
+# Workspace
 RUN mkdir -p /ros2_ws/src
 WORKDIR /ros2_ws
 
-# Copie seus scripts (assumindo que o build context é a pasta 'docker/')
-COPY install_dependencies.sh /setup/install_dependencies.sh
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /setup/install_dependencies.sh /entrypoint.sh
-
-# Fonte do ROS no shell interativo
+# Entrypoint simples
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 RUN echo 'source /opt/ros/humble/setup.bash' >> /root/.bashrc
 
-# Entrypoint padrão (inicializa ambiente e fica no bash)
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/bin/bash"]
