@@ -62,8 +62,8 @@ RUN usermod -a -G video,render,input root || true
 RUN mkdir -p /ros2_ws/src
 WORKDIR /ros2_ws
 
-# Entrypoint simples
-COPY docker/entrypoint.sh /entrypoint.sh
+# Entrypoint simples (caminho relativo ao diretório do Dockerfile)
+COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 RUN echo 'source /opt/ros/humble/setup.bash' >> /root/.bashrc
 
