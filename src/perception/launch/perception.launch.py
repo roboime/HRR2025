@@ -135,13 +135,19 @@ def generate_launch_description():
             'Modelo: ', LaunchConfiguration('model_path')
         ]
     )
-    # Abrir janela automaticamente quando debug=true
+    # Abrir janela automaticamente quando debug=true (tenta tópico relativo e absoluto)
     debug_view = Node(
         package='image_view',
         executable='image_view',
         name='debug_view',
         output='screen',
-        remappings=[('image', '/yolov8_detector/debug_image_3d')],
+        # Primeiro usa tópico relativo do pacote (mais robusto ao namespace),
+        # e remapeará internamente via parâmetros do image_view se necessário
+        # Mantemos remap explícito para o caminho absoluto legacy também
+        remappings=[
+            ('image', 'debug_image'),
+            ('image', '/yolov8_detector/debug_image_3d')
+        ],
         condition=IfCondition(LaunchConfiguration('debug'))
     )
     # Viewer removido: quando debug=true, apenas publica a imagem em /yolov8_detector/debug_image_3d
