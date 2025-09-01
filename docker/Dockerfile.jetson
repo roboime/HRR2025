@@ -51,9 +51,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gstreamer1.0-plugins-ugly gstreamer1.0-libav \
     && rm -rf /var/lib/apt/lists/*
 
-# TensorRT (garante metapacote disponível na imagem)
-RUN apt-get update && apt-get install -y --no-install-recommends nvidia-tensorrt \
-    && rm -rf /var/lib/apt/lists/*
+# TensorRT já está incluso na imagem base l4t-ml (JetPack 6.x)
 
 # Headers do spdlog (para builds C++)
 RUN apt-get update && apt-get install -y --no-install-recommends libspdlog-dev \
