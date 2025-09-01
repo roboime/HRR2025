@@ -1131,6 +1131,35 @@ class YOLOv8UnifiedDetector(Node):
         }
         self.get_logger().info("Using default RoboCup field coordinates")
 
+    def _extract_xytheta(self, pose) -> Tuple[float, float, float]:
+        """
+        Extrai (x, y, theta) de diferentes tipos de mensagens de pose de forma robusta.
+        Suporta `RobotPose2D`, `geometry_msgs/Pose2D` e estruturas aninhadas comuns.
+        """
+        try:
+            if pose is None:
+                return 0.0, 0.0, 0.0
+            # Tentativa direta (RobotPose2D ou geometry_msgs/Pose2D)
+            if hasattr(pose, 'x') and hasattr(pose, 'y') and hasattr(pose, 'theta'):
+                return float(pose.x), float(pose.y), float(pose.theta)
+            # Pose2D aninhada em campo `pose` (ex.: PoseWithCovarianceStamped -> pose.pose)
+            inner = getattr(pose, 'pose', None)
+            if inner is not None:
+                # geometry_msgs/Pose -> position (x,y) e orientação (theta ausente)
+                if hasattr(inner, 'pose'):
+                    geo = inner.pose
+                    if hasattr(geo, 'position'):
+                        x = float(getattr(geo.position, 'x', 0.0))
+                        y = float(getattr(geo.position, 'y', 0.0))
+                        # Sem theta disponível, assumir 0.0
+                        return x, y, 0.0
+                # geometry_msgs/Pose2D diretamente
+                if hasattr(inner, 'x') and hasattr(inner, 'y') and hasattr(inner, 'theta'):
+                    return float(inner.x), float(inner.y), float(inner.theta)
+        except Exception:
+            pass
+        return 0.0, 0.0, 0.0
+
     def _calculate_absolute_position_from_pose(self, field_landmark: FieldLandmark) -> Point:
         """
         Calcula posição absoluta do landmark baseado na pose atual do robô
@@ -1141,8 +1170,9 @@ class YOLOv8UnifiedDetector(Node):
             return Point()  # Retornar posição zero se não há pose
         
         # Transformação do frame do robô para frame do mapa
-        cos_theta = np.cos(self.current_robot_pose.theta)
-        sin_theta = np.sin(self.current_robot_pose.theta)
+        _, _, theta_r = self._extract_xytheta(self.current_robot_pose)
+        cos_theta = np.cos(theta_r)
+        sin_theta = np.sin(theta_r)
         
         # Matriz de rotação 2D
         R = np.array([[cos_theta, -sin_theta],
@@ -1153,8 +1183,8 @@ class YOLOv8UnifiedDetector(Node):
                                 field_landmark.position_relative.y])
         
         # Transformar para frame do mapa: p_global = p_robot + R * p_relative
-        pos_global = np.array([self.current_robot_pose.x, 
-                              self.current_robot_pose.y]) + R @ pos_relative
+        x_r, y_r, _ = self._extract_xytheta(self.current_robot_pose)
+        pos_global = np.array([x_r, y_r]) + R @ pos_relative
         
         # Retornar como Point
         point = Point()
@@ -1219,9 +1249,15 @@ class YOLOv8UnifiedDetector(Node):
         # Método 2: Correspondência com landmarks conhecidos (fallback)
         # Primeiro, calcular posição estimada usando transformação com pose zero
         temp_pose = RobotPose2D()
-        temp_pose.x = 0.0
-        temp_pose.y = 0.0  
-        temp_pose.theta = 0.0
+        try:
+            temp_pose.x = 0.0
+            temp_pose.y = 0.0
+            temp_pose.theta = 0.0
+        except Exception:
+            # Em alguns ambientes, o tipo pode vir como geometry_msgs/Pose2D
+            setattr(temp_pose, 'x', 0.0)
+            setattr(temp_pose, 'y', 0.0)
+            setattr(temp_pose, 'theta', 0.0)
         
         # Salvar pose atual e usar temporária
         original_pose = self.current_robot_pose
@@ -1358,12 +1394,17 @@ class YOLOv8UnifiedDetector(Node):
         # Normal (apontando para o campo): +90° (não usado mas disponível se necessário)
         # alpha = np.arctan2(v[1], v[0]) + np.pi/2.0
         side = "left" if c[0] < 0 else "right"
-        distance = np.hypot(c[0] - 0.0, c[1] - 0.0) if self.current_robot_pose is None else np.hypot(c[0]-self.current_robot_pose.x, c[1]-self.current_robot_pose.y)
+        if self.current_robot_pose is None:
+            distance = np.hypot(c[0], c[1])
+        else:
+            rx, ry, _ = self._extract_xytheta(self.current_robot_pose)
+            distance = np.hypot(c[0]-rx, c[1]-ry)
         # Bearing relativo ao robô
         if self.current_robot_pose is None:
             bearing = np.arctan2(c[1], c[0])
         else:
-            bearing = np.arctan2(c[1]-self.current_robot_pose.y, c[0]-self.current_robot_pose.x) - self.current_robot_pose.theta
+            rx, ry, rt = self._extract_xytheta(self.current_robot_pose)
+            bearing = np.arctan2(c[1]-ry, c[0]-rx) - rt
         # Ajuste de confiança por coerência geométrica usando tolerâncias configuradas
         width_consistency = max(0.0, 1.0 - abs(width_est-2.6)/self.goal_width_tolerance)
         center_y_consistency = max(0.0, 1.0 - abs(c[1])/self.goal_center_y_tolerance)
