@@ -63,7 +63,7 @@ class YOLOv8UnifiedDetector(Node):
         self.declare_parameters(
             namespace='',
             parameters=[
-                ('model_path', os.path.join(share_dir, 'resources', 'models', 'robocup_yolov8.pt')),
+                ('model_path', os.path.join(share_dir, 'resources', 'models', 'robocup_yolov8.engine')),
                 ('confidence_threshold', 0.6),
                 ('iou_threshold', 0.45),
                 ('publish_debug', True),
@@ -225,15 +225,20 @@ class YOLOv8UnifiedDetector(Node):
             if not isinstance(model_path, str):
                 model_path = ''
             
-            # Verificar se existe modelo customizado treinado para 7 classes
+            # Preferir TensorRT (.engine) e fazer fallback para .pt
             if model_path and os.path.exists(model_path):
-                self.get_logger().info(f'Carregando modelo simplificado: {model_path}')
+                self.get_logger().info(f'Carregando modelo (preferência TensorRT se .engine): {model_path}')
                 self.model = YOLO(model_path)
             else:
-                self.get_logger().warn(f'Modelo simplificado não encontrado: {model_path}')
-                self.get_logger().warn('Usando YOLOv8n padrão - REQUER RETREINAMENTO!')
-                self.get_logger().warn('Para detecção correta, treine modelo com 7 classes de futebol robótico')
-                self.model = YOLO('yolov8n.pt')
+                # Tentar automaticamente o .pt se .engine não existir
+                pt_path = model_path.replace('.engine', '.pt') if isinstance(model_path, str) else ''
+                if pt_path and os.path.exists(pt_path):
+                    self.get_logger().warn(f'.engine não encontrado. Usando .pt: {pt_path}')
+                    self.model = YOLO(pt_path)
+                else:
+                    self.get_logger().warn(f'Modelo não encontrado: {model_path}')
+                    self.get_logger().warn('Usando YOLOv8n padrão - REQUER RETREINAMENTO!')
+                    self.model = YOLO('yolov8n.pt')
             
             # Configurar device (evitar half para prevenir dtype mismatch)
             if torch.cuda.is_available() and self.device == 'cuda':

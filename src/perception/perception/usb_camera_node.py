@@ -57,6 +57,9 @@ class USB_C930_CameraNode(Node):
         self._start_capture()
         
         self.get_logger().info("✅ Nó USB Camera C930 inicializado com sucesso!")
+        # Estado da janela de display
+        self._display_window_created = False
+        self._display_window_name = 'USB Camera (C930)'
 
     def _declare_parameters(self):
         """Declara parâmetros específicos da Logitech C930"""
@@ -67,6 +70,8 @@ class USB_C930_CameraNode(Node):
                 ('device_path', '/dev/video0'),
                 ('camera_name', 'logitech_c930'),
                 ('display', False),
+                ('display_scale', 1.0),
+                ('prefer_gstreamer', True),
                 ('enable_cuda', True),
                 ('gpu_filter', False),               # Desabilita filtro GPU pesado por padrão
                 
@@ -167,6 +172,20 @@ class USB_C930_CameraNode(Node):
 
     def _open_capture_robust(self, device_path):
         """Tenta abrir a câmera usando várias estratégias de fallback."""
+        # 0) Preferir GStreamer com aceleração (nvjpegdec + nvvidconv) para MJPG
+        try:
+            if self.get_parameter('prefer_gstreamer').value:
+                gst = self._build_gstreamer_pipeline(device_path)
+                if gst:
+                    cap = cv2.VideoCapture(gst, cv2.CAP_GSTREAMER)
+                    if cap.isOpened():
+                        self.get_logger().info("📸 Abrindo câmera via GStreamer (nvjpegdec/nvvidconv)")
+                        return cap
+                    else:
+                        cap.release()
+        except Exception:
+            pass
+
         # 1) Tentar diretamente por caminho com V4L2
         try:
             cap = cv2.VideoCapture(device_path, cv2.CAP_V4L2)
@@ -221,7 +240,7 @@ class USB_C930_CameraNode(Node):
         except Exception:
             pass
 
-        # 4) Tentar GStreamer (útil quando MJPG está ativo)
+        # 4) Tentar GStreamer (fallback: jpegdec CPU)
         try:
             gst = None
             if isinstance(device_path, str):
@@ -247,6 +266,45 @@ class USB_C930_CameraNode(Node):
             pass
 
         return None
+
+    def _build_gstreamer_pipeline(self, device_path: str) -> Optional[str]:
+        """Constroi pipeline GStreamer otimizando MJPG com nvjpegdec/nvvidconv."""
+        try:
+            width = int(self.get_parameter('width').value)
+            height = int(self.get_parameter('height').value)
+            fps = int(float(self.get_parameter('fps').value))
+            fourcc_str = str(self.get_parameter('fourcc').value).upper()
+
+            # MJPG: usar nvjpegdec (hw) -> nvvidconv -> BGRx -> videoconvert -> BGR
+            if fourcc_str == 'MJPG':
+                pipeline = (
+                    f"v4l2src device={device_path} io-mode=2 ! "
+                    f"image/jpeg, width={width}, height={height}, framerate={fps}/1 ! "
+                    f"nvjpegdec ! nvvidconv ! video/x-raw, format=BGRx ! "
+                    f"videoconvert ! video/x-raw, format=BGR ! appsink drop=true sync=false max-buffers=1"
+                )
+                return pipeline
+
+            # YUYV: converter via v4l2src -> nvvidconv
+            if fourcc_str == 'YUYV':
+                pipeline = (
+                    f"v4l2src device={device_path} io-mode=2 ! "
+                    f"video/x-raw, format=YUY2, width={width}, height={height}, framerate={fps}/1 ! "
+                    f"nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! video/x-raw, format=BGR ! "
+                    f"appsink drop=true sync=false max-buffers=1"
+                )
+                return pipeline
+
+            # Fallback genérico (assume MJPG)
+            pipeline = (
+                f"v4l2src device={device_path} io-mode=2 ! "
+                f"image/jpeg, width={width}, height={height}, framerate={fps}/1 ! "
+                f"nvjpegdec ! nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! "
+                f"video/x-raw, format=BGR ! appsink drop=true sync=false max-buffers=1"
+            )
+            return pipeline
+        except Exception:
+            return None
 
     def _configure_c930_settings(self):
         """Configura parâmetros avançados específicos da Logitech C930"""
@@ -350,6 +408,34 @@ class USB_C930_CameraNode(Node):
                         
                         # Atualizar estatísticas
                         self._update_fps_stats()
+
+                        # Exibir janela opcionalmente
+                        if self.get_parameter('display').value:
+                            try:
+                                if not self._display_window_created:
+                                    cv2.namedWindow(self._display_window_name, cv2.WINDOW_NORMAL)
+                                    self._display_window_created = True
+                                scale = float(self.get_parameter('display_scale').value)
+                                display_frame = frame
+                                if scale > 0.0 and scale != 1.0:
+                                    new_w = max(1, int(display_frame.shape[1] * scale))
+                                    new_h = max(1, int(display_frame.shape[0] * scale))
+                                    display_frame = cv2.resize(display_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                                fps_text = f"FPS: {self.fps:.1f}"
+                                cv2.putText(display_frame, fps_text, (10, 30),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                                cv2.imshow(self._display_window_name, display_frame)
+                                key = cv2.waitKey(1) & 0xFF
+                                if key == ord('q') or key == 27:
+                                    self.get_logger().info("Saindo do display da câmera USB.")
+                                    self.set_parameters([rclpy.parameter.Parameter('display', rclpy.Parameter.Type.BOOL, False)])
+                                    try:
+                                        cv2.destroyWindow(self._display_window_name)
+                                    except Exception:
+                                        pass
+                            except Exception as e:
+                                self.get_logger().warn(f"Erro ao exibir janela USB: {e}. Desabilitando display.")
+                                self.set_parameters([rclpy.parameter.Parameter('display', rclpy.Parameter.Type.BOOL, False)])
                         
                     else:
                         self.get_logger().warn("⚠️  Falha na captura de frame da C930")
@@ -467,6 +553,12 @@ class USB_C930_CameraNode(Node):
         # Liberar câmera
         if self.cap:
             self.cap.release()
+        # Fechar janela
+        try:
+            if self._display_window_created:
+                cv2.destroyWindow(self._display_window_name)
+        except Exception:
+            pass
         
         super().destroy_node()
         self.get_logger().info("✅ Nó USB Camera C930 finalizado")

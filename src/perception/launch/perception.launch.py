@@ -50,7 +50,7 @@ def generate_launch_description():
         'model_path',
         default_value=PathJoinSubstitution([
             FindPackageShare('perception'),
-            'resources/models/robocup_yolov8.pt'
+            'resources/models/robocup_yolov8.engine'
         ]),
         description='Caminho para modelo YOLOv8 customizado'
     )
