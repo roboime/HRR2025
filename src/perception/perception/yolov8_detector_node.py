@@ -12,6 +12,8 @@ from cv_bridge import CvBridge
 import cv2
 import numpy as np
 import os
+# Desativar checagem de updates do Ultralytics ANTES do import
+os.environ.setdefault('ULTRALYTICS_NO_UPDATE_CHECK', 'True')
 from ultralytics import YOLO
 from ultralytics import settings as yolo_settings
 import torch
