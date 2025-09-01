@@ -229,33 +229,43 @@ class YOLOv8UnifiedDetector(Node):
             if model_path and os.path.exists(model_path):
                 self.get_logger().info(f'Carregando modelo (preferência TensorRT se .engine): {model_path}')
                 self.model = YOLO(model_path)
+                ext = os.path.splitext(model_path)[1].lower()
+                self._is_pytorch_model = (ext == '.pt')
             else:
                 # Tentar automaticamente o .pt se .engine não existir
                 pt_path = model_path.replace('.engine', '.pt') if isinstance(model_path, str) else ''
                 if pt_path and os.path.exists(pt_path):
                     self.get_logger().warn(f'.engine não encontrado. Usando .pt: {pt_path}')
                     self.model = YOLO(pt_path)
+                    self._is_pytorch_model = True
                 else:
                     self.get_logger().warn(f'Modelo não encontrado: {model_path}')
                     self.get_logger().warn('Usando YOLOv8n padrão - REQUER RETREINAMENTO!')
                     self.model = YOLO('yolov8n.pt')
+                    self._is_pytorch_model = True
             
             # Configurar device (evitar half para prevenir dtype mismatch)
-            if torch.cuda.is_available() and self.device == 'cuda':
-                self.model.to('cuda')
-                try:
-                    if hasattr(self.model, 'fuse'):
-                        self.model.fuse()
-                except Exception:
-                    pass
-                # Melhorar desempenho em matmul (TF32 quando disponível)
-                try:
-                    torch.set_float32_matmul_precision('high')
-                except Exception:
-                    pass
-                self.get_logger().info('Modelo YOLOv8 carregado na GPU (CUDA) em float32')
+            # Configurar dispositivo apenas para modelos PyTorch; exportados (TensorRT/ONNX) não suportam .to('cuda')
+            if self._is_pytorch_model:
+                if torch.cuda.is_available() and self.device == 'cuda':
+                    self.model.to('cuda')
+                    try:
+                        if hasattr(self.model, 'fuse'):
+                            self.model.fuse()
+                    except Exception:
+                        pass
+                    try:
+                        torch.set_float32_matmul_precision('high')
+                    except Exception:
+                        pass
+                    self.get_logger().info('Modelo YOLOv8 (PyTorch) na GPU (CUDA) em float32')
+                self._inference_device_arg = None  # não necessário passar em cada chamada
             else:
-                self.get_logger().warn('Usando CPU - performance reduzida')
+                # Modelo exportado (ex.: TensorRT .engine) -> definir device na chamada de inferência
+                if self.device == 'cuda' and torch.cuda.is_available():
+                    self._inference_device_arg = 0
+                else:
+                    self._inference_device_arg = 'cpu'
                 
         except Exception as e:
             self.get_logger().error(f'Erro ao carregar modelo YOLOv8: {e}')
@@ -321,7 +331,11 @@ class YOLOv8UnifiedDetector(Node):
             if torch.cuda.is_available() and self.device == 'cuda' and getattr(self, 'half_precision', True):
                 # Desabilitar half explicitamente para evitar dtype mismatch
                 run_kwargs.pop('half', None)
-            results = self.model(image, **run_kwargs)
+            # Para modelos exportados (TensorRT/ONNX), o Ultralytics requer 'device' no predict
+            if hasattr(self, '_inference_device_arg') and self._inference_device_arg is not None:
+                results = self.model.predict(image, device=self._inference_device_arg, **run_kwargs)
+            else:
+                results = self.model(image, **run_kwargs)
             
             # Processar resultados
             for result in results:
