@@ -67,17 +67,7 @@ def generate_launch_description():
         description='Tamanho de entrada da imagem para o YOLOv8'
     )
 
-    turbo_mode_arg = DeclareLaunchArgument(
-        'turbo_mode',
-        default_value='false',
-        description='Ativa modo turbo (usa turbo_imgsz)'
-    )
-
-    turbo_imgsz_arg = DeclareLaunchArgument(
-        'turbo_imgsz',
-        default_value='512',
-        description='Tamanho de imagem quando turbo_mode=true (ex: 512 ou 384)'
-    )
+    # turbo removido: TensorRT usará imgsz padrão (ex.: 640)
     
     def create_camera_nodes(context):
         cam = LaunchConfiguration('camera_type').perform(context)
@@ -129,9 +119,7 @@ def generate_launch_description():
             'publish_debug': LaunchConfiguration('debug'),
             'iou_threshold': 0.45,
             'max_detections': 300,
-            'imgsz': LaunchConfiguration('imgsz'),
-            'turbo_mode': LaunchConfiguration('turbo_mode'),
-            'turbo_imgsz': LaunchConfiguration('turbo_imgsz')
+            'imgsz': LaunchConfiguration('imgsz')
         }],
         remappings=[
             ('camera/image_raw', '/camera/image_raw'),
@@ -167,8 +155,6 @@ def generate_launch_description():
         model_path_arg,
         confidence_arg,
         imgsz_arg,
-        turbo_mode_arg,
-        turbo_imgsz_arg,
         
         # Log
         startup_log,

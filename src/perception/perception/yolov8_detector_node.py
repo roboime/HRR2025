@@ -91,9 +91,7 @@ class YOLOv8UnifiedDetector(Node):
                 ('publish_debug', True),
                 ('max_detections', 300),
                 ('landmark_config_path', os.path.join(share_dir, 'resources', 'calibration', 'camera_info.yaml')),
-                ('imgsz', 640),                # tamanho da imagem para YOLO
-                ('turbo_mode', False),          # ativa modo turbo
-                ('turbo_imgsz', 512),           # 512 ou 384
+                ('imgsz', 640),                # tamanho da imagem para YOLO/TensorRT
             ]
         )
         # Carregar parâmetros em variáveis da instância
@@ -102,8 +100,6 @@ class YOLOv8UnifiedDetector(Node):
         self.publish_debug = bool(self.get_parameter('publish_debug').value)
         self.max_detections = int(self.get_parameter('max_detections').value)
         self.imgsz = int(self.get_parameter('imgsz').value)
-        self.turbo_mode = bool(self.get_parameter('turbo_mode').value)
-        self.turbo_imgsz = int(self.get_parameter('turbo_imgsz').value)
         
         # Sistema de geometria 3D
         self._init_3d_geometry()
@@ -343,8 +339,7 @@ class YOLOv8UnifiedDetector(Node):
         try:
             # Executar inferência com configurações otimizadas
             # Converter imagem para FP16/GPU se disponível para maximizar throughput
-            # Selecionar imgsz (turbo substitui)
-            imgsz = self.turbo_imgsz if self.turbo_mode else self.imgsz
+            imgsz = self.imgsz
             run_kwargs = dict(conf=self.confidence_threshold,
                               iou=self.iou_threshold,
                               max_det=self.max_detections,
