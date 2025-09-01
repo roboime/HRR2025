@@ -1,6 +1,6 @@
-# Base oficial JetPack SDK Container (JetPack 6.2 / L4T r36.4, Ubuntu 22.04)
-# Inclui CUDA 12.6, cuDNN, TensorRT, OpenCV otimizado, GStreamer, VPI, Multimedia
-FROM nvcr.io/nvidia/l4t-jetpack:r36.4.0
+# -------------------- Base do sistema --------------------
+# Imagem ML com PyTorch/TensorFlow otimizados para L4T r36.4 (JetPack 6.2)
+FROM dustynv/l4t-ml:r36.4.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y locales && \
