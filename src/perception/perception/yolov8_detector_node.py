@@ -18,6 +18,7 @@ os.environ.setdefault('ULTRALYTICS_NO_UPDATE_CHECK', 'True')
 from ultralytics import YOLO
 from ultralytics import settings as yolo_settings
 import sys
+import traceback
 import torch
 import time
 import os
@@ -336,7 +337,7 @@ class YOLOv8UnifiedDetector(Node):
             self._update_stats(detections, time.time() - start_time)
                 
         except Exception as e:
-            self.get_logger().error(f'❌ Erro no processamento da imagem: {e}')
+            self.get_logger().error(f'❌ Erro no processamento da imagem: {e}\n{traceback.format_exc()}')
     
     def _detect_objects(self, image: np.ndarray) -> List[dict]:
         """Executa detecção YOLOv8 para 7 classes"""
@@ -910,19 +911,7 @@ class YOLOv8UnifiedDetector(Node):
                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
                     y_offset -= 15
             
-            # Adicionar informações da câmera no canto
-            if self.geometry_3d:
-                info_lines = [
-                    f'Camera Height: {self.geometry_3d.geometry.height:.2f}m',
-                    f'Tilt: {np.degrees(self.geometry_3d.geometry.tilt_angle):.1f}deg',
-                    f'Detections 3D: {len(objects_3d)}'
-                ]
-                
-                y_pos = 30
-                for line in info_lines:
-                    cv2.putText(debug_image, line, (10, y_pos), 
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                    y_pos += 25
+            # (Removido) Sobreposição de informações de câmera para evitar poluir a tela
             
             # Publicar imagem de debug
             debug_msg = self.bridge.cv2_to_imgmsg(debug_image, "bgr8")
@@ -1062,8 +1051,16 @@ class YOLOv8UnifiedDetector(Node):
 
     def robot_pose_callback(self, msg: RobotPose2D):
         """Atualiza a pose do robô a partir do tópico 'robot_pose'"""
-        self.current_robot_pose = msg
-        self.pose_timestamp = time.time()  # Pose2D não tem header, usar timestamp atual
+        # Normaliza para um objeto simples com .x, .y, .theta para evitar incompatibilidades
+        x, y, theta = self._extract_xytheta(msg)
+        class _SimplePose2D:
+            __slots__ = ('x', 'y', 'theta')
+            def __init__(self, x_v: float, y_v: float, t_v: float):
+                self.x = x_v
+                self.y = y_v
+                self.theta = t_v
+        self.current_robot_pose = _SimplePose2D(x, y, theta)
+        self.pose_timestamp = time.time()  # Usar timestamp atual
 
     def _load_landmark_coordinates(self):
         """Carrega as coordenadas conhecidas dos landmarks do arquivo YAML"""

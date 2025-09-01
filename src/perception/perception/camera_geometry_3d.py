@@ -401,22 +401,41 @@ class CameraGeometry3D:
             Point com coordenadas absolutas do campo
         """
         field_point = Point()
-        
+
+        def _extract_xytheta(pose_like) -> Tuple[float, float, float]:
+            try:
+                if pose_like is None:
+                    return 0.0, 0.0, 0.0
+                # Tentativa direta (Pose2D canônica)
+                if hasattr(pose_like, 'x') and hasattr(pose_like, 'y') and hasattr(pose_like, 'theta'):
+                    return float(pose_like.x), float(pose_like.y), float(pose_like.theta)
+                # Estruturas aninhadas comuns (pose.pose ou pose.position)
+                inner = getattr(pose_like, 'pose', None)
+                if inner is not None:
+                    if hasattr(inner, 'pose') and hasattr(inner.pose, 'position'):
+                        pos = inner.pose.position
+                        return float(getattr(pos, 'x', 0.0)), float(getattr(pos, 'y', 0.0)), 0.0
+                    if hasattr(inner, 'x') and hasattr(inner, 'y') and hasattr(inner, 'theta'):
+                        return float(inner.x), float(inner.y), float(inner.theta)
+            except Exception:
+                pass
+            return 0.0, 0.0, 0.0
+
         if robot_pose is not None:
-            # Transformar para coordenadas do campo usando pose do robô
-            cos_theta = np.cos(robot_pose.theta)
-            sin_theta = np.sin(robot_pose.theta)
-            
+            rx, ry, rt = _extract_xytheta(robot_pose)
+            cos_theta = np.cos(rt)
+            sin_theta = np.sin(rt)
+
             # Rotação + translação
-            field_point.x = robot_pose.x + (world_x * cos_theta - world_y * sin_theta)
-            field_point.y = robot_pose.y + (world_x * sin_theta + world_y * cos_theta)
+            field_point.x = rx + (world_x * cos_theta - world_y * sin_theta)
+            field_point.y = ry + (world_x * sin_theta + world_y * cos_theta)
             field_point.z = 0.0
         else:
             # Coordenadas relativas (sem pose do robô)
             field_point.x = world_x
-            field_point.y = world_y  
+            field_point.y = world_y
             field_point.z = 0.0
-        
+
         return field_point
     
     def get_camera_info_summary(self) -> Dict:
