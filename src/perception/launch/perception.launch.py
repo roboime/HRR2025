@@ -90,8 +90,8 @@ def generate_launch_description():
                 output='screen',
                 parameters=[{
                     'device_path': LaunchConfiguration('device_path'),
-                    'width': 640,
-                    'height': 480,
+                    'width': 320,
+                    'height': 240,
                     'fps': 30.0,
                     'fourcc': 'MJPG',
                     'zoom': 100,

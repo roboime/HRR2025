@@ -75,9 +75,9 @@ class USB_C930_CameraNode(Node):
                 ('enable_cuda', True),
                 ('gpu_filter', False),               # Desabilita filtro GPU pesado por padrão
                 
-                # Resolução e FPS (C930 otimizada)
-                ('width', 1280),                    # C930 sweet spot
-                ('height', 720),                    # 720p para performance
+                # Resolução e FPS (default baixo para menor carga)
+                ('width', 320),
+                ('height', 240),
                 ('fps', 30.0),                      # 30fps estável
                 
                 # Configurações avançadas C930

@@ -11,13 +11,25 @@ from geometry_msgs.msg import Pose2D, Point
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
+import os
 from ultralytics import YOLO
+from ultralytics import settings as yolo_settings
 import torch
 import time
 import os
 import yaml
 from typing import List, Tuple, Optional
 from ament_index_python.packages import get_package_share_directory
+
+# Desabilitar sync/telemetria e evitar auto-update de requirements do Ultralytics
+try:
+    yolo_settings.update({"sync": False})
+    from ultralytics.utils import checks as ychecks
+    def _no_requirements(*args, **kwargs):
+        return True
+    ychecks.check_requirements = _no_requirements
+except Exception:
+    pass
 
 # Importar módulo de geometria 3D
 from .camera_geometry_3d import CameraGeometry3D, Object3D
