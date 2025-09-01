@@ -7,7 +7,7 @@ Sistema completo de percepção usando YOLOv8 + Geometria 3D avançada
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from geometry_msgs.msg import Pose2D, Point
 from cv_bridge import CvBridge
 import cv2
@@ -139,8 +139,11 @@ class YOLOv8UnifiedDetector(Node):
         self.unified_pub = self.create_publisher(SimplifiedDetections, 'unified_detections', 10)
         
         # Publishers de debug: absoluto (compat) e relativo (mais robusto para remap)
-        self.debug_image_pub = self.create_publisher(Image, '/yolov8_detector/debug_image_3d', qos_profile_sensor_data)
-        self.debug_image_pub_rel = self.create_publisher(Image, 'debug_image_3d', qos_profile_sensor_data)
+        reliable_qos = QoSProfile(depth=10)
+        reliable_qos.reliability = ReliabilityPolicy.RELIABLE
+        reliable_qos.history = HistoryPolicy.KEEP_LAST
+        self.debug_image_pub = self.create_publisher(Image, '/yolov8_detector/debug_image_3d', reliable_qos)
+        self.debug_image_pub_rel = self.create_publisher(Image, 'debug_image_3d', reliable_qos)
         
         # Subscriber para imagens
         self.image_sub = self.create_subscription(
