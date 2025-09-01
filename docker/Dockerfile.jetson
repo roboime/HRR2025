@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends software-proper
 
 # ROS 2 Humble (Jammy) + utilitários essenciais
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl gnupg2 lsb-release ca-certificates software-properties-common \
+    curl gnupg2 lsb-release ca-certificates software-properties-common apt-transport-https \
  && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
       | gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg \
  && bash -lc 'echo "deb [arch=arm64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-pip python3-dev build-essential cmake \
       # vídeo/câmera e GStreamer (a base já traz plugins, mas reforçamos ferramentas)
       v4l-utils gstreamer1.0-tools \
-      libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+      libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev \
       # utilidades
       git wget libspdlog1 \
  && rm -rf /var/lib/apt/lists/*
@@ -52,6 +52,10 @@ RUN bash -lc 'set -e; LIB=/usr/lib/aarch64-linux-gnu; \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
       gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+    && rm -rf /var/lib/apt/lists/*
+
+# TensorRT (garante metapacote disponível na imagem)
+RUN apt-get update && apt-get install -y --no-install-recommends nvidia-tensorrt \
     && rm -rf /var/lib/apt/lists/*
 
 # Headers do spdlog (para builds C++)
