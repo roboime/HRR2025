@@ -16,6 +16,7 @@ import os
 os.environ.setdefault('ULTRALYTICS_NO_UPDATE_CHECK', 'True')
 from ultralytics import YOLO
 from ultralytics import settings as yolo_settings
+import sys
 import torch
 import time
 import os
@@ -30,6 +31,13 @@ try:
     def _no_requirements(*args, **kwargs):
         return True
     ychecks.check_requirements = _no_requirements
+    # Propagar para módulos que tenham copiado a referência
+    for _m in list(sys.modules.values()):
+        try:
+            if hasattr(_m, 'check_requirements'):
+                setattr(_m, 'check_requirements', _no_requirements)
+        except Exception:
+            pass
 except Exception:
     pass
 
