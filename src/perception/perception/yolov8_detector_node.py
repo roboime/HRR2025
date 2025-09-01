@@ -139,7 +139,6 @@ class YOLOv8UnifiedDetector(Node):
         
         # Publishers de debug: absoluto (compat) e relativo (mais robusto para remap)
         self.debug_image_pub = self.create_publisher(Image, '/yolov8_detector/debug_image_3d', 10)
-        self.debug_image_pub_rel = self.create_publisher(Image, 'debug_image', 10)
         
         # Subscriber para imagens
         self.image_sub = self.create_subscription(
@@ -923,10 +922,6 @@ class YOLOv8UnifiedDetector(Node):
             debug_msg = self.bridge.cv2_to_imgmsg(debug_image, "bgr8")
             debug_msg.header = header
             self.debug_image_pub.publish(debug_msg)
-            try:
-                self.debug_image_pub_rel.publish(debug_msg)
-            except Exception:
-                pass
             
         except Exception as e:
             self.get_logger().error(f'❌ Erro ao publicar imagem de debug 3D: {e}')
