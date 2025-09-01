@@ -122,32 +122,37 @@ class USB_C930_CameraNode(Node):
             if self.cap is None or not self.cap.isOpened():
                 raise RuntimeError(f"❌ Não foi possível abrir câmera em {device_path}")
             
-            # Configurar FOURCC (codec)
-            fourcc_str = self.get_parameter('fourcc').value
-            if fourcc_str == 'MJPG':
-                fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-            elif fourcc_str == 'YUYV':
-                fourcc = cv2.VideoWriter_fourcc(*'YUYV')
-            else:
-                fourcc = cv2.VideoWriter_fourcc(*'MJPG')  # Default
-            
-            self.cap.set(cv2.CAP_PROP_FOURCC, fourcc)
-            
-            # Configurar resolução e FPS
-            width = self.get_parameter('width').value
-            height = self.get_parameter('height').value
-            fps = self.get_parameter('fps').value
-            
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            self.cap.set(cv2.CAP_PROP_FPS, fps)
+            # Quando usando GStreamer pipeline, não aplicar propriedades V4L2 no decoder
+            width = int(self.get_parameter('width').value)
+            height = int(self.get_parameter('height').value)
+            fps = float(self.get_parameter('fps').value)
+            fourcc_str = str(self.get_parameter('fourcc').value)
+            if isinstance(self.cap, cv2.VideoCapture):
+                # Tentar apenas quando backend não for GStreamer
+                backend = self.cap.getBackendName() if hasattr(self.cap, 'getBackendName') else ''
+                if 'GSTREAMER' not in backend.upper():
+                    if fourcc_str == 'MJPG':
+                        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+                    elif fourcc_str == 'YUYV':
+                        fourcc = cv2.VideoWriter_fourcc(*'YUYV')
+                    else:
+                        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+                    self.cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                    self.cap.set(cv2.CAP_PROP_FPS, fps)
             
             # Buffer size para baixa latência
             buffer_size = self.get_parameter('buffer_size').value
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, buffer_size)
             
-            # Configurações específicas da C930
-            self._configure_c930_settings()
+            # Configurações específicas da C930 (apenas se backend não for GStreamer)
+            try:
+                backend = self.cap.getBackendName() if hasattr(self.cap, 'getBackendName') else ''
+                if 'GSTREAMER' not in backend.upper():
+                    self._configure_c930_settings()
+            except Exception:
+                pass
 
             # Garantir que o zoom = 100 (sem zoom) para evitar "imagem ampliada"
             try:
