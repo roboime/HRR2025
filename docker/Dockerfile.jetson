@@ -32,9 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-pip python3-dev build-essential cmake \
       # vídeo/câmera e GStreamer (a base já traz plugins, mas reforçamos ferramentas)
       v4l-utils gstreamer1.0-tools \
-      libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev \
       # utilidades
-      git wget libspdlog1 \
+      git wget \
  && rm -rf /var/lib/apt/lists/*
 
 # Garantir que libspdlog.so.1 esteja resolvível (algumas bases têm versão específica)
@@ -60,10 +59,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends nvidia-tensorrt
 RUN apt-get update && apt-get install -y --no-install-recommends libspdlog-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Forçar instalação do runtime do spdlog e atualizar cache do linker
-RUN apt-get update && apt-get install -y --no-install-recommends libspdlog1 && \
-    ldconfig -v | grep -i spdlog || true && \
-    rm -rf /var/lib/apt/lists/*
+# (Opcional) Cache do linker para garantir bibliotecas conhecidas
+RUN ldconfig -v | grep -i spdlog || true
 
 # NÃO instalar opencv via pip aqui. A base já inclui o OpenCV do JetPack (otimizado).
 # Importante: evite instalar "libopencv-dev" do Ubuntu para não misturar com a versão da NVIDIA.
@@ -88,6 +85,18 @@ RUN usermod -a -G video,render,input root || true
 # Workspace
 RUN mkdir -p /ros2_ws/src
 WORKDIR /ros2_ws
+
+# Adiciona cv_bridge (vision_opencv) via source e compila sem instalar libopencv-dev
+RUN bash -lc "set -e; \
+    source /opt/ros/$ROS_DISTRO/setup.bash; \
+    cd /ros2_ws/src; \
+    if [ ! -d vision_opencv ]; then \
+      git clone --depth=1 -b humble https://github.com/ros-perception/vision_opencv.git; \
+    fi; \
+    cd /ros2_ws; \
+    rosdep update || true; \
+    rosdep install --from-paths src --ignore-src -y --rosdistro $ROS_DISTRO --skip-keys=opencv --skip-keys=libopencv-dev --skip-keys=python3-opencv || true; \
+    colcon build --packages-select cv_bridge --cmake-args -DCMAKE_BUILD_TYPE=Release"
 
 # Entrypoint simples (caminho relativo ao contexto do build)
 COPY docker/entrypoint.sh /entrypoint.sh
