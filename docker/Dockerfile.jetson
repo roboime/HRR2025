@@ -86,6 +86,7 @@ WORKDIR /ros2_ws
 
 # Adiciona cv_bridge (vision_opencv) via source e compila sem instalar libopencv-dev
 RUN bash -lc "set -e; \
+    apt-get update && apt-get install -y --no-install-recommends libboost-dev libboost-python-dev; \
     source /opt/ros/$ROS_DISTRO/setup.bash; \
     cd /ros2_ws/src; \
     if [ ! -d vision_opencv ]; then \
