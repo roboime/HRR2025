@@ -8,7 +8,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from geometry_msgs.msg import Pose2D, Point
+from geometry_msgs.msg import Point
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
@@ -48,7 +48,8 @@ from .camera_geometry_3d import CameraGeometry3D, Object3D
 # Importar mensagens customizadas do roboime_msgs
 from roboime_msgs.msg import (
     BallDetection, RobotDetection, GoalDetection, 
-    FieldDetection, SimplifiedDetections, FieldLandmark
+    FieldDetection, SimplifiedDetections, FieldLandmark,
+    RobotPose2D,
 )
 from vision_msgs.msg import BoundingBox2D
 
@@ -152,7 +153,7 @@ class YOLOv8UnifiedDetector(Node):
         
         # Subscriber para pose do robô (necessário para cálculo de posição absoluta)
         self.robot_pose_sub = self.create_subscription(
-            Pose2D, 'robot_pose', self.robot_pose_callback, 10
+            RobotPose2D, 'robot_pose', self.robot_pose_callback, 10
         )
         
         # Estado atual do robô
@@ -1059,7 +1060,7 @@ class YOLOv8UnifiedDetector(Node):
         
         return bearing
 
-    def robot_pose_callback(self, msg: Pose2D):
+    def robot_pose_callback(self, msg: RobotPose2D):
         """Atualiza a pose do robô a partir do tópico 'robot_pose'"""
         self.current_robot_pose = msg
         self.pose_timestamp = time.time()  # Pose2D não tem header, usar timestamp atual
@@ -1217,7 +1218,7 @@ class YOLOv8UnifiedDetector(Node):
         
         # Método 2: Correspondência com landmarks conhecidos (fallback)
         # Primeiro, calcular posição estimada usando transformação com pose zero
-        temp_pose = Pose2D()
+        temp_pose = RobotPose2D()
         temp_pose.x = 0.0
         temp_pose.y = 0.0  
         temp_pose.theta = 0.0
