@@ -171,99 +171,25 @@ class USB_C930_CameraNode(Node):
             raise
 
     def _open_capture_robust(self, device_path):
-        """Tenta abrir a câmera usando várias estratégias de fallback."""
-        # 0) Preferir GStreamer com aceleração (nvjpegdec + nvvidconv) para MJPG
+        """Abre a câmera usando um pipeline único GStreamer acelerado (sem fallback)."""
         try:
-            if self.get_parameter('prefer_gstreamer').value:
-                for gst in self._candidate_gstreamer_pipelines(device_path):
-                    cap = cv2.VideoCapture(gst, cv2.CAP_GSTREAMER)
-                    if cap.isOpened():
-                        self.get_logger().info(f"📸 Abrindo câmera via GStreamer: {gst}")
-                        return cap
-                    else:
-                        cap.release()
-        except Exception:
-            pass
-
-        # 1) Tentar diretamente por caminho com V4L2
-        try:
-            cap = cv2.VideoCapture(device_path, cv2.CAP_V4L2)
+            width = int(self.get_parameter('width').value)
+            height = int(self.get_parameter('height').value)
+            fps = int(float(self.get_parameter('fps').value))
+            pipeline = (
+                f"v4l2src device={device_path} ! "
+                f"image/jpeg, width={width}, height={height}, framerate={fps}/1 ! "
+                f"nvv4l2decoder mjpeg=1 ! nvvidconv ! video/x-raw, format=BGRx ! "
+                f"videoconvert ! video/x-raw, format=BGR ! appsink drop=true sync=false max-buffers=1"
+            )
+            cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
             if cap.isOpened():
-                self.get_logger().info(f"📸 Abrindo câmera via V4L2 por caminho: {device_path}")
+                self.get_logger().info(f"📸 Abrindo câmera via GStreamer: {pipeline}")
                 return cap
             else:
                 cap.release()
         except Exception:
             pass
-
-        # 2) Se for do tipo /dev/videoX ou string numérica, tentar por índice com V4L2
-        try:
-            index = None
-            if isinstance(device_path, str):
-                if device_path.startswith('/dev/video') and device_path[len('/dev/video'):].isdigit():
-                    index = int(device_path[len('/dev/video'):])
-                elif device_path.isdigit():
-                    index = int(device_path)
-            elif isinstance(device_path, int):
-                index = int(device_path)
-
-            if index is not None:
-                cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
-                if cap.isOpened():
-                    self.get_logger().info(f"📸 Abrindo câmera via V4L2 por índice: {index}")
-                    return cap
-                else:
-                    cap.release()
-        except Exception:
-            pass
-
-        # 3) Tentar backend automático (CAP_ANY) com caminho/índice
-        try:
-            cap = cv2.VideoCapture(device_path)
-            if cap.isOpened():
-                self.get_logger().warn("⚠️ Usando backend automático (CAP_ANY) para abrir a câmera")
-                return cap
-            else:
-                cap.release()
-        except Exception:
-            pass
-
-        try:
-            if 'index' in locals() and index is not None:
-                cap = cv2.VideoCapture(index)
-                if cap.isOpened():
-                    self.get_logger().warn("⚠️ Usando backend automático por índice (CAP_ANY)")
-                    return cap
-                else:
-                    cap.release()
-        except Exception:
-            pass
-
-        # 4) Tentar GStreamer (fallback: jpegdec CPU)
-        try:
-            gst = None
-            if isinstance(device_path, str):
-                gst = (
-                    f"v4l2src device={device_path} ! image/jpeg, framerate=30/1 ! jpegdec ! videoconvert ! appsink"
-                )
-            if gst:
-                cap = cv2.VideoCapture(gst, cv2.CAP_GSTREAMER)
-                if cap.isOpened():
-                    self.get_logger().info("📸 Abrindo câmera via GStreamer (v4l2src/jpegdec)")
-                    return cap
-                else:
-                    cap.release()
-        except Exception:
-            pass
-
-        # 5) Listar dispositivos disponíveis para diagnosticar
-        try:
-            if os.path.isdir('/dev'):
-                devices = [f"/dev/{f}" for f in os.listdir('/dev') if f.startswith('video')]
-                self.get_logger().error(f"Dispositivos de vídeo disponíveis: {devices}")
-        except Exception:
-            pass
-
         return None
 
     def _candidate_gstreamer_pipelines(self, device_path: str) -> list:
