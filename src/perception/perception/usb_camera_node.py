@@ -175,11 +175,10 @@ class USB_C930_CameraNode(Node):
         # 0) Preferir GStreamer com aceleração (nvjpegdec + nvvidconv) para MJPG
         try:
             if self.get_parameter('prefer_gstreamer').value:
-                gst = self._build_gstreamer_pipeline(device_path)
-                if gst:
+                for gst in self._candidate_gstreamer_pipelines(device_path):
                     cap = cv2.VideoCapture(gst, cv2.CAP_GSTREAMER)
                     if cap.isOpened():
-                        self.get_logger().info("📸 Abrindo câmera via GStreamer (nvjpegdec/nvvidconv)")
+                        self.get_logger().info(f"📸 Abrindo câmera via GStreamer: {gst}")
                         return cap
                     else:
                         cap.release()
@@ -267,44 +266,62 @@ class USB_C930_CameraNode(Node):
 
         return None
 
-    def _build_gstreamer_pipeline(self, device_path: str) -> Optional[str]:
-        """Constroi pipeline GStreamer otimizando MJPG com nvjpegdec/nvvidconv."""
+    def _candidate_gstreamer_pipelines(self, device_path: str) -> list:
+        """Gera uma lista de pipelines GStreamer (GPU primeiro) a serem testados."""
         try:
             width = int(self.get_parameter('width').value)
             height = int(self.get_parameter('height').value)
             fps = int(float(self.get_parameter('fps').value))
             fourcc_str = str(self.get_parameter('fourcc').value).upper()
 
-            # MJPG: usar nvjpegdec (hw) -> nvvidconv -> BGRx -> videoconvert -> BGR
+            candidates = []
             if fourcc_str == 'MJPG':
-                pipeline = (
-                    f"v4l2src device={device_path} io-mode=2 ! "
+                # 1) nvjpegdec + nvvidconv com jpegparse e caps NVMM
+                candidates.append(
+                    f"v4l2src device={device_path} ! "
                     f"image/jpeg, width={width}, height={height}, framerate={fps}/1 ! "
-                    f"nvjpegdec ! nvvidconv ! video/x-raw, format=BGRx ! "
-                    f"videoconvert ! video/x-raw, format=BGR ! appsink drop=true sync=false max-buffers=1"
+                    f"jpegparse ! nvjpegdec ! video/x-raw(memory:NVMM), format=NV12 ! "
+                    f"nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! video/x-raw, format=BGR ! "
+                    f"appsink drop=true sync=false max-buffers=1"
                 )
-                return pipeline
-
-            # YUYV: converter via v4l2src -> nvvidconv
-            if fourcc_str == 'YUYV':
-                pipeline = (
-                    f"v4l2src device={device_path} io-mode=2 ! "
+                # 2) nvjpegdec + nvvidconv sem jpegparse
+                candidates.append(
+                    f"v4l2src device={device_path} ! "
+                    f"image/jpeg, width={width}, height={height}, framerate={fps}/1 ! "
+                    f"nvjpegdec ! video/x-raw(memory:NVMM), format=NV12 ! nvvidconv ! "
+                    f"video/x-raw, format=BGRx ! videoconvert ! video/x-raw, format=BGR ! "
+                    f"appsink drop=true sync=false max-buffers=1"
+                )
+                # 3) nvv4l2decoder (mjpeg=1) + nvvidconv
+                candidates.append(
+                    f"v4l2src device={device_path} ! "
+                    f"image/jpeg, width={width}, height={height}, framerate={fps}/1 ! "
+                    f"nvv4l2decoder mjpeg=1 ! nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! "
+                    f"video/x-raw, format=BGR ! appsink drop=true sync=false max-buffers=1"
+                )
+                # 4) Fallback CPU: jpegdec
+                candidates.append(
+                    f"v4l2src device={device_path} ! "
+                    f"image/jpeg, width={width}, height={height}, framerate={fps}/1 ! "
+                    f"jpegdec ! videoconvert ! video/x-raw, format=BGR ! appsink drop=true sync=false max-buffers=1"
+                )
+            else:
+                # YUYV: converter via videoconvert (ou nvvidconv)
+                candidates.append(
+                    f"v4l2src device={device_path} ! "
                     f"video/x-raw, format=YUY2, width={width}, height={height}, framerate={fps}/1 ! "
                     f"nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! video/x-raw, format=BGR ! "
                     f"appsink drop=true sync=false max-buffers=1"
                 )
-                return pipeline
+                candidates.append(
+                    f"v4l2src device={device_path} ! "
+                    f"video/x-raw, format=YUY2, width={width}, height={height}, framerate={fps}/1 ! "
+                    f"videoconvert ! video/x-raw, format=BGR ! appsink drop=true sync=false max-buffers=1"
+                )
 
-            # Fallback genérico (assume MJPG)
-            pipeline = (
-                f"v4l2src device={device_path} io-mode=2 ! "
-                f"image/jpeg, width={width}, height={height}, framerate={fps}/1 ! "
-                f"nvjpegdec ! nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! "
-                f"video/x-raw, format=BGR ! appsink drop=true sync=false max-buffers=1"
-            )
-            return pipeline
+            return candidates
         except Exception:
-            return None
+            return []
 
     def _configure_c930_settings(self):
         """Configura parâmetros avançados específicos da Logitech C930"""
