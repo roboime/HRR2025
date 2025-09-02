@@ -138,9 +138,19 @@ ament_python_install_package(navigation)
 # Install Python scripts
 install(PROGRAMS
   navigation/localization_node.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(PROGRAMS
   navigation/path_planner_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME path_planner_node
+)
+
+install(PROGRAMS
   navigation/navigation_manager.py
   DESTINATION lib/${PROJECT_NAME}
+  RENAME navigation_manager
 )
 
 # =============================================================================
