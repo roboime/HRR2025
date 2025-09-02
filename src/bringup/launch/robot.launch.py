@@ -52,7 +52,7 @@ def generate_launch_description():
     )
 
     behavior_node = Node(
-        package='behavior',
+        package='roboime_behavior',
         executable='behavior_node',
         name='soccer_behavior',
         output='screen',
