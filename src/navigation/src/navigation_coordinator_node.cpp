@@ -404,7 +404,12 @@ private:
     std::shared_ptr<roboime_msgs::srv::InitializeLocalization::Response> response)
   {
     try {
-      coordinator_->initialize(team_side_, request->initial_pose, false);
+      // Converter geometry_msgs::msg::Pose2D -> roboime_msgs::msg::RobotPose2D
+      roboime_msgs::msg::RobotPose2D init_pose;
+      init_pose.x = request->initial_pose.x;
+      init_pose.y = request->initial_pose.y;
+      init_pose.theta = request->initial_pose.theta;
+      coordinator_->initialize(team_side_, init_pose, false);
       is_initialized_ = true;
       
       response->success = true;

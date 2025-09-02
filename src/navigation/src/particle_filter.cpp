@@ -314,6 +314,64 @@ roboime_msgs::msg::RobotPose2D ParticleFilter::get_estimated_pose() const
   return pose;
 }
 
+geometry_msgs::msg::PoseWithCovarianceStamped ParticleFilter::get_pose_with_covariance() const
+{
+  geometry_msgs::msg::PoseWithCovarianceStamped msg;
+  // Timestamp e frame id ficarão a cargo do chamador
+  if (particles_.empty()) {
+    return msg;
+  }
+
+  // Média ponderada da pose
+  auto pose = get_estimated_pose();
+  msg.pose.pose.position.x = pose.x;
+  msg.pose.pose.position.y = pose.y;
+  msg.pose.pose.position.z = 0.0;
+
+  // Orientação em quaternion a partir de theta
+  tf2::Quaternion q;
+  q.setRPY(0.0, 0.0, pose.theta);
+  msg.pose.pose.orientation = tf2::toMsg(q);
+
+  // Covariância 3x3 embutida nos índices da 6x6
+  // Estimar variâncias a partir da dispersão das partículas
+  double total_weight = 0.0;
+  double mean_x = 0.0, mean_y = 0.0;
+  double mean_cos = 0.0, mean_sin = 0.0;
+  for (const auto& p : particles_) {
+    total_weight += p.weight;
+    mean_x += p.weight * p.x;
+    mean_y += p.weight * p.y;
+    mean_cos += p.weight * std::cos(p.theta);
+    mean_sin += p.weight * std::sin(p.theta);
+  }
+  if (total_weight <= 0.0) total_weight = 1.0;
+  mean_x /= total_weight;
+  mean_y /= total_weight;
+  double mean_theta = std::atan2(mean_sin / total_weight, mean_cos / total_weight);
+
+  double var_x = 0.0, var_y = 0.0, var_theta = 0.0;
+  for (const auto& p : particles_) {
+    double dx = p.x - mean_x;
+    double dy = p.y - mean_y;
+    double dth = std::atan2(std::sin(p.theta - mean_theta), std::cos(p.theta - mean_theta));
+    var_x += p.weight * dx * dx;
+    var_y += p.weight * dy * dy;
+    var_theta += p.weight * dth * dth;
+  }
+  var_x /= total_weight;
+  var_y /= total_weight;
+  var_theta /= total_weight;
+
+  // Preencher matriz 6x6 nos campos relevantes: xx, yy e yaw
+  for (int i = 0; i < 36; ++i) msg.pose.covariance[i] = 0.0;
+  msg.pose.covariance[0] = var_x;    // cov(xx)
+  msg.pose.covariance[7] = var_y;    // cov(yy)
+  msg.pose.covariance[35] = var_theta; // cov(yaw,yaw)
+
+  return msg;
+}
+
 double ParticleFilter::get_localization_confidence() const
 {
   if (particles_.empty()) {

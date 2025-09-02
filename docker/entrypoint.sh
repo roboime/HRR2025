@@ -37,20 +37,6 @@ verificar_disponibilidade() {
     eval $comando || echo -e "  ${VERMELHO}$mensagem_erro${SEM_COR}"
 }
 
-# Função para verificar status de bibliotecas Python
-verificar_biblioteca() {
-    local nome=$1
-    local modulo=$2
-    
-    echo -en "${CIANO}$nome:${SEM_COR} "
-    if python3 -c "import $modulo; print('OK (' + $modulo.__version__ + ')')" 2>/dev/null; then
-        return 0
-    else
-        echo -e "${VERMELHO}Não instalado${SEM_COR}"
-        return 1
-    fi
-}
-
 # Configuração do ambiente ROS2
 source /opt/ros/$ROS_DISTRO/setup.bash
 
@@ -114,36 +100,15 @@ if [ -e "/dev/nvhost-gpu" ] || [ -e "/dev/nvhost-as-gpu" ] || [ -e "/dev/nvhost-
     ls -1 /dev/nvhost* /dev/nvmap 2>/dev/null | sed 's/^/    - /'
 else
     if command -v tegrastats &> /dev/null; then
-        verificar_disponibilidade "Status da GPU Jetson" \
+        verificar_disponibilidade "Status da GPU (tegrastats)" \
             "timeout 2s tegrastats --interval 1000 | head -n 1" \
-            "GPU Jetson não detectada ou drivers não instalados."
+            "GPU não detectada ou drivers não instalados."
     else
-        echo -e "  ${VERMELHO}GPU Jetson não detectada${SEM_COR}"
+        echo -e "  ${VERMELHO}GPU NVIDIA não detectada${SEM_COR}"
     fi
 fi
 
-# Verifica TensorFlow e status da GPU
-echo ""
-echo -e "${CIANO}Status do TensorFlow:${SEM_COR}"
-python3 -c "
-import sys
-try:
-    import tensorflow as tf
-    print('  ${VERDE}✓${SEM_COR} TensorFlow ' + tf.__version__)
-    print('  ${VERDE}✓${SEM_COR} Suporte CUDA: ' + ('Sim' if tf.test.is_built_with_cuda() else 'Não'))
-    gpus = tf.config.list_physical_devices('GPU')
-    if gpus:
-        for gpu in gpus:
-            print('  ${VERDE}✓${SEM_COR} GPU disponível: ' + gpu.name)
-    else:
-        print('  ${AMARELO}!${SEM_COR} Nenhuma GPU detectada pelo TensorFlow')
-except ImportError:
-    print('  ${VERMELHO}✗${SEM_COR} TensorFlow não instalado')
-except Exception as e:
-    print('  ${VERMELHO}✗${SEM_COR} Erro: ' + str(e))
-" 2>/dev/null || echo -e "  ${VERMELHO}✗${SEM_COR} Erro ao verificar TensorFlow"
-
-# Verifica dispositivos de câmera
+# Verificação de dispositivos de câmera
 echo ""
 verificar_disponibilidade "Câmeras disponíveis" \
     "ls -la /dev/video* 2>/dev/null" \
