@@ -115,9 +115,20 @@ void ParticleFilter::predict(
   const sensor_msgs::msg::Imu& imu_data,
   double dt)
 {
+  // Estimar delta de orientação adicional a partir do IMU (se disponível)
+  double imu_dtheta = 0.0;
+  if (dt > 0.0) {
+    // Preferir angular velocity em z (rad/s)
+    imu_dtheta = imu_data.angular_velocity.z * dt;
+  }
+
+  // Delta combinado em orientação
+  roboime_msgs::msg::RobotPose2D combined_delta = odometry_delta;
+  combined_delta.theta = normalize_angle(odometry_delta.theta + imu_dtheta);
+
   // Aplicar modelo de movimento a cada partícula
   for (auto& particle : particles_) {
-    apply_motion_model(particle, odometry_delta, dt);
+    apply_motion_model(particle, combined_delta, dt);
   }
   
   // Atualizar histórico
@@ -133,9 +144,10 @@ void ParticleFilter::apply_motion_model(
   double dt)
 {
   // Modelo de movimento com ruído
-  double noisy_dx = odometry_delta.x + add_gaussian_noise(0.0, motion_noise_std_[0]);
-  double noisy_dy = odometry_delta.y + add_gaussian_noise(0.0, motion_noise_std_[1]);
-  double noisy_dtheta = odometry_delta.theta + add_gaussian_noise(0.0, motion_noise_std_[2]);
+  double scale = dt > 0.0 ? std::sqrt(dt) : 1.0;
+  double noisy_dx = odometry_delta.x + add_gaussian_noise(0.0, motion_noise_std_[0] * scale);
+  double noisy_dy = odometry_delta.y + add_gaussian_noise(0.0, motion_noise_std_[1] * scale);
+  double noisy_dtheta = odometry_delta.theta + add_gaussian_noise(0.0, motion_noise_std_[2] * scale);
   
   // Aplicar movimento no referencial local da partícula
   double cos_theta = std::cos(particle.theta);

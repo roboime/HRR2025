@@ -200,7 +200,6 @@ double NavigationCoordinator::get_localization_confidence() const
 void NavigationCoordinator::set_localization_mode(LocalizationMode new_mode)
 {
   if (new_mode != current_mode_) {
-    LocalizationMode old_mode = current_mode_;
     current_mode_ = new_mode;
     
     // Log da mudança
