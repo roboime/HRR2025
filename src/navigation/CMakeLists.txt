@@ -37,14 +37,40 @@ include_directories(
 )
 
 # =============================================================================
+# C++ CORE LIBRARY
+# =============================================================================
+
+add_library(navigation_core STATIC
+  src/particle_filter.cpp
+  src/ekf_localization.cpp
+)
+
+ament_target_dependencies(navigation_core
+  rclcpp
+  std_msgs
+  std_srvs
+  geometry_msgs
+  nav_msgs
+  sensor_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  tf2_eigen
+  roboime_msgs
+)
+
+target_include_directories(navigation_core PUBLIC include)
+
+# =============================================================================
 # C++ EXECUTABLES - Algoritmos de Alta Performance
 # =============================================================================
 
 # Particle Filter SLAM Node
 add_executable(particle_filter_node
   src/particle_filter_node.cpp
-  src/particle_filter.cpp
 )
+
+target_link_libraries(particle_filter_node navigation_core)
 
 ament_target_dependencies(particle_filter_node
   rclcpp
@@ -63,8 +89,9 @@ ament_target_dependencies(particle_filter_node
 # EKF Localization Node
 add_executable(ekf_localization_node
   src/ekf_localization_node.cpp
-  src/ekf_localization.cpp
 )
+
+target_link_libraries(ekf_localization_node navigation_core)
 
 ament_target_dependencies(ekf_localization_node
   rclcpp
@@ -85,6 +112,8 @@ add_executable(navigation_coordinator_node
   src/navigation_coordinator_node.cpp
   src/navigation_coordinator.cpp
 )
+
+target_link_libraries(navigation_coordinator_node navigation_core)
 
 ament_target_dependencies(navigation_coordinator_node
   rclcpp
