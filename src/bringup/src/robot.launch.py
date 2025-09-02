@@ -118,20 +118,23 @@ def generate_launch_description():
         }]
     )
     
-    # 🧭 Sistema de Navegação (quando implementado)
-    # navigation_launch = IncludeLaunchDescription(
-    #     PathJoinSubstitution([
-    #         FindPackageShare('navigation'),
-    #         'launch',
-    #         'navigation.launch.py'
-    #     ]),
-    #     launch_arguments={
-    #         'field_length': '9.0',
-    #         'field_width': '6.0',
-    #         'enable_localization': 'true',
-    #         'debug': debug
-    #     }.items()
-    # )
+    # 🧭 Sistema de Navegação (C++) + Planejamento (Python)
+    navigation_launch = IncludeLaunchDescription(
+        PathJoinSubstitution([
+            FindPackageShare('roboime_navigation'),
+            'launch',
+            'navigation.launch.py'
+        ]),
+        launch_arguments={
+            'field_length': '9.0',
+            'field_width': '6.0',
+            'robot_id': player_number,
+            'team_side': 'left',
+            'use_global_localization': 'true',
+            'enable_team_communication': 'false',
+            'debug_mode': debug
+        }.items()
+    )
     
     # Log de inicialização
     startup_log = LogInfo(
@@ -160,7 +163,7 @@ def generate_launch_description():
         
         # Sistemas principais
         perception_launch,      # Sistema de percepção YOLOv8 unificado
-        # navigation_launch,    # Sistema de navegação (comentado até implementação)
+        navigation_launch,      # Sistema de navegação completo
         
         # Nós individuais
         behavior_node,         # Comportamento de futebol
