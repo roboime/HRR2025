@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>bringup</name>
+  <version>0.1.0</version>
+  <description>RoboIME HSL2025 - Launch unificado do robô</description>
+
+  <maintainer email="team@roboime.org">RoboIME Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>perception</exec_depend>
+  <exec_depend>roboime_navigation</exec_depend>
+  <exec_depend>motion</exec_depend>
+  <exec_depend>behavior</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
+
+
