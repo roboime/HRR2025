@@ -198,7 +198,7 @@ def generate_launch_description():
     # Planejador de trajetória
     path_planner_node = Node(
         package='roboime_navigation',
-        executable='path_planner_node.py',
+        executable='path_planner_node',
         name='path_planner_node',
         output='screen',
         parameters=[
@@ -235,7 +235,7 @@ def generate_launch_description():
     # Coordenador principal (interface com comportamento)
     navigation_manager_node = Node(
         package='roboime_navigation',
-        executable='navigation_manager.py',
+        executable='navigation_manager',
         name='navigation_manager_node',
         output='screen',
         parameters=[
