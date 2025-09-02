@@ -93,12 +93,12 @@ public:
     );
     
     // Subscribers - Poses individuais dos algoritmos (para comparação)
-    mcl_pose_sub_ = this->create_subscription<geometry_msgs::msg::Pose2D>(
+    mcl_pose_sub_ = this->create_subscription<roboime_msgs::msg::RobotPose2D>(
       "particle_filter/pose", 10,
       std::bind(&NavigationCoordinatorNode::mcl_pose_callback, this, std::placeholders::_1)
     );
     
-    ekf_pose_sub_ = this->create_subscription<geometry_msgs::msg::Pose2D>(
+    ekf_pose_sub_ = this->create_subscription<roboime_msgs::msg::RobotPose2D>(
       "ekf/pose", 10,
       std::bind(&NavigationCoordinatorNode::ekf_pose_callback, this, std::placeholders::_1)
     );
@@ -204,8 +204,8 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_sub_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
   rclcpp::Subscription<roboime_msgs::msg::LandmarkArray>::SharedPtr landmarks_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::Pose2D>::SharedPtr mcl_pose_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::Pose2D>::SharedPtr ekf_pose_sub_;
+  rclcpp::Subscription<roboime_msgs::msg::RobotPose2D>::SharedPtr mcl_pose_sub_;
+  rclcpp::Subscription<roboime_msgs::msg::RobotPose2D>::SharedPtr ekf_pose_sub_;
   // rclcpp::Subscription<roboime_msgs::msg::TeamRobotInfo>::SharedPtr team_comm_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr game_state_sub_;
   
@@ -231,8 +231,8 @@ private:
   bool is_initialized_;
   
   // Poses individuais para comparação
-  std::shared_ptr<geometry_msgs::msg::Pose2D> last_mcl_pose_;
-  std::shared_ptr<geometry_msgs::msg::Pose2D> last_ekf_pose_;
+  std::shared_ptr<roboime_msgs::msg::RobotPose2D> last_mcl_pose_;
+  std::shared_ptr<roboime_msgs::msg::RobotPose2D> last_ekf_pose_;
   
   // Estatísticas
   size_t total_updates_;
@@ -265,8 +265,10 @@ private:
         tf2::fromMsg(msg->pose.pose.orientation, q1);
         tf2::fromMsg(last_odometry_->pose.pose.orientation, q2);
         
-        double yaw1 = tf2::getYaw(q1);
-        double yaw2 = tf2::getYaw(q2);
+        double roll1, pitch1, yaw1;
+        double roll2, pitch2, yaw2;
+        tf2::Matrix3x3(q1).getRPY(roll1, pitch1, yaw1);
+        tf2::Matrix3x3(q2).getRPY(roll2, pitch2, yaw2);
         delta.theta = normalize_angle(yaw1 - yaw2);
         
         coordinator_->update_with_odometry(delta, dt);
@@ -337,16 +339,21 @@ private:
       "Coordinator atualizado com %zu landmarks", landmarks.size());
   }
   
-  void mcl_pose_callback(const geometry_msgs::msg::Pose2D::SharedPtr msg)
+  void mcl_pose_callback(const roboime_msgs::msg::RobotPose2D::SharedPtr msg)
   {
     last_mcl_pose_ = msg;
-    mcl_pose_pub_->publish(*msg);  // Republish para debug
+    // Converter para geometry_msgs para debug topic
+    geometry_msgs::msg::Pose2D debug_pose;
+    debug_pose.x = msg->x; debug_pose.y = msg->y; debug_pose.theta = msg->theta;
+    mcl_pose_pub_->publish(debug_pose);
   }
   
-  void ekf_pose_callback(const geometry_msgs::msg::Pose2D::SharedPtr msg)
+  void ekf_pose_callback(const roboime_msgs::msg::RobotPose2D::SharedPtr msg)
   {
     last_ekf_pose_ = msg;
-    ekf_pose_pub_->publish(*msg);  // Republish para debug
+    geometry_msgs::msg::Pose2D debug_pose;
+    debug_pose.x = msg->x; debug_pose.y = msg->y; debug_pose.theta = msg->theta;
+    ekf_pose_pub_->publish(debug_pose);
   }
   
   // void team_communication_callback(const roboime_msgs::msg::TeamRobotInfo::SharedPtr msg)
@@ -613,7 +620,7 @@ private:
     }
   }
   
-  void publish_tf_transform(const geometry_msgs::msg::Pose2D& pose)
+  void publish_tf_transform(const roboime_msgs::msg::RobotPose2D& pose)
   {
     geometry_msgs::msg::TransformStamped transform;
     

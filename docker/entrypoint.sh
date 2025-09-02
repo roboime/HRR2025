@@ -155,38 +155,6 @@ verificar_disponibilidade "Pacotes ROS2 do projeto" \
     "ros2 pkg list | grep -E 'roboime|perception'" \
     "Nenhum pacote personalizado encontrado. Execute o build primeiro."
 
-# Verifica bibliotecas Python
-echo ""
-exibir_cabecalho "📦 Bibliotecas Python para IA e Visão"
-
-verificar_biblioteca "TensorFlow" "tensorflow"
-verificar_biblioteca "NumPy" "numpy"
-verificar_biblioteca "SciPy" "scipy"
-verificar_biblioteca "OpenCV" "cv2"
-verificar_biblioteca "h5py" "h5py"
-verificar_biblioteca "Matplotlib" "matplotlib"
-verificar_biblioteca "Pillow" "PIL"
-verificar_biblioteca "PyYAML" "yaml"
-
-# Exibe informações de uso
-echo ""
-exibir_cabecalho "📋 Comandos úteis"
-
-echo -e "${CIANO}Para instalar as dependências:${SEM_COR}"
-exibir_comando "/setup/install_dependencies.sh"
-
-echo -e "${CIANO}Para compilar o workspace:${SEM_COR}"
-exibir_comando "cd /ros2_ws && colcon build --symlink-install"
-
-echo -e "${CIANO}Para executar um nó ROS2:${SEM_COR}"
-exibir_comando "ros2 run <package_name> <node_name>"
-
-echo -e "${CIANO}Para visualizar tópicos disponíveis:${SEM_COR}"
-exibir_comando "ros2 topic list"
-
-echo -e "${CIANO}Para testar as bibliotecas Python:${SEM_COR}"
-exibir_comando "python3 -c \"import tensorflow as tf; print('TensorFlow:', tf.__version__); print('GPU disponível:', tf.config.list_physical_devices('GPU'))\""
-
 echo -e "${AZUL}============================================================${SEM_COR}"
 
 # Executa o comando passado como argumento ou inicia um shell interativo

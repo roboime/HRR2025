@@ -310,8 +310,14 @@ private:
       Eigen::Matrix3d cov = Eigen::Matrix3d::Identity();
       double r = request->uncertainty_radius > 0 ? request->uncertainty_radius : 0.5;
       cov(0,0) = r * r; cov(1,1) = r * r; cov(2,2) = 0.3 * 0.3;
-      
-      ekf_->initialize(request->initial_pose, cov);
+
+      // Converter geometry_msgs::msg::Pose2D -> roboime_msgs::msg::RobotPose2D
+      roboime_msgs::msg::RobotPose2D init_pose;
+      init_pose.x = request->initial_pose.x;
+      init_pose.y = request->initial_pose.y;
+      init_pose.theta = request->initial_pose.theta;
+
+      ekf_->initialize(init_pose, cov);
       is_initialized_ = true;
       last_update_time_ = this->now();
       

@@ -138,7 +138,7 @@ void NavigationCoordinator::update_with_landmarks(const std::vector<Landmark>& l
 void NavigationCoordinator::process_team_robot_info(const TeamRobotInfo& robot_info)
 {
   // Atualizar informações do robô do time
-  team_robots_[robot_info.robot_id] = robot_info;
+  team_robots_.insert_or_assign(robot_info.robot_id, robot_info);
   
   // Usar consenso do time se ativado
   if (current_mode_ == LocalizationMode::TEAM_CONSENSUS) {

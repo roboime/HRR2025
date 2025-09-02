@@ -8,7 +8,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, Pose2D
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
@@ -469,6 +469,7 @@ class YOLOv8UnifiedDetector(Node):
             ball_msg.detection_method = "yolov8"
             # BBox
             bbox = BoundingBox2D()
+            bbox.center = Pose2D()
             bbox.center.x = float(best_ball['center_x'])
             bbox.center.y = float(best_ball['center_y'])
             bbox.size_x = float(best_ball['width'])
@@ -492,6 +493,7 @@ class YOLOv8UnifiedDetector(Node):
                 robot_msg.distance = float(rob.get('distance') or 0.0)
                 robot_msg.bearing = float(self._calculate_bearing(rob['center_x'], rob['center_y']))
                 # BBox
+                robot_msg.bbox.center = Pose2D()
                 robot_msg.bbox.center.x = float(rob['center_x'])
                 robot_msg.bbox.center.y = float(rob['center_y'])
                 robot_msg.bbox.size_x = float(rob['width'])
@@ -569,6 +571,7 @@ class YOLOv8UnifiedDetector(Node):
             ball_msg.confidence = float(best_ball.get('confidence', 0.0))
             ball_msg.detection_method = "yolov8"
             bbox = BoundingBox2D()
+            bbox.center = Pose2D()
             bbox.center.x = float(best_ball['center_x'])
             bbox.center.y = float(best_ball['center_y'])
             bbox.size_x = float(best_ball['width'])
@@ -589,6 +592,7 @@ class YOLOv8UnifiedDetector(Node):
             robot_msg.robot_classification = "robot"
             robot_msg.distance = float(rob.get('distance') or 0.0)
             robot_msg.bearing = float(self._calculate_bearing(rob['center_x'], rob['center_y']))
+            robot_msg.bbox.center = Pose2D()
             robot_msg.bbox.center.x = float(rob['center_x'])
             robot_msg.bbox.center.y = float(rob['center_y'])
             robot_msg.bbox.size_x = float(rob['width'])

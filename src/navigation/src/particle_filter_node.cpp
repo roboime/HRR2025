@@ -297,11 +297,19 @@ private:
       Eigen::Matrix3d cov = Eigen::Matrix3d::Identity();
       double r = request->uncertainty_radius > 0 ? request->uncertainty_radius : 0.5;
       cov(0,0) = r * r; cov(1,1) = r * r; cov(2,2) = 0.3 * 0.3;
-      particle_filter_->initialize_global_localization(&request->initial_pose, cov);
+      // Converter geometry_msgs::msg::Pose2D -> roboime_msgs::msg::RobotPose2D
+      roboime_msgs::msg::RobotPose2D init_pose;
+      init_pose.x = request->initial_pose.x;
+      init_pose.y = request->initial_pose.y;
+      init_pose.theta = request->initial_pose.theta;
+      particle_filter_->initialize_global_localization(&init_pose, cov);
     } else if (request->method == "landmarks") {
       // Usa lado do time para restringir busca
       std::string side = request->team_side.empty() ? team_side_ : request->team_side;
-      roboime_msgs::msg::RobotPose2D pose_hint = request->initial_pose;
+      roboime_msgs::msg::RobotPose2D pose_hint;
+      pose_hint.x = request->initial_pose.x;
+      pose_hint.y = request->initial_pose.y;
+      pose_hint.theta = request->initial_pose.theta;
       particle_filter_->initialize_with_team_side(side, pose_hint);
     } else { // "auto" ou outro
       particle_filter_->initialize_global_localization();
