@@ -68,7 +68,7 @@ def generate_launch_description():
 
     motion_node = Node(
         package='motion',
-        executable='walking_controller',
+        executable='walking_controller.py',
         name='walking_controller',
         output='screen'
     )
