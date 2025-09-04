@@ -467,14 +467,23 @@ class YOLOv8UnifiedDetector(Node):
             ball_msg.detected = True
             ball_msg.confidence = float(best_ball.get('confidence', 0.0))
             ball_msg.detection_method = "yolov8"
-            # BBox (não reatribuir submensagem center; preencher campos)
+            # BBox (ajuste compatível com diferentes definições de Pose2D)
             bbox = BoundingBox2D()
-            bbox.center.x = float(best_ball['center_x'])
-            bbox.center.y = float(best_ball['center_y'])
-            try:
-                bbox.center.theta = 0.0
-            except Exception:
-                pass
+            center = type(bbox.center)()
+            if hasattr(center, 'x'):
+                center.x = float(best_ball['center_x'])
+            if hasattr(center, 'y'):
+                center.y = float(best_ball['center_y'])
+            if hasattr(center, 'theta'):
+                center.theta = 0.0
+            elif hasattr(center, 'angle'):
+                center.angle = 0.0
+            elif hasattr(center, 'orientation'):
+                try:
+                    center.orientation = 0.0
+                except Exception:
+                    pass
+            bbox.center = center
             if hasattr(bbox, 'size_x'):
                 bbox.size_x = float(best_ball['width'])
                 bbox.size_y = float(best_ball['height'])
@@ -499,14 +508,23 @@ class YOLOv8UnifiedDetector(Node):
                 robot_msg.robot_classification = "robot"
                 robot_msg.distance = float(rob.get('distance') or 0.0)
                 robot_msg.bearing = float(self._calculate_bearing(rob['center_x'], rob['center_y']))
-                # BBox (não reatribuir submensagem center; preencher campos)
+                # BBox (ajuste compatível com diferentes definições de Pose2D)
                 bbox = BoundingBox2D()
-                bbox.center.x = float(rob['center_x'])
-                bbox.center.y = float(rob['center_y'])
-                try:
-                    bbox.center.theta = 0.0
-                except Exception:
-                    pass
+                center = type(bbox.center)()
+                if hasattr(center, 'x'):
+                    center.x = float(rob['center_x'])
+                if hasattr(center, 'y'):
+                    center.y = float(rob['center_y'])
+                if hasattr(center, 'theta'):
+                    center.theta = 0.0
+                elif hasattr(center, 'angle'):
+                    center.angle = 0.0
+                elif hasattr(center, 'orientation'):
+                    try:
+                        center.orientation = 0.0
+                    except Exception:
+                        pass
+                bbox.center = center
                 if hasattr(bbox, 'size_x'):
                     bbox.size_x = float(rob['width'])
                     bbox.size_y = float(rob['height'])
@@ -587,12 +605,21 @@ class YOLOv8UnifiedDetector(Node):
             ball_msg.confidence = float(best_ball.get('confidence', 0.0))
             ball_msg.detection_method = "yolov8"
             bbox = BoundingBox2D()
-            bbox.center.x = float(best_ball['center_x'])
-            bbox.center.y = float(best_ball['center_y'])
-            try:
-                bbox.center.theta = 0.0
-            except Exception:
-                pass
+            center = type(bbox.center)()
+            if hasattr(center, 'x'):
+                center.x = float(best_ball['center_x'])
+            if hasattr(center, 'y'):
+                center.y = float(best_ball['center_y'])
+            if hasattr(center, 'theta'):
+                center.theta = 0.0
+            elif hasattr(center, 'angle'):
+                center.angle = 0.0
+            elif hasattr(center, 'orientation'):
+                try:
+                    center.orientation = 0.0
+                except Exception:
+                    pass
+            bbox.center = center
             if hasattr(bbox, 'size_x'):
                 bbox.size_x = float(best_ball['width'])
                 bbox.size_y = float(best_ball['height'])
@@ -616,12 +643,21 @@ class YOLOv8UnifiedDetector(Node):
             robot_msg.distance = float(rob.get('distance') or 0.0)
             robot_msg.bearing = float(self._calculate_bearing(rob['center_x'], rob['center_y']))
             bbox = BoundingBox2D()
-            bbox.center.x = float(rob['center_x'])
-            bbox.center.y = float(rob['center_y'])
-            try:
-                bbox.center.theta = 0.0
-            except Exception:
-                pass
+            center = type(bbox.center)()
+            if hasattr(center, 'x'):
+                center.x = float(rob['center_x'])
+            if hasattr(center, 'y'):
+                center.y = float(rob['center_y'])
+            if hasattr(center, 'theta'):
+                center.theta = 0.0
+            elif hasattr(center, 'angle'):
+                center.angle = 0.0
+            elif hasattr(center, 'orientation'):
+                try:
+                    center.orientation = 0.0
+                except Exception:
+                    pass
+            bbox.center = center
             if hasattr(bbox, 'size_x'):
                 bbox.size_x = float(rob['width'])
                 bbox.size_y = float(rob['height'])
