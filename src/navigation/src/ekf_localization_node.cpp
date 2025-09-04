@@ -22,14 +22,14 @@ public:
     , tf_broadcaster_(this)
   {
     // Parâmetros
-    this->declare_parameter("field_length", 9.0);
-    this->declare_parameter("field_width", 6.0);
-    this->declare_parameter("publish_rate", 20.0);
-    this->declare_parameter("enable_tf_broadcast", true);
-    this->declare_parameter("process_noise_std", 0.1);
-    this->declare_parameter("measurement_noise_std", 0.15);
-    this->declare_parameter("imu_noise_std", 0.02);
-    this->declare_parameter("innovation_threshold", 9.0);
+    this->declare_parameter("field_length", this->get_parameter("field_length").get_type() ? this->get_parameter("field_length").as_double() : 9.0);
+    this->declare_parameter("field_width", this->get_parameter("field_width").get_type() ? this->get_parameter("field_width").as_double() : 6.0);
+    this->declare_parameter("publish_rate", this->get_parameter("publish_rate").get_type() ? this->get_parameter("publish_rate").as_double() : 20.0);
+    this->declare_parameter("enable_tf_broadcast", this->get_parameter("enable_tf_broadcast").get_type() ? this->get_parameter("enable_tf_broadcast").as_bool() : true);
+    this->declare_parameter("process_noise_std", this->get_parameter("process_noise_std").get_type() ? this->get_parameter("process_noise_std").as_double() : 0.1);
+    this->declare_parameter("measurement_noise_std", this->get_parameter("measurement_noise_std").get_type() ? this->get_parameter("measurement_noise_std").as_double() : 0.15);
+    this->declare_parameter("imu_noise_std", this->get_parameter("imu_noise_std").get_type() ? this->get_parameter("imu_noise_std").as_double() : 0.02);
+    this->declare_parameter("innovation_threshold", this->get_parameter("innovation_threshold").get_type() ? this->get_parameter("innovation_threshold").as_double() : 9.0);
     
     // Obter parâmetros
     double field_length = this->get_parameter("field_length").as_double();

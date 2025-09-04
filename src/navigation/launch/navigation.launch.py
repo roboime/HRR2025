@@ -13,8 +13,8 @@ from ament_index_python.packages import get_package_share_directory
 def generate_launch_description():
     
     # Argumentos de lançamento
-    config_file_arg = DeclareLaunchArgument(
-        'config_file',
+    nav_config_file_arg = DeclareLaunchArgument(
+        'nav_config_file',
         default_value=os.path.join(
             get_package_share_directory('roboime_navigation'),
             'config', 'navigation_config.yaml'
@@ -98,18 +98,7 @@ def generate_launch_description():
         name='particle_filter_node',
         output='screen',
         parameters=[
-            {
-                'field_length': LaunchConfiguration('field_length'),
-                'field_width': LaunchConfiguration('field_width'),
-                'num_particles': 500,  # Aumentado para melhor precisão
-                'robot_id': LaunchConfiguration('robot_id'),
-                'team_side': LaunchConfiguration('team_side'),
-                'publish_rate': 20.0,
-                'enable_tf_broadcast': False,  # TF será publicado pelo coordinator
-                'resample_threshold': 0.5,
-                'motion_noise_std': 0.05,
-                'measurement_noise_std': 0.1
-            }
+            LaunchConfiguration('nav_config_file')
         ],
         remappings=[
             ('odometry', 'odometry'),
@@ -129,16 +118,7 @@ def generate_launch_description():
         name='ekf_localization_node',
         output='screen',
         parameters=[
-            {
-                'field_length': LaunchConfiguration('field_length'),
-                'field_width': LaunchConfiguration('field_width'),
-                'publish_rate': 20.0,
-                'enable_tf_broadcast': False,  # TF será publicado pelo coordinator
-                'process_noise_std': 0.1,
-                'measurement_noise_std': 0.15,
-                'imu_noise_std': 0.02,
-                'innovation_threshold': 9.0
-            }
+            LaunchConfiguration('nav_config_file')
         ],
         remappings=[
             ('odometry', 'odometry'),
@@ -158,18 +138,7 @@ def generate_launch_description():
         name='navigation_coordinator_node',
         output='screen',
         parameters=[
-            {
-                'field_length': LaunchConfiguration('field_length'),
-                'field_width': LaunchConfiguration('field_width'),
-                'robot_id': LaunchConfiguration('robot_id'),
-                'team_name': 'RoboIME',
-                'team_side': LaunchConfiguration('team_side'),
-                'publish_rate': 20.0,
-                'enable_tf_broadcast': True,  # TF principal
-                'enable_team_communication': LaunchConfiguration('enable_team_communication'),
-                'confidence_threshold': LaunchConfiguration('min_localization_confidence'),
-                'use_global_localization': LaunchConfiguration('use_global_localization')
-            }
+            LaunchConfiguration('nav_config_file')
         ],
         remappings=[
             ('odometry', 'odometry'),
@@ -202,7 +171,7 @@ def generate_launch_description():
         name='path_planner_node',
         output='screen',
         parameters=[
-            LaunchConfiguration('config_file'),
+            LaunchConfiguration('nav_config_file'),
             {
                 'field_length': LaunchConfiguration('field_length'),
                 'field_width': LaunchConfiguration('field_width'),
@@ -239,7 +208,7 @@ def generate_launch_description():
         name='navigation_manager_node',
         output='screen',
         parameters=[
-            LaunchConfiguration('config_file'),
+            LaunchConfiguration('nav_config_file'),
             {
                 'enable_safety_checks': LaunchConfiguration('enable_safety'),
                 'localization_timeout': 5.0,
@@ -290,7 +259,7 @@ def generate_launch_description():
     
     return LaunchDescription([
         # Argumentos
-        config_file_arg,
+        nav_config_file_arg,
         field_length_arg,
         field_width_arg,
         robot_id_arg,

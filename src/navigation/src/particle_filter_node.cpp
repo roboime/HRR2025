@@ -22,13 +22,13 @@ public:
     , tf_broadcaster_(this)
   {
     // Parâmetros
-    this->declare_parameter("field_length", 9.0);
-    this->declare_parameter("field_width", 6.0);
-    this->declare_parameter("num_particles", 500);
-    this->declare_parameter("robot_id", 1);
-    this->declare_parameter("team_side", "left");
-    this->declare_parameter("publish_rate", 20.0);
-    this->declare_parameter("enable_tf_broadcast", true);
+    this->declare_parameter("field_length", this->get_parameter("field_length").get_type() ? this->get_parameter("field_length").as_double() : 9.0);
+    this->declare_parameter("field_width", this->get_parameter("field_width").get_type() ? this->get_parameter("field_width").as_double() : 6.0);
+    this->declare_parameter("num_particles", this->get_parameter("num_particles").get_type() ? this->get_parameter("num_particles").as_int() : 500);
+    this->declare_parameter("robot_id", this->get_parameter("robot_id").get_type() ? this->get_parameter("robot_id").as_int() : 1);
+    this->declare_parameter("team_side", this->get_parameter("team_side").get_type() ? this->get_parameter("team_side").as_string() : std::string("left"));
+    this->declare_parameter("publish_rate", this->get_parameter("publish_rate").get_type() ? this->get_parameter("publish_rate").as_double() : 20.0);
+    this->declare_parameter("enable_tf_broadcast", this->get_parameter("enable_tf_broadcast").get_type() ? this->get_parameter("enable_tf_broadcast").as_bool() : true);
     
     // Obter parâmetros
     double field_length = this->get_parameter("field_length").as_double();

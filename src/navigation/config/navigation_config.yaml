@@ -18,3 +18,39 @@ navigation_manager_node:
     navigation_timeout: 30.0
     min_localization_confidence: 0.3
     required_landmarks_for_navigation: 1
+
+particle_filter_node:
+  ros__parameters:
+    field_length: 9.0
+    field_width: 6.0
+    num_particles: 500
+    team_side: left
+    publish_rate: 20.0
+    enable_tf_broadcast: false
+    resample_threshold: 0.5
+    motion_noise_std: 0.05
+    measurement_noise_std: 0.1
+
+ekf_localization_node:
+  ros__parameters:
+    field_length: 9.0
+    field_width: 6.0
+    publish_rate: 20.0
+    enable_tf_broadcast: false
+    process_noise_std: 0.1
+    measurement_noise_std: 0.15
+    imu_noise_std: 0.02
+    innovation_threshold: 9.0
+
+navigation_coordinator_node:
+  ros__parameters:
+    field_length: 9.0
+    field_width: 6.0
+    robot_id: 1
+    team_name: RoboIME
+    team_side: left
+    publish_rate: 20.0
+    enable_tf_broadcast: true
+    enable_team_communication: false
+    confidence_threshold: 0.3
+    use_global_localization: true
