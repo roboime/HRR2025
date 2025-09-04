@@ -73,6 +73,14 @@ def generate_launch_description():
         output='screen'
     )
 
+    imu_node = Node(
+        package='motion',
+        executable='imu_driver',
+        name='imu_driver',
+        output='screen',
+        parameters=[{}]
+    )
+
     startup_log = LogInfo(msg=['RoboIME Bringup iniciado'])
 
     return LaunchDescription([
@@ -87,6 +95,7 @@ def generate_launch_description():
         navigation_launch,
         behavior_node,
         motion_node,
+        imu_node,
     ])
 
 

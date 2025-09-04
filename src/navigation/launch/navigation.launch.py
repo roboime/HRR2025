@@ -107,7 +107,7 @@ def generate_launch_description():
         remappings=[
             ('odometry', 'odometry'),
             ('imu/data', 'imu/data'),
-            ('perception/landmarks', '/perception/localization_landmarks'),
+            # landmarks agora publicados diretamente em /perception/landmarks como LandmarkArray
             ('localization/pose', 'mcl/pose'),
             ('localization/pose_with_covariance', 'mcl/pose_with_covariance'),
             ('localization/confidence', 'mcl/confidence'),

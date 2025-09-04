@@ -52,6 +52,7 @@ from roboime_msgs.msg import (
     FieldDetection, SimplifiedDetections, FieldLandmark,
     RobotPose2D,
 )
+from roboime_msgs.msg import LandmarkArray
 from vision_msgs.msg import BoundingBox2D
 
 class YOLOv8UnifiedDetector(Node):
@@ -912,6 +913,53 @@ class YOLOv8UnifiedDetector(Node):
         unified_msg.field_coverage_ratio = 0.8  # Estimativa
         
         self.unified_pub.publish(unified_msg)
+
+        # Publicar LandmarkArray para navegação (compatibilidade com nós C++)
+        try:
+            lm_array = LandmarkArray()
+            lm_array.header = header
+            # Converter organized['landmarks'] (dicts) em FieldLandmark msgs
+            flist = []
+            for landmark in organized['landmarks']:
+                fld = FieldLandmark()
+                cls = landmark['class_name']
+                if cls == 'penalty_mark':
+                    fld.type = FieldLandmark.PENALTY_MARK
+                elif cls == 'goal_post':
+                    fld.type = FieldLandmark.GOAL_POST
+                elif cls == 'center_circle':
+                    fld.type = FieldLandmark.CENTER_CIRCLE
+                elif cls == 'field_corner':
+                    fld.type = FieldLandmark.FIELD_CORNER
+                else:
+                    fld.type = FieldLandmark.AREA_CORNER
+                fld.confidence = float(landmark.get('confidence', 0.0))
+                fld.yolo_confidence = fld.confidence
+                fld.source_detection_method = "yolov8"
+                # Medidas relativas (distância/bearing)
+                dist = float(landmark.get('distance') or 0.0)
+                bearing = float(self._calculate_bearing(landmark['center_x'], landmark['center_y']))
+                fld.distance = dist
+                fld.bearing = bearing
+                fld.position_relative.x = dist * np.cos(bearing)
+                fld.position_relative.y = dist * np.sin(bearing)
+                fld.position_relative.z = 0.0
+                # Posição absoluta estimada
+                fld.position_absolute = self._calculate_absolute_position(fld, cls)
+                flist.append(fld)
+            lm_array.landmarks = flist
+            lm_array.total_detected = len(flist)
+            lm_array.reliable_count = len([f for f in flist if f.confidence > 0.7])
+            lm_array.detection_confidence = float(np.mean([f.confidence for f in flist])) if flist else 0.0
+            lm_array.detection_method = "yolov8"
+            lm_array.sufficient_for_localization = len(flist) >= 2
+            lm_array.localization_status = "good" if lm_array.sufficient_for_localization else "poor"
+            # Publisher criado no __init__ se ainda não existir
+            if not hasattr(self, 'landmarks_array_pub'):
+                self.landmarks_array_pub = self.create_publisher(LandmarkArray, '/perception/landmarks', 10)
+            self.landmarks_array_pub.publish(lm_array)
+        except Exception:
+            pass
     
     def _publish_debug_image_3d(self, image: np.ndarray, detections: List[dict], 
                               objects_3d: List[Object3D], header):

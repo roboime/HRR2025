@@ -7,7 +7,7 @@
 #=======================================#
 
 # Câmera ativa: "imx219_csi" ou "c930_usb"
-active_camera: "imx219_csi"
+active_camera: "c930_usb"
 
 #=======================================#
 # CÂMERA 1: IMX219 CSI (Jetson/Raspberry Pi)

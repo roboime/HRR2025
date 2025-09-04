@@ -218,8 +218,12 @@ private:
   
   void landmarks_callback(const roboime_msgs::msg::LandmarkArray::SharedPtr msg)
   {
-    if (!is_initialized_ || msg->landmarks.empty()) {
+    if (msg->landmarks.empty()) {
       return;
+    }
+    if (!is_initialized_) {
+      auto_initialize_localization();
+      is_initialized_ = true;
     }
     
     // Converter landmarks ROS para formato interno

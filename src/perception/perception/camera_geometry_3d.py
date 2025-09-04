@@ -85,6 +85,8 @@ class CameraGeometry3D:
         self.geometry = self._load_camera_geometry(camera_info_path)
         self.field_dimensions = None
         self.object_sizes = None
+        # Distâncias de trabalho devem vir do YAML; não definir defaults no código
+        self.working_distances = {}
         
         # Matrizes de câmera pré-calculadas
         self._setup_camera_matrices()
@@ -131,6 +133,11 @@ class CameraGeometry3D:
                 'area_corner': 0.2       # Tamanho estimado dos cantos da área
             }
             
+            # Working distances (opcional no YAML)
+            wd = config.get('working_distances', None)
+            if isinstance(wd, dict) and len(wd) > 0:
+                self.working_distances = wd
+
             return CameraGeometry(
                 fx=fx, fy=fy, cx=cx, cy=cy,
                 k1=k1, k2=k2, p1=p1, p2=p2, k3=k3,
@@ -445,6 +452,32 @@ class CameraGeometry3D:
         Returns:
             Dicionário com informações principais
         """
+        # Estimar distância máxima visível pela interseção do raio no rodapé da imagem
+        # (centro inferior). Clampar pelos limites configurados.
+        try:
+            u = float(self.geometry.cx)
+            v = float(self.geometry.image_height - 1)
+            wx, wy, dist = self.pixel_to_world_ground_plane(u, v)
+            max_dist = float(dist) if dist is not None else None
+        except Exception:
+            max_dist = None
+
+        if max_dist is None or not np.isfinite(max_dist):
+            # Fallback geométrico simples
+            try:
+                denom = np.tan(max(1e-3, (np.pi/2 - self.geometry.tilt_angle)))
+                max_dist = float(self.geometry.height / denom)
+            except Exception:
+                max_dist = 5.0
+
+        # Aplicar limites configurados se disponíveis
+        if isinstance(self.working_distances, dict) and 'max_detection_distance' in self.working_distances:
+            try:
+                max_cfg = float(self.working_distances['max_detection_distance'])
+                max_dist = min(max_dist, max_cfg)
+            except Exception:
+                pass
+
         return {
             'camera_height': self.geometry.height,
             'tilt_angle_degrees': np.degrees(self.geometry.tilt_angle),
@@ -454,5 +487,6 @@ class CameraGeometry3D:
             'image_size': (self.geometry.image_width, self.geometry.image_height),
             'field_of_view_x_degrees': np.degrees(2 * np.arctan(self.geometry.image_width / (2 * self.geometry.fx))),
             'field_of_view_y_degrees': np.degrees(2 * np.arctan(self.geometry.image_height / (2 * self.geometry.fy))),
-            'max_distance_visible': self.geometry.height / np.tan(np.pi/2 - self.geometry.tilt_angle) if self.geometry.tilt_angle < np.pi/2 else float('inf')
-        } 
+            'max_distance_visible': max_dist,
+            'working_distances': self.working_distances if self.working_distances else None,
+        }
