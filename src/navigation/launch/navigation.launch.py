@@ -98,7 +98,11 @@ def generate_launch_description():
         name='particle_filter_node',
         output='screen',
         parameters=[
-            LaunchConfiguration('nav_config_file')
+            LaunchConfiguration('nav_config_file'),
+            {
+                'field_length': LaunchConfiguration('field_length'),
+                'field_width': LaunchConfiguration('field_width')
+            }
         ],
         remappings=[
             ('odometry', 'odometry'),
@@ -118,7 +122,11 @@ def generate_launch_description():
         name='ekf_localization_node',
         output='screen',
         parameters=[
-            LaunchConfiguration('nav_config_file')
+            LaunchConfiguration('nav_config_file'),
+            {
+                'field_length': LaunchConfiguration('field_length'),
+                'field_width': LaunchConfiguration('field_width')
+            }
         ],
         remappings=[
             ('odometry', 'odometry'),
@@ -138,7 +146,11 @@ def generate_launch_description():
         name='navigation_coordinator_node',
         output='screen',
         parameters=[
-            LaunchConfiguration('nav_config_file')
+            LaunchConfiguration('nav_config_file'),
+            {
+                'field_length': LaunchConfiguration('field_length'),
+                'field_width': LaunchConfiguration('field_width')
+            }
         ],
         remappings=[
             ('odometry', 'odometry'),
