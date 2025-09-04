@@ -493,11 +493,13 @@ class YOLOv8UnifiedDetector(Node):
                 robot_msg.distance = float(rob.get('distance') or 0.0)
                 robot_msg.bearing = float(self._calculate_bearing(rob['center_x'], rob['center_y']))
                 # BBox
-                robot_msg.bbox.center = Pose2D()
-                robot_msg.bbox.center.x = float(rob['center_x'])
-                robot_msg.bbox.center.y = float(rob['center_y'])
-                robot_msg.bbox.size_x = float(rob['width'])
-                robot_msg.bbox.size_y = float(rob['height'])
+                bbox = BoundingBox2D()
+                bbox.center = Pose2D()
+                bbox.center.x = float(rob['center_x'])
+                bbox.center.y = float(rob['center_y'])
+                bbox.size_x = float(rob['width'])
+                bbox.size_y = float(rob['height'])
+                robot_msg.bbox = bbox
                 self.robots_pub.publish(robot_msg)
         
         # Landmarks para localização
@@ -592,11 +594,13 @@ class YOLOv8UnifiedDetector(Node):
             robot_msg.robot_classification = "robot"
             robot_msg.distance = float(rob.get('distance') or 0.0)
             robot_msg.bearing = float(self._calculate_bearing(rob['center_x'], rob['center_y']))
-            robot_msg.bbox.center = Pose2D()
-            robot_msg.bbox.center.x = float(rob['center_x'])
-            robot_msg.bbox.center.y = float(rob['center_y'])
-            robot_msg.bbox.size_x = float(rob['width'])
-            robot_msg.bbox.size_y = float(rob['height'])
+            bbox = BoundingBox2D()
+            bbox.center = Pose2D()
+            bbox.center.x = float(rob['center_x'])
+            bbox.center.y = float(rob['center_y'])
+            bbox.size_x = float(rob['width'])
+            bbox.size_y = float(rob['height'])
+            robot_msg.bbox = bbox
             robot_detections.append(robot_msg)
         
         unified_msg.robots = robot_detections
