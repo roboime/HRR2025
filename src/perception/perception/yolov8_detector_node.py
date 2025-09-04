@@ -467,13 +467,20 @@ class YOLOv8UnifiedDetector(Node):
             ball_msg.detected = True
             ball_msg.confidence = float(best_ball.get('confidence', 0.0))
             ball_msg.detection_method = "yolov8"
-            # BBox
+            # BBox (não reatribuir submensagem center; preencher campos)
             bbox = BoundingBox2D()
-            bbox.center = Pose2D()
             bbox.center.x = float(best_ball['center_x'])
             bbox.center.y = float(best_ball['center_y'])
-            bbox.size_x = float(best_ball['width'])
-            bbox.size_y = float(best_ball['height'])
+            try:
+                bbox.center.theta = 0.0
+            except Exception:
+                pass
+            if hasattr(bbox, 'size_x'):
+                bbox.size_x = float(best_ball['width'])
+                bbox.size_y = float(best_ball['height'])
+            elif hasattr(bbox, 'size'):
+                bbox.size.x = float(best_ball['width'])
+                bbox.size.y = float(best_ball['height'])
             ball_msg.bbox = bbox
             # Distância/bearing (garantir float)
             ball_msg.distance = float(best_ball.get('distance') or 0.0)
@@ -492,13 +499,20 @@ class YOLOv8UnifiedDetector(Node):
                 robot_msg.robot_classification = "robot"
                 robot_msg.distance = float(rob.get('distance') or 0.0)
                 robot_msg.bearing = float(self._calculate_bearing(rob['center_x'], rob['center_y']))
-                # BBox
+                # BBox (não reatribuir submensagem center; preencher campos)
                 bbox = BoundingBox2D()
-                bbox.center = Pose2D()
                 bbox.center.x = float(rob['center_x'])
                 bbox.center.y = float(rob['center_y'])
-                bbox.size_x = float(rob['width'])
-                bbox.size_y = float(rob['height'])
+                try:
+                    bbox.center.theta = 0.0
+                except Exception:
+                    pass
+                if hasattr(bbox, 'size_x'):
+                    bbox.size_x = float(rob['width'])
+                    bbox.size_y = float(rob['height'])
+                elif hasattr(bbox, 'size'):
+                    bbox.size.x = float(rob['width'])
+                    bbox.size.y = float(rob['height'])
                 robot_msg.bbox = bbox
                 self.robots_pub.publish(robot_msg)
         
@@ -573,11 +587,18 @@ class YOLOv8UnifiedDetector(Node):
             ball_msg.confidence = float(best_ball.get('confidence', 0.0))
             ball_msg.detection_method = "yolov8"
             bbox = BoundingBox2D()
-            bbox.center = Pose2D()
             bbox.center.x = float(best_ball['center_x'])
             bbox.center.y = float(best_ball['center_y'])
-            bbox.size_x = float(best_ball['width'])
-            bbox.size_y = float(best_ball['height'])
+            try:
+                bbox.center.theta = 0.0
+            except Exception:
+                pass
+            if hasattr(bbox, 'size_x'):
+                bbox.size_x = float(best_ball['width'])
+                bbox.size_y = float(best_ball['height'])
+            elif hasattr(bbox, 'size'):
+                bbox.size.x = float(best_ball['width'])
+                bbox.size.y = float(best_ball['height'])
             ball_msg.bbox = bbox
             ball_msg.distance = float(best_ball.get('distance') or 0.0)
             ball_msg.bearing = float(self._calculate_bearing(best_ball['center_x'], best_ball['center_y']))
@@ -595,11 +616,18 @@ class YOLOv8UnifiedDetector(Node):
             robot_msg.distance = float(rob.get('distance') or 0.0)
             robot_msg.bearing = float(self._calculate_bearing(rob['center_x'], rob['center_y']))
             bbox = BoundingBox2D()
-            bbox.center = Pose2D()
             bbox.center.x = float(rob['center_x'])
             bbox.center.y = float(rob['center_y'])
-            bbox.size_x = float(rob['width'])
-            bbox.size_y = float(rob['height'])
+            try:
+                bbox.center.theta = 0.0
+            except Exception:
+                pass
+            if hasattr(bbox, 'size_x'):
+                bbox.size_x = float(rob['width'])
+                bbox.size_y = float(rob['height'])
+            elif hasattr(bbox, 'size'):
+                bbox.size.x = float(rob['width'])
+                bbox.size.y = float(rob['height'])
             robot_msg.bbox = bbox
             robot_detections.append(robot_msg)
         
